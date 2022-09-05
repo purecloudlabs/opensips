@@ -1070,6 +1070,9 @@ static struct mi_root* mi_reload(struct mi_root *root, void *param)
 		return init_mi_tree(500, MI_SSTR("ERROR Cache entry not found"));
 	}
 
+	LM_INFO("sql_cacher_reload MI command received for: %.*s\n",
+			entry_id.len, entry_id.s);
+
 	/* key */
 	if (!node->next || !node->next->value.len || !node->next->value.s)
 		key.s = NULL;
