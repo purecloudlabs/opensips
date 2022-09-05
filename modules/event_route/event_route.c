@@ -359,6 +359,7 @@ static int scriptroute_raise(struct sip_msg *msg, str* ev_name,
 	str * backup_name;
 	route_send_t *buf = NULL;
 	int sync_mode;
+	int old_route_type;
 
 
 	if (!sock || !(sock->flags & EVI_PARAMS)) {
@@ -386,7 +387,9 @@ static int scriptroute_raise(struct sip_msg *msg, str* ev_name,
 		parameters = params;
 		event_name = ev_name;
 
+		swap_route_type(old_route_type, EVENT_ROUTE);
 		run_top_route(event_rlist[SR_SOCK_ROUTE(sock)].a, msg);
+		set_route_type(old_route_type);
 
 		/* restore previous parameters */
 		parameters = backup_params;

@@ -250,6 +250,7 @@ void event_route_handler(int rank)
 	route_init_reader();
 	route_send_t *route_s;
 	struct sip_msg* req;
+	int old_route_type;
 
 	if (init_child(PROC_MODULE) != 0) {
 		LM_ERR("cannot init child process\n");
@@ -272,7 +273,9 @@ void event_route_handler(int rank)
 
 		event_name = &route_s->event;
 		parameters = &route_s->params;
+		swap_route_type(old_route_type, EVENT_ROUTE);
 		run_top_route(route_s->a, req);
+		set_route_type(old_route_type);
 		release_dummy_sip_msg(req);
 end:
 		if (route_s)
