@@ -1589,7 +1589,7 @@ static int w_get_dlg_vals(struct sip_msg *msg, char *v_name, char  *v_val,
 		return -1;
 	}
 
-	dlg = get_dlg_by_callid( &callid_s );
+       dlg = get_dlg_by_callid( &callid_s, 0 );
 
 	if (dlg==NULL) {
 		/* nothing found */

@@ -780,7 +780,7 @@ struct dlg_cell* get_dlg_by_val(str *attr, str *val)
 }
 
 
-struct dlg_cell* get_dlg_by_callid( str *callid)
+struct dlg_cell* get_dlg_by_callid( str *callid, int active_only )
 {
 	struct dlg_cell *dlg;
 	struct dlg_entry *d_entry;
@@ -794,7 +794,7 @@ struct dlg_cell* get_dlg_by_callid( str *callid)
 	LM_DBG("input ci=<%.*s>(%d)\n", callid->len,callid->s, callid->len);
 
 	for( dlg = d_entry->first ; dlg ; dlg = dlg->next ) {
-		if ( dlg->state>DLG_STATE_CONFIRMED )
+               if ( active_only && dlg->state>DLG_STATE_CONFIRMED )
 			continue;
 		if ( dlg->callid.len==callid->len &&
 		strncmp( dlg->callid.s, callid->s, callid->len)==0 ) {
