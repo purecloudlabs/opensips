@@ -262,8 +262,7 @@ static inline char* dp_time(void)
 			do { \
 				if (is_printable(_lev)){ \
 					if (log_stderr) \
-						dprint( DP_PREFIX fmt, dp_time(), \
-							dp_my_pid(), __VA_ARGS__ ); \
+						if (log_stderr) dprint(__VA_ARGS__); \
 					else { \
 						switch(_lev){ \
 							case L_CRIT: \
@@ -454,8 +453,7 @@ static inline char* dp_time(void)
 			do { \
 				if (is_printable(_lev)){ \
 					if (log_stderr) \
-						dprint( DP_PREFIX fmt, dp_time(), \
-							dp_my_pid(), ## args); \
+						if (log_stderr) dprint( fmt, ## args); \
 					else { \
 						switch(_lev){ \
 							case L_CRIT: \
