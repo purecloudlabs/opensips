@@ -113,9 +113,11 @@ void try_reconnect(handle_set_t * p){
                     global->set_list[p->set_index].db_list[i].dbf.init(
                     &global->set_list[p->set_index].db_list[i].db_url);
                 if(!p->con_list[i].con){
-                    LM_DBG("cant reconnect to db %.*s\n",
-                        global->set_list[p->set_index].db_list[i].db_url.len,
-                        global->set_list[p->set_index].db_list[i].db_url.s);
+                    LM_WARN("cant reconnect to db: current_con=%i, can=%i, may=%i, r_rec=%i\n",
+                        i,
+                        (global->set_list[p->set_index].db_list[i].flags & CAN_USE) ? 1 : 0,
+                        (global->set_list[p->set_index].db_list[i].flags & MAY_USE) ? 1 : 0,
+                        (global->set_list[p->set_index].db_list[i].flags & RERECONNECT) ? 1 : 0);
                     continue;
                 }
 
@@ -124,6 +126,11 @@ void try_reconnect(handle_set_t * p){
 
                 p->con_list[i].flags |= CAN_USE;
                 set_update_flags(i, p);
+                LM_INFO("reconnected to db: current_con=%i, can=%i, may=%i, r_rec=%i\n",
+                    i,
+                    (global->set_list[p->set_index].db_list[i].flags & CAN_USE) ? 1 : 0,
+                    (global->set_list[p->set_index].db_list[i].flags & MAY_USE) ? 1 : 0,
+                    (global->set_list[p->set_index].db_list[i].flags & RERECONNECT) ? 1 : 0);
 
                 p->con_list[i].no_retries = db_max_consec_retrys;
             }
@@ -176,9 +183,13 @@ do{                                                                             
                     CON_OR_RESET( _h );                                         \
                                                                                 \
                     if((rc && use_rc)){                                         \
-                        LM_DBG("failover call failed\n");                       \
                         /* set local can not use flag*/                         \
                         handle->flags &= NOT_CAN_USE;                           \
+                      LM_ERR("failover call failed to db: current_con=%i, can=%i, may=%i, r_rec=%i\n", \
+                        i,                                         \
+                        (handle->flags & CAN_USE) ? 1 : 0,                        \
+                        (handle->flags & MAY_USE) ? 1 : 0,                        \
+                        (handle->flags & RERECONNECT) ? 1 : 0);                   \
                                                                                 \
                         /* close connection*/                                   \
                         f->close(handle->con);                                  \
@@ -189,10 +200,22 @@ do{                                                                             
                     set_update_flags(p->curent_con, p);                         \
                 }else{                                                          \
                     LM_DBG("flags2 = %i\n", p->con_list[p->curent_con].flags);  \
+                    LM_WARN("db connection out of service: current_con=%i, can=%i, may=%i, r_rec=%i\n", \
+                      p->curent_con,                                           \
+                      (handle->flags & CAN_USE) ? 1 : 0,                          \
+                      (handle->flags & MAY_USE) ? 1 : 0,                          \
+                      (handle->flags & RERECONNECT) ? 1 : 0);                     \
                                                                                 \
                     /* try next*/                                               \
                     rc = -1;                                                    \
                     p->curent_con = (p->curent_con+1)%p->size;                  \
+                    LM_WARN("trying next db conn: current_con=%i, can=%i, may=%i, r_rec=%i\n", \
+                      i,                                           \
+                      global->set_list[p->set_index].db_list[i].db_url.len,     \
+                      global->set_list[p->set_index].db_list[i].db_url.s,       \
+                      (handle->flags & CAN_USE) ? 1 : 0,                          \
+                      (handle->flags & MAY_USE) ? 1 : 0,                          \
+                      (handle->flags & RERECONNECT) ? 1 : 0);                     \
                 }                                                               \
                 LM_DBG("curent_con = %i\n", p->curent_con);                     \
             }while((rc && use_rc) && --max_loop);                               \
@@ -209,8 +232,11 @@ do{                                                                             
                                                                                 \
                         rc = f->FUNCTION_WITH_PARAMS;                           \
                         if((rc && use_rc)){                                     \
-                            LM_DBG("parallel call failed\n");                   \
-                            handle->flags &= NOT_CAN_USE;                       \
+                          LM_ERR("parallel call failed to db: current_con=%i, can=%i, may=%i, r_rec=%i\n", \
+                            i,                                     \
+                            (handle->flags & CAN_USE) ? 1 : 0,                    \
+                            (handle->flags & MAY_USE) ? 1 : 0,                    \
+                            (handle->flags & RERECONNECT) ? 1 : 0);               \
                                                                                 \
                             f->close(handle->con);                              \
                         }                                                       \
