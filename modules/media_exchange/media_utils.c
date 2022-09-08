@@ -518,7 +518,8 @@ void media_exchange_event_received(enum b2b_entity_type et, str *key,
 			break;
 	}
 
-	media_dlg.dlg_unref(dlg, 1);
+	if (dlg)
+		media_dlg.dlg_unref(dlg, 1);
 	return;
 }
 
@@ -528,7 +529,7 @@ str *media_exchange_get_offer_sdp(rtp_ctx ctx, struct dlg_cell *dlg,
 	static str sbody;
 
 	*release = 0;
-	if (ctx) {
+	if (media_rtp.offer && ctx) {
 		sbody = dlg->legs[DLG_MEDIA_SESSION_LEG(dlg, mleg)].in_sdp;
 		if (media_rtp.offer(ctx, &media_exchange_name,
 				(mleg == MEDIA_LEG_CALLER?
@@ -547,7 +548,7 @@ str *media_exchange_get_answer_sdp(rtp_ctx ctx, str *body,
 		int mleg, int *release)
 {
 	*release = 0;
-	if (ctx && media_rtp.answer(ctx, &media_exchange_name,
+	if (media_rtp.answer && ctx && media_rtp.answer(ctx, &media_exchange_name,
 			(mleg == MEDIA_LEG_CALLER?
 			 RTP_RELAY_CALLER:RTP_RELAY_CALLEE),
 			body) >= 0) {
