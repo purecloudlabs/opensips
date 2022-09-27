@@ -261,9 +261,9 @@ static inline char* dp_time(void)
 		#define LM_GEN2( _facility, _lev, ...) \
 			do { \
 				if (is_printable(_lev)){ \
-					if (log_stderr) \
-						if (log_stderr) dprint(__VA_ARGS__); \
-					else { \
+					if (log_stderr) { \
+						dprint(__VA_ARGS__); \
+					} else { \
 						switch(_lev){ \
 							case L_CRIT: \
 								syslog(LOG_CRIT|_facility, __VA_ARGS__); \
@@ -452,9 +452,9 @@ static inline char* dp_time(void)
 		#define LM_GEN2( _facility, _lev, fmt, args...) \
 			do { \
 				if (is_printable(_lev)){ \
-					if (log_stderr) \
-						if (log_stderr) dprint( fmt, ## args); \
-					else { \
+					if (log_stderr) { \
+						dprint( fmt, ## args); \
+					} else { \
 						switch(_lev){ \
 							case L_CRIT: \
 								syslog(LOG_CRIT|_facility, fmt, ##args); \
