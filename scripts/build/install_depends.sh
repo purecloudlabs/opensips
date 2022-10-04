@@ -14,6 +14,8 @@ fi
 sudo apt-get update -y
 sudo apt-get -y install ${PKGS}
 
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
 if [ ! -z "${POST_INSTALL_CMD}" ]
 then
 	${POST_INSTALL_CMD}

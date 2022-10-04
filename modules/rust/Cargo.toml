@@ -1,0 +1,11 @@
+[package]
+name = "rust"
+version = "0.1.0"
+authors = ["Bence Szigeti <bence.szigeti@gohyda.com>"]
+edition = "2021"
+
+[lib]
+crate-type = ["dylib"]
+
+[build-dependencies]
+bindgen = "0.60.1"
