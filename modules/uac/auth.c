@@ -242,16 +242,6 @@ void apply_cseq_decrement(struct cell* t, int type, struct tmcb_params *p)
 	apply_cseq_op(rpl, (int)cseq_req-(int)cseq_rpl);
 }
 
-static int uac_auth_dlg_leg(struct dlg_cell *dlg, str *tag)
-{
-	if (!tag || tag->len == 0)
-		return dlg->legs_no[DLG_LEGS_USED]-1;
-	if (str_match(&dlg->legs[DLG_CALLER_LEG].tag, tag))
-		return DLG_CALLER_LEG;
-	else /* FIXME: shall we check the tag is really it? */
-		return callee_idx(dlg);
-}
-
 int uac_auth( struct sip_msg *msg, int algmask)
 {
 	struct authenticate_body *auth = NULL;
@@ -268,7 +258,6 @@ int uac_auth( struct sip_msg *msg, int algmask)
 	char *p;
 	struct dlg_cell *dlg;
 	const struct match_auth_hf_desc *mdesc;
-	int dleg;
 
 	/* get transaction */
 	t = uac_tmb.t_gett();
@@ -413,13 +402,6 @@ int uac_auth( struct sip_msg *msg, int algmask)
 
 				pkg_free(param.s);
 			}
-		} else if (dlg) {
-			/* a sequential that has updated the cseq - we need to
-			 * inform dialog as well */
-			dleg = uac_auth_dlg_leg(dlg, &ttag);
-			dlg->legs[dleg].last_gen_cseq = new_cseq;
-			if (msg->REQ_METHOD == METHOD_INVITE)
-				dlg->legs[dleg].last_inv_gen_cseq = new_cseq;
 		}
 
 	} else {
@@ -427,10 +409,7 @@ int uac_auth( struct sip_msg *msg, int algmask)
 		/* this is a sequential with dialog support, so the dialog module
 		 * is already managing the cseq => tell directly the dialog module
 		 * about the cseq increasing */
-		dleg = uac_auth_dlg_leg(dlg, &ttag);
-		new_cseq = ++dlg->legs[dleg].last_gen_cseq;
-		if (msg->REQ_METHOD == METHOD_INVITE)
-			dlg->legs[dleg].last_inv_gen_cseq = new_cseq;
+		new_cseq = ++dlg->legs[dlg->legs_no[DLG_LEGS_USED]-1].last_gen_cseq;
 
 		/* as we expect to have the request already altered (by the dialog 
 		 * module) with a new cseq, to invalidate that change, we do a trick
