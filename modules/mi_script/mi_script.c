@@ -160,7 +160,7 @@ static mi_request_t *mi_script_parse_request(str *method, str *params,
 	mi_request_t *req = NULL;
 	struct usr_avp *v_avp = NULL;
 	struct usr_avp *a_avp = NULL;
-	int_str avp_val;
+	int_str avp_val, avp_val_v;
 	unsigned int tmp;
 	cJSON *val;
 	char *p;
@@ -211,8 +211,11 @@ static mi_request_t *mi_script_parse_request(str *method, str *params,
 			trim_leading(params);
 			p = q_memchr(params->s, ' ', params->len);
 			avp_val.s = *params;
-			if (p)
+			if (p) {
 				avp_val.s.len = p - avp_val.s.s;
+				params->s += avp_val.s.len;
+				params->len -= avp_val.s.len;
+			}
 			if (avp_val.s.len <= 0)
 				break;
 			val = cJSON_CreateStr(avp_val.s.s, avp_val.s.len);
@@ -236,15 +239,15 @@ static mi_request_t *mi_script_parse_request(str *method, str *params,
 		/* check attribute */
 		if (vals) {
 			v_avp = search_first_avp(vals->pvp.pvn.u.isname.type,
-					vals->pvp.pvn.u.isname.name.n, &avp_val, v_avp);
+					vals->pvp.pvn.u.isname.name.n, &avp_val_v, v_avp);
 			if (!v_avp) {
 				LM_ERR("missing attribute\n");
 				goto error;
 			}
 			if (a_avp->flags & AVP_VAL_STR)
-				val = cJSON_CreateStr(avp_val.s.s, avp_val.s.len);
+				val = cJSON_CreateStr(avp_val_v.s.s, avp_val_v.s.len);
 			else
-				val = cJSON_CreateNumber(avp_val.n);
+				val = cJSON_CreateNumber(avp_val_v.n);
 			/* avp is always null terminated */
 			cJSON_AddItemToObject(req->params, avp_val.s.s, val);
 		} else {

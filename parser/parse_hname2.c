@@ -32,8 +32,8 @@
 #include "keys.h"
 #include "../ut.h"  /* q_memchr */
 
-#define LOWER_BYTE(b) ((b) | 0x20)
-#define LOWER_DWORD(d) ((d) | 0x20202020)
+#define LOWER_BYTE(b) ((b) | 0x20U)
+#define LOWER_DWORD(d) ((d) | 0x20202020U)
 
 /*
  * Skip all white-chars and return position of the first
@@ -102,10 +102,10 @@ static inline char* skip_ws(char* p, char *end)
  * (Sparc for example)
  */
 #define READ(addr) \
-	(*((unsigned char *)addr + 0) + \
-	(*((unsigned char *)addr + 1) << 8) + \
-	(*((unsigned char *)addr + 2) << 16) + \
-	(*((unsigned char *)addr + 3) << 24))
+	((unsigned)*((unsigned char *)addr + 0) + \
+	 ((unsigned)*((unsigned char *)addr + 1) << 8) + \
+	 ((unsigned)*((unsigned char *)addr + 2) << 16) + \
+	 ((unsigned)*((unsigned char *)addr + 3) << 24))
 
 #ifdef FUZZ_BUILD
 /* fuzzers are sensible to heap read overflows, so enable all "HAVE" checks */
@@ -239,7 +239,7 @@ char* parse_hname2(char* begin, char* end, struct hdr_field* hdr)
 	if (p>=end)
 		goto error;
 	p = skip_ws(p, end);
-	if (*p != ':')
+	if (p >= end || *p != ':')
 		goto error;
 	/* hdr type, name should be already set at this point */
 	return (p+1);
@@ -259,7 +259,7 @@ char* parse_hname2(char* begin, char* end, struct hdr_field* hdr)
 		case '\t':
 			/* consume spaces to the end of name */
 			p = skip_ws( p+1, end);
-			if (*p != ':')
+			if (p >= end || *p != ':')
 				goto error;
 			return (p+1);
 		/* default: it seems the hdr name continues, fall to "other" */
@@ -280,7 +280,7 @@ char* parse_hname2(char* begin, char* end, struct hdr_field* hdr)
 			case '\t':
 				hdr->name.len = p - hdr->name.s;
 				p = skip_ws(p+1, end);
-				if (*p != ':')
+				if (p >= end || *p != ':')
 					goto error;
 				return (p+1);
 		}
