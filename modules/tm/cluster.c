@@ -166,6 +166,7 @@ static void receive_tm_repl(bin_packet_t *packet)
 	int proto;
 	int port;
 	str tmp;
+	str sip_msg;
 	struct receive_info ri;
 
 	LM_DBG("received %d packet from %d in cluster %d\n",
@@ -207,7 +208,7 @@ static void receive_tm_repl(bin_packet_t *packet)
 	TM_BIN_POP(str, &tmp, "src host");
 	memcpy((char *)&ri.src_ip, tmp.s, tmp.len);
 	TM_BIN_POP(int, &ri.src_port, "src port");
-	TM_BIN_POP(str, &tmp, "message");
+	TM_BIN_POP(str, &sip_msg, "message");
 
 	/* only auto-CANCEL is treated differently */
 	if (packet->type == TM_CLUSTER_AUTO_CANCEL) {
@@ -217,7 +218,10 @@ static void receive_tm_repl(bin_packet_t *packet)
 		}
 		LM_WARN("auto-CANCEL handling is disabled, but got one auto-CANCEL here!\n");
 	}
-	receive_msg(tmp.s, tmp.len, &ri, NULL, FL_TM_REPLICATED);
+
+	// sip_msg.s[sip_msg.len] = 0;
+
+	receive_msg(sip_msg.s, sip_msg.len, &ri, NULL, FL_TM_REPLICATED);
 }
 #undef TM_BIN_POP
 
@@ -313,8 +317,14 @@ static bin_packet_t *tm_replicate_packet(struct sip_msg *msg, int type)
 	tmp.len = sizeof(struct ip_addr);
 	TM_BIN_PUSH(str, &tmp, "src host");
 	TM_BIN_PUSH(int, msg->rcv.src_port, "src port");
-	tmp.s = msg->buf;
-	tmp.len = msg->len + 1; /* XXX: add null terminator */
+
+	if (msg->buf[msg->len] == '\0') {
+		tmp.s = msg->buf;
+		tmp.len = msg->len;
+	} else {
+		tmp.s = msg->buf;
+		tmp.len = msg->len + 1; /* XXX: add null terminator */
+	}
 	TM_BIN_PUSH(str, &tmp, "message");
 
 	return &packet;
