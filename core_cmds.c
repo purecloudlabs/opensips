@@ -884,7 +884,6 @@ static int w_add_local_rport(struct sip_msg *msg)
 {
 	msg->msg_flags|=FL_FORCE_LOCAL_RPORT;
 	return 1;
-
 }
 
 static int w_force_tcp_alias(struct sip_msg *msg, int *port)
