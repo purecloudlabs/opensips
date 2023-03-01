@@ -876,6 +876,9 @@ static int load_entire_table(cache_entry_t *c_entry, db_handlers_t *db_hdls,
 
 	row = RES_ROWS(sql_res);
 	values = ROW_VALUES(row);
+
+	LM_ERR("Table: %.*s has '%d' rows\n", c_entry->table.len, c_entry->table.s);
+
 	if (get_column_types(c_entry, values + 1, ROW_N(row) - 1) < 0) {
 		lock_stop_write(db_hdls->c_entry->ref_lock);
 		goto error;
