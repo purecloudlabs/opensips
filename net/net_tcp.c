@@ -1218,10 +1218,8 @@ inline static int handle_tcp_worker(struct tcp_worker* tcp_c, int fd_i)
 			sh_log(tcpconn->hist, TCP_UNREF, "tcpworker release write, (%d)", tcpconn->refcnt);
 			tcpconn_put(tcpconn);
 			break;
-		case ASYNC_WRITE:
+		case ASYNC_WRITE_TCPW:
 			tcp_c->busy--;
-			/* fall through*/
-		case ASYNC_WRITE2:
 			if (tcpconn->state==S_CONN_BAD){
 				sh_log(tcpconn->hist, TCP_UNREF, "tcpworker async write bad, (%d)", tcpconn->refcnt);
 				tcpconn_destroy(tcpconn);
@@ -1233,13 +1231,11 @@ inline static int handle_tcp_worker(struct tcp_worker* tcp_c, int fd_i)
 			reactor_add_writer( tcpconn->s, F_TCPCONN, RCT_PRIO_NET, tcpconn);
 			tcpconn->flags&=~F_CONN_REMOVED_WRITE;
 			break;
-		case CONN_ERROR:
+		case CONN_ERROR_TCPW:
 		case CONN_DESTROY:
 		case CONN_EOF:
 			/* WARNING: this will auto-dec. refcnt! */
 			tcp_c->busy--;
-			/* fall through*/
-		case CONN_ERROR2:
 			if ((tcpconn->flags & F_CONN_REMOVED) != F_CONN_REMOVED &&
 				(tcpconn->s!=-1)){
 				reactor_del_all( tcpconn->s, -1, IO_FD_CLOSING);
@@ -1335,8 +1331,7 @@ inline static int handle_worker(struct process_table* p, int fd_i)
 		goto end;
 	}
 	switch(cmd){
-		case CONN_ERROR:
-		case CONN_ERROR2:
+		case CONN_ERROR_GENW:
 			/* remove from reactor only if the fd exists, and it wasn't
 			 * removed before */
 			if ((tcpconn->flags & F_CONN_REMOVED) != F_CONN_REMOVED &&
@@ -1388,8 +1383,7 @@ inline static int handle_worker(struct process_table* p, int fd_i)
 			reactor_add_writer( tcpconn->s, F_TCPCONN, RCT_PRIO_NET, tcpconn);
 			tcpconn->flags&=~F_CONN_REMOVED_WRITE;
 			break;
-		case ASYNC_WRITE:
-		case ASYNC_WRITE2:
+		case ASYNC_WRITE_GENW:
 			if (tcpconn->state==S_CONN_BAD){
 				tcpconn->lifetime=0;
 				break;
@@ -1464,13 +1458,13 @@ error:
  * iterates through all TCP connections and closes expired ones
  * Note: runs once per second at most
  */
-#define tcpconn_lifetime(last_sec, close_all) \
+#define tcpconn_lifetime(last_sec) \
 	do { \
 		int now; \
 		now = get_ticks(); \
 		if (last_sec != now) { \
 			last_sec = now; \
-			__tcpconn_lifetime(close_all); \
+			__tcpconn_lifetime(0); \
 		} \
 	} while (0)
 
@@ -1480,7 +1474,7 @@ error:
  * the same except for io_watch_del..
  * \todo FIXME (very inefficient for now)
  */
-static inline void __tcpconn_lifetime(int force)
+static inline void __tcpconn_lifetime(int shutdown)
 {
 	struct tcp_connection *c, *next;
 	unsigned int ticks,part;
@@ -1493,25 +1487,25 @@ static inline void __tcpconn_lifetime(int force)
 		ticks=0;
 
 	for( part=0 ; part<TCP_PARTITION_SIZE ; part++ ) {
-		TCPCONN_LOCK(part); /* fixme: we can lock only on delete IMO */
+		if (!shutdown) TCPCONN_LOCK(part); /* fixme: we can lock only on delete IMO */
 		for(h=0; h<TCP_ID_HASH_SIZE; h++){
 			c=TCP_PART(part).tcpconn_id_hash[h];
 			while(c){
 				next=c->id_next;
-				if (force ||((c->refcnt==0) && (ticks>c->lifetime))) {
-					if (!force)
+				if (shutdown ||((c->refcnt==0) && (ticks>c->lifetime))) {
+					if (!shutdown)
 						LM_DBG("timeout for hash=%d - %p"
 								" (%d > %d)\n", h, c, ticks, c->lifetime);
 					fd=c->s;
 					/* report the closing of the connection . Note that
 					 * there are connectioned that use an foced expire to 0
 					 * as a way to be deleted - we are not interested in */
-					/* Also, do not trigger reporting when shutdown (force=1)
+					/* Also, do not trigger reporting when shutdown
 					 * is done */
-					if (c->lifetime>0 && !force)
+					if (c->lifetime>0 && !shutdown)
 						tcp_trigger_report(c, TCP_REPORT_CLOSE,
 							"Timeout on no traffic");
-					if ((!force)&&(fd>0)&&(c->refcnt==0)) {
+					if ((!shutdown)&&(fd>0)&&(c->refcnt==0)) {
 						/* if any of read or write are set, we need to remove
 						 * the fd from the reactor */
 						if ((c->flags & F_CONN_REMOVED) != F_CONN_REMOVED){
@@ -1527,7 +1521,7 @@ static inline void __tcpconn_lifetime(int force)
 				c=next;
 			}
 		}
-		TCPCONN_UNLOCK(part);
+		if (!shutdown) TCPCONN_UNLOCK(part);
 	}
 }
 
@@ -1609,7 +1603,7 @@ static void tcp_main_server(void)
 
 	/* main loop (requires "handle_io()" implementation) */
 	reactor_main_loop( TCP_MAIN_SELECT_TIMEOUT, error,
-			tcpconn_lifetime(last_sec, 0) );
+			tcpconn_lifetime(last_sec) );
 
 error:
 	destroy_worker_reactor();
