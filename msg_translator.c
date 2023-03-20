@@ -1249,7 +1249,7 @@ skip_after:
  *    to be 100% that estimating and building the body leads to the same
  *    result (as len).
  */
-static unsigned int prep_reassemble_body_parts( struct sip_msg* msg,
+unsigned int prep_reassemble_body_parts( struct sip_msg* msg,
 												struct socket_info* send_sock)
 {
 	struct body_part *part;
@@ -2176,11 +2176,9 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 	if(msg->msg_flags&FL_FORCE_LOCAL_RPORT) {
 		id_buf=extra_params.s;
 		id_len=extra_params.len;
-
 		if (via_params && !extra_params.len) {
 			/* if no other parameters were added yet, consider via_params */
 			extra_params.len = via_params->len;
-			id_len = via_params->len;
 			/* otherwise, the via_params were already copied in the id block */
 		}
 		extra_params.len += RPORT_LEN-1; /* last char in RPORT define is '='
@@ -2196,8 +2194,10 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 		if(id_buf!=0) {
 			memcpy(extra_params.s, id_buf, id_len);
 			pkg_free(id_buf);
-		} else if (via_params)
+		} else if (via_params) {
 			memcpy(extra_params.s, via_params->s, via_params->len);
+			id_len = via_params->len;
+		}
 		memcpy(extra_params.s+id_len, RPORT, RPORT_LEN-1);
 		extra_params.s[extra_params.len]='\0';
 		LM_DBG("extra param added: <%.*s>\n",extra_params.len, extra_params.s);
