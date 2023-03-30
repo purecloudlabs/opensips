@@ -2365,6 +2365,7 @@ send_rtpe_command(struct rtpe_node *node, bencode_item_t *dict, int *outlen)
 	if (IOV_MAX < OSIP_IOV_MAX)
 		max_vcnt = IOV_MAX;
 #endif
+	vcnt++; /* add the cookie */
 
 	if (vcnt > max_vcnt) {
 		int i, vec_len = 0;
@@ -3608,7 +3609,7 @@ static void rtpengine_notify_process(int rank)
 	union sockaddr_union ss;
 	char buffer[RTPENGINE_DGRAM_BUF];
 
-	p = strrchr(rtpengine_notify_sock.s, ':');
+	p = q_memchr(rtpengine_notify_sock.s, ':', rtpengine_notify_sock.len);
 	if (!p) {
 		LM_ERR("no port specified in notification socket %.*s!\n",
 				rtpengine_notify_sock.len, rtpengine_notify_sock.s);

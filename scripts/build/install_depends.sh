@@ -2,7 +2,15 @@
 
 set -e
 
-PKGS=`grep -A 35 packages: .travis.yml  | grep -e '^ *[-]' | awk '{print $2}'`
+PKGS=""
+for pkg in `grep -A 35 packages: .travis.yml  | grep -e '^ *[-]' | awk '{print $2}'`
+do
+  if [ "${BUILD_OS}" = ubuntu-22.04 -a "${pkg}" = python-dev ]
+  then
+    pkg="python-dev-is-python3"
+  fi
+  PKGS="${PKGS} ${pkg}"
+done
 
 . $(dirname $0)/build.conf.sub
 
@@ -12,7 +20,7 @@ then
 fi
 
 sudo apt-get update -y
-sudo apt-get -y install ${PKGS}
+sudo apt-get -y --allow-downgrades install ${PKGS}
 
 if [ ! -z "${POST_INSTALL_CMD}" ]
 then

@@ -2521,9 +2521,7 @@ error:
 static void ds_options_callback( struct cell *t, int type,
 		struct tmcb_params *ps )
 {
-	str uri = {0, 0};
-
-	/* The Param does contain the group, in which the failed host
+	/* The Param contains the URI+ group, in which the failed host
 	 * can be found.*/
 	if (!ps->param) {
 		LM_DBG("No parameter provided, OPTIONS-Request was finished"
@@ -2537,13 +2535,8 @@ static void ds_options_callback( struct cell *t, int type,
 	ds_options_callback_param_t *cb_param =
 		(ds_options_callback_param_t*)(*ps->param);
 
-	/* The SIP-URI is taken from the Transaction.
-	 * Remove the "To: " (s+4) and the trailing new-line (s - 4 (To: )
-	 * - 2 (\r\n)). */
-	uri.s = t->to.s + 4;
-	uri.len = t->to.len - 6;
 	LM_DBG("OPTIONS-Request was finished with code %d (to %.*s, group %d)\n",
-			ps->code, uri.len, uri.s, cb_param->set_id);
+			ps->code, cb_param->uri.len, cb_param->uri.s, cb_param->set_id);
 
 	/* ps->code contains the result-code of the request;
 	 * We accept "200 OK" by default and the custom codes
@@ -2551,12 +2544,12 @@ static void ds_options_callback( struct cell *t, int type,
 	if ((ps->code == 200) || check_options_rplcode(ps->code)) {
 		/* Set the according entry back to "Active":
 		 *  remove the Probing/Inactive Flag and reset the failure counter. */
-		if (ds_set_state(cb_param->set_id, &uri,
+		if (ds_set_state(cb_param->set_id, &cb_param->uri,
 					DS_INACTIVE_DST|DS_PROBING_DST|DS_RESET_FAIL_DST, 0,
 					cb_param->partition) != 0)
 		{
-			LM_ERR("Setting the state failed (%.*s, group %d)\n", uri.len,
-					uri.s, cb_param->set_id);
+			LM_ERR("Setting the state failed (%.*s, group %d)\n",
+				cb_param->uri.len, cb_param->uri.s, cb_param->set_id);
 		}
 	}
 	/* if we always probe, and we get a timeout
@@ -2565,11 +2558,11 @@ static void ds_options_callback( struct cell *t, int type,
 	if(ds_probing_mode==1 && ps->code != 200 &&
 	(ps->code == 408 || !check_options_rplcode(ps->code)))
 	{
-		if (ds_set_state(cb_param->set_id, &uri, DS_PROBING_DST, 1,
+		if (ds_set_state(cb_param->set_id, &cb_param->uri, DS_PROBING_DST, 1,
 					cb_param->partition) != 0)
 		{
 			LM_ERR("Setting the probing state failed (%.*s, group %d)\n",
-					uri.len, uri.s, cb_param->set_id);
+				cb_param->uri.len, cb_param->uri.s, cb_param->set_id);
 		}
 	}
 
@@ -2583,7 +2576,18 @@ static void ds_options_callback( struct cell *t, int type,
  */
 void ds_check_timer(unsigned int ticks, void* param)
 {
+	struct gw_prob_pack {
+		/* IMPORTANT, this member must be the first, as we use its pointer
+		 * to free the whole structure here */
+		ds_options_callback_param_t params;
+
+		struct socket_info *sock;
+		struct usr_avp *avps;
+
+		struct gw_prob_pack *next;
+	};
 	ds_partition_t *partition;
+	struct gw_prob_pack *pack, *pack_last, *pack_head;
 	dlg_t *dlg;
 	ds_set_p list;
 	int_str val;
@@ -2596,6 +2600,8 @@ void ds_check_timer(unsigned int ticks, void* param)
 		/* Check for the list. */
 		if ( (*partition->data)->sets==NULL )
 			continue;
+
+		pack_last = pack_head = NULL;
 
 		/* access ds data under reader's lock */
 		lock_start_read( partition->lock );
@@ -2615,59 +2621,87 @@ void ds_check_timer(unsigned int ticks, void* param)
 					LM_DBG("probing set #%d, URI %.*s\n", list->id,
 							list->dlist[j].uri.len, list->dlist[j].uri.s);
 
-					/* Execute the Dialog using the "request"-Method of the
-					 * TM-Module.*/
-					if (tmb.new_auto_dlg_uac(&ds_ping_from,
-					&list->dlist[j].uri, NULL, NULL,
-					list->dlist[j].sock?list->dlist[j].sock:probing_sock,
-					&dlg) != 0 ) {
-						LM_ERR("failed to create new TM dlg\n");
-						continue;
-					}
-					dlg->state = DLG_CONFIRMED;
-
-					if (ds_ping_maxfwd>=0) {
-						dlg->mf_enforced = 1;
-						dlg->mf_value = (unsigned short)ds_ping_maxfwd;
+					/* build its pack, so we can build and send the prob later */
+					pack = shm_malloc(sizeof(struct gw_prob_pack) +
+						list->dlist[j].uri.len );
+					if( pack==0 ) {
+						LM_ERR("no more shm memory!\n");
+						/* send whatever probs we have so far */
+						break;
 					}
 
-					ds_options_callback_param_t *cb_param =
-								shm_malloc(sizeof(*cb_param));
-
-					if (cb_param == NULL) {
-						LM_CRIT("No more shared memory\n");
-						continue;
-					}
+					pack->sock = list->dlist[j].sock;
 
 					if (partition->attrs_avp_name>=0) {
 						val.s = list->dlist[j].attrs;
-						dlg->avps = new_avp(
+						pack->avps = new_avp(
 							AVP_VAL_STR|partition->attrs_avp_type,
 							partition->attrs_avp_name, val);
 						// we do not care if the adding failed, there will
 						// be no attr AVP exposed in local route
-						if (dlg->avps)
-							dlg->avps->next = NULL;
-					}
+						if (pack->avps)
+							pack->avps->next = NULL;
+					} else
+						pack->avps = NULL;
 
-					cb_param->partition = partition;
-					cb_param->set_id = list->id;
-					if (tmb.t_request_within(&ds_ping_method,
-							NULL,
-							NULL,
-							dlg,
-							ds_options_callback,
-							(void*)cb_param,
-							osips_shm_free) < 0) {
-						LM_ERR("unable to execute dialog\n");
-						shm_free(cb_param);
+					pack->params.uri.s = (char*)(pack+1);
+					memcpy(pack->params.uri.s, list->dlist[j].uri.s,
+						list->dlist[j].uri.len);
+					pack->params.uri.len = list->dlist[j].uri.len;
+
+					pack->params.partition = partition;
+					pack->params.set_id = list->id;
+
+					if (pack_head==NULL) {
+						pack_head = pack_last = pack;
+					} else {
+						pack_last->next = pack;
+						pack_last = pack;
 					}
-					tmb.free_dlg(dlg);
+					pack->next = NULL;
+
 				}
 			}
 		}
 
 		lock_stop_read( partition->lock );
+
+		/* now send all the probs, outside the lock */
+		for( pack = pack_head ; pack ; pack=pack_last ) {
+
+			pack_last = pack->next;
+
+			/* Execute the Dialog using the "request"-Method of the
+			 * TM-Module.*/
+			if (tmb.new_auto_dlg_uac(&ds_ping_from,
+			&pack->params.uri, NULL, NULL,
+			pack->sock?pack->sock:probing_sock,
+			&dlg) != 0 ) {
+				LM_ERR("failed to create new TM dlg\n");
+					continue;
+			}
+			dlg->state = DLG_CONFIRMED;
+
+			if (ds_ping_maxfwd>=0) {
+				dlg->mf_enforced = 1;
+				dlg->mf_value = (unsigned short)ds_ping_maxfwd;
+			}
+			dlg->avps = pack->avps;
+			pack->avps = NULL;
+
+			if (tmb.t_request_within(&ds_ping_method,
+					NULL,
+					NULL,
+					dlg,
+					ds_options_callback,
+					(void*)pack,
+					osips_shm_free) < 0) {
+				LM_ERR("unable to execute dialog\n");
+				shm_free(pack);
+			}
+			tmb.free_dlg(dlg);
+
+		}
 	}
 }
 

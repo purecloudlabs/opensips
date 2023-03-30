@@ -244,7 +244,7 @@ b2bl_tuple_t* b2bl_insert_new(struct sip_msg* msg, unsigned int hash_index,
 		}
 	}
 
-	tuple->state = B2B_NOTDEF_STATE;
+	tuple->state = B2B_INIT_BRIDGING_STATE;
 
 	if (repl_flag != TUPLE_REPL_RECV)
 		lock_get(&b2bl_htable[hash_index].lock);
@@ -328,7 +328,7 @@ b2bl_tuple_t* b2bl_insert_new(struct sip_msg* msg, unsigned int hash_index,
 	tuple->req_routeid = init_params->req_routeid;
 	tuple->reply_routeid = init_params->reply_routeid;
 
-	if (set_tracer_func && msg->msg_flags&tracer_msg_flag_filter)
+	if (set_tracer_func && msg && msg->msg_flags&tracer_msg_flag_filter)
 		tuple->tracer = *set_tracer_func();
 
 	LM_DBG("new tuple [%p]->[%.*s]\n", tuple, b2bl_key->len, b2bl_key->s);

@@ -36,7 +36,7 @@ ifeq ($(WOLFSSL_FIPS_ENABLED),)
 	fi; \
 	if [ ! -f "Makefile" ]; then \
 		env -u DEFS -u CFLAGS -u LDFLAGS -u LIBS ./configure \
-		--enable-all --disable-fpecc --disable-examples \
+		--enable-all --disable-fpecc --disable-examples -disable-aligndata \
 		--enable-writedup --enable-tlsv10 --disable-shared --enable-static \
 		--disable-jni --disable-crl-monitor \
 		--prefix=$(MOD_DIR)/lib \

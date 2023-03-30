@@ -49,13 +49,11 @@
 #include "wolfssl.h"
 #include "wolfssl_api.h"
 
-#ifdef WOLFSSL_FIPS_ENABLED
 #if defined __OS_linux
 #include <features.h>
 #if defined(__GLIBC_PREREQ)
 #if __GLIBC_PREREQ(2, 2)
 #define __WOLFSSL_ON_EXIT
-#endif
 #endif
 #endif
 #endif
@@ -152,22 +150,11 @@ static void *oss_realloc(void *ptr, size_t size)
 	return shm_realloc(ptr, size);
 }
 
-#ifdef WOLFSSL_FIPS_ENABLED
 #ifdef __WOLFSSL_ON_EXIT
-/* This is used to exit _without_ running the remaining onexit callbacks;
- * we do this because wolfssl tries to free the RNG from each
- * process, resulting in multiple frees of the same chunk.
- *
- * We are sure that this callback is called _before_ the wolfssl onexit()
- * because glibc guarantees that the callbacks are called in the reversed
- * order they are armed, and since we are only registering this function in
- * module init, we are the last ones that register it.
- */
-static void wolfssl_on_exit(int status, void *param)
+static void _wolfssl_on_exit(int status, void *param)
 {
-	_exit(status);
+       _exit(status);
 }
-#endif
 #endif
 
 static int mod_init(void)
@@ -201,10 +188,8 @@ static int mod_init(void)
 #endif
 	_wolfssl_init_ssl_methods();
 
-#ifdef WOLFSSL_FIPS_ENABLED
 #ifdef __WOLFSSL_ON_EXIT
-	on_exit(wolfssl_on_exit, NULL);
-#endif
+       on_exit(_wolfssl_on_exit, NULL);
 #endif
 
 	return 0;
