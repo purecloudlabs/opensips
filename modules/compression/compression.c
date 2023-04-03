@@ -129,7 +129,7 @@ static int mc_compact_cb(char** buf, mc_whitelist_p wh_list, int, int*);
 static int mc_compress(struct sip_msg* msg, int* algo, int* flags,
 		mc_whitelist_p wh_list);
 int mc_compress_cb(char** buf, void* param, int type, int* olen);
-static inline int mc_ndigits(int x);
+static inline unsigned int mc_ndigits(int x);
 static inline void parse_algo_hdr(struct hdr_field* algo_hdr, int* algo, int* b64_required);
 
 static int mc_decompress(struct sip_msg*);
@@ -605,7 +605,7 @@ static int mc_compact(struct sip_msg* msg, mc_whitelist_p wh_list)
 		goto error;
 	}
 
-	if (tm_api.t_gett && msg->flags&FL_TM_CB_REGISTERED)
+	if (tm_api.t_gett && msg->msg_flags&FL_TM_CB_REGISTERED)
 		goto error;
 
 	/*register tm callback if tm api */
@@ -613,7 +613,7 @@ static int mc_compact(struct sip_msg* msg, mc_whitelist_p wh_list)
 			tm_api.register_tmcb( msg, 0, TMCB_PRE_SEND_BUFFER,
 				wrap_tm_compact, NULL, 0) != 1) {
 		LM_ERR("failed to add tm TMCB_PRE_SEND_BUFFER callback\n");
-		msg->flags |= FL_TM_CB_REGISTERED;
+		msg->msg_flags |= FL_TM_CB_REGISTERED;
 		goto error;
 	}
 
@@ -964,14 +964,16 @@ free_mem:
 /*
  *
  */
-static inline int mc_ndigits(int x)
+static inline unsigned int mc_ndigits(int x)
 {
-	if (x == 0)
-		return 1;
+	unsigned int n = 0;
 
-	if (x > 10)
-		return 1 + mc_ndigits(x/10);
-	else return 1;
+	while (x >= 10) {
+		x /= 10;
+		n++;
+	}
+
+	return n + 1;
 }
 
 /*
@@ -1045,7 +1047,7 @@ static int mc_compress(struct sip_msg* msg, int *algo_p, int *flags_p,
 		goto end;
 	}
 
-	if (tm_api.t_gett && msg->flags&FL_TM_CB_REGISTERED) {
+	if (tm_api.t_gett && msg->msg_flags&FL_TM_CB_REGISTERED) {
 		ret = 1;
 		goto end;
 	}
@@ -1055,7 +1057,7 @@ static int mc_compress(struct sip_msg* msg, int *algo_p, int *flags_p,
 			tm_api.register_tmcb( msg, 0, TMCB_PRE_SEND_BUFFER,
 				wrap_tm_compress, NULL, 0) != 1) {
 		LM_ERR("failed to add tm TMCB_PRE_SEND_BUFFER callback\n");
-		msg->flags |= FL_TM_CB_REGISTERED;
+		msg->msg_flags |= FL_TM_CB_REGISTERED;
 		goto end;
 	}
 

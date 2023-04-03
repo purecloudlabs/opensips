@@ -1078,6 +1078,19 @@ logic_notify:
 			}
 		}
 		lock_get(&table[hash_index].lock);
+
+		/* check if the dialog has not be deleted while not holding the lock */
+		for(aux_dlg = table[hash_index].first; aux_dlg; aux_dlg = aux_dlg->next)
+		{
+			if(aux_dlg == dlg)
+				break;
+		}
+		if(!aux_dlg)
+		{
+			LM_DBG("Record not found anymore\n");
+			lock_release(&table[hash_index].lock);
+			return SCB_DROP_MSG;
+		}
 	}
 
 	if(method_value != METHOD_CANCEL)
@@ -1125,17 +1138,46 @@ logic_notify:
 					/* there is another transaction for which no reply
 					 * was sent out */
 					{
-						/* send reply */
-						LM_DBG("Received another request when the previous "
-							"one was in process\n");
-						str text = str_init("Request Pending");
-						if(tmb.t_reply_with_body( tm_tran, 491,
-						&text, 0, 0, &to_tag) < 0)
-						{
-							LM_ERR("failed to send reply with tm\n");
+						if (method_value != METHOD_BYE) {
+							/* send reply */
+							LM_DBG("Received another request when the previous "
+								"one was in process\n");
+							str text = str_init("Request Pending");
+							if(tmb.t_reply_with_body( tm_tran, 491,
+							&text, 0, 0, &to_tag) < 0)
+							{
+								LM_ERR("failed to send reply with tm\n");
+							}
+							LM_DBG("Sent reply [491] and unreffed the cell %p\n",
+								tm_tran);
+						} else {
+							LM_DBG("Received BYE while another request "
+								"was in process\n");
+							str text_ok = str_init("OK");
+							if(tmb.t_reply_with_body( tm_tran, 200,
+							&text_ok, 0, 0, &to_tag) < 0)
+							{
+								LM_ERR("failed to send reply with tm\n");
+							}
+							LM_DBG("Sent reply [200] and unreffed the cell %p\n",
+								tm_tran);
+							tmb.unref_cell(tm_tran);
+
+							str text_term = str_init("Request Terminated");
+							if(tmb.t_reply_with_body(dlg->uas_tran, 487,
+							&text_term, 0, 0, &to_tag) < 0)
+							{
+								LM_ERR("failed to send reply with tm\n");
+							}
+							LM_DBG("Sent reply [487] and unreffed the cell %p\n",
+								dlg->uas_tran);
+
+							tmb.unref_cell(dlg->uas_tran);
+							dlg->uas_tran = NULL;
+
+							b2b_cb_flags |= B2B_NOTIFY_FL_TERM_BYE;
+							goto run_cb;
 						}
-						LM_DBG("Sent reply [491] and unreffed the cell %p\n",
-							tm_tran);
 					}
 					tmb.unref_cell(tm_tran); /* for t_newtran() */
 					lock_release(&table[hash_index].lock);
@@ -1158,6 +1200,8 @@ logic_notify:
 				tmb.unref_cell(tm_tran);
 		}
 	}
+
+run_cb:
 
 	b2b_cback = dlg->b2b_cback;
 	if(dlg->param.s)
@@ -2609,11 +2653,12 @@ void b2b_tm_cback(struct cell *t, b2b_table htable, struct tmcb_params *ps)
 	static struct authenticate_nc_cnonce auth_nc_cnonce;
 	struct digest_auth_response response;
 	str *new_hdr;
-	char status_buf[INT2STR_MAX_LEN];
+	char dummy_fl_buf[7/*SIP/2.0*/ + 1 + 3/*statuscode*/ + 1 + 7/*Timeout*/];
 	static str sdp_ct = str_init("Content-Type: application/sdp\r\n");
 	int old_route_type;
 	bin_packet_t storage;
 	int b2b_ev = -1;
+	int lock_taken = 0;
 	struct b2b_context *ctx;
 	int b2b_cb_flags = 0;
 	unsigned int reqmask;
@@ -3003,12 +3048,23 @@ dummy_reply:
 			memset(&dummy_msg, 0, sizeof(struct sip_msg));
 			dummy_msg.id = 1;
 			dummy_msg.first_line.type = SIP_REPLY;
-			dummy_msg.first_line.u.reply.statuscode = statuscode;
-			dummy_msg.first_line.u.reply.status.s =
-				int2bstr( statuscode, status_buf,
-				&dummy_msg.first_line.u.reply.status.len);
-			dummy_msg.first_line.u.reply.reason.s = "Timeout";
+
+			memcpy(dummy_fl_buf, "SIP/2.0", 7);
+			dummy_msg.first_line.u.reply.version.s = dummy_fl_buf;
+			dummy_msg.first_line.u.reply.version.len = 7;
+			dummy_fl_buf[7] = ' ';
+
+			btostr(dummy_fl_buf+8, statuscode);
+			dummy_msg.first_line.u.reply.status.s = dummy_fl_buf+8;
+			dummy_msg.first_line.u.reply.status.len = 3;
+			dummy_fl_buf[11] = ' ';
+
+			memcpy(dummy_fl_buf, "Timeout", 7);
+			dummy_msg.first_line.u.reply.reason.s = dummy_fl_buf+12;
 			dummy_msg.first_line.u.reply.reason.len = 7;
+
+			dummy_msg.first_line.u.reply.statuscode = statuscode;
+
 			memset(&cb, 0, sizeof(struct cseq_body));
 			memset(&cseq, 0, sizeof(struct hdr_field));
 			cb.method = t->method;
@@ -3340,8 +3396,9 @@ done1:
 b2b_route:
 
 	if (B2BE_SERIALIZE_STORAGE()) {
+		lock_get(&htable[hash_index].lock);
+		lock_taken = 1;
 		if (dlg_state == B2B_CONFIRMED && prev_state == B2B_MODIFIED) {
-			lock_get(&htable[hash_index].lock);
 
 			if (dlg->state != B2B_TERMINATED) {
 				b2b_ev = B2B_EVENT_UPDATE;
@@ -3350,7 +3407,6 @@ b2b_route:
 			} else
 				b2b_ev = -1;
 		} else if (b2b_ev == B2B_EVENT_CREATE) {
-			lock_get(&htable[hash_index].lock);
 
 			if (dlg->state != B2B_TERMINATED) {
 				b2b_run_cb(dlg, hash_index, etype, B2BCB_TRIGGER_EVENT, b2b_ev,
@@ -3366,8 +3422,8 @@ b2b_route:
 	current_dlg = 0;
 	if(b2be_db_mode == WRITE_THROUGH && dlg_state>B2B_CONFIRMED)
 	{
-		if (b2b_ev == -1)
-			lock_get(&htable[hash_index].lock);
+		/* the lock is already aquired above, since B2BE_SERIALIZE_STORAGE()
+		 * is true for the WRITE_THROUGH b2be_db_mode */
 
 		for(aux_dlg = htable[hash_index].first; aux_dlg; aux_dlg = aux_dlg->next)
 		{
@@ -3383,7 +3439,7 @@ b2b_route:
 		if (b2be_db_update(dlg, etype) < 0)
 			LM_ERR("Failed to update in database\n");
 		lock_release(&htable[hash_index].lock);
-	} else if (b2b_ev != -1)
+	} else if (lock_taken)
 		lock_release(&htable[hash_index].lock);
 
 	if (b2be_cluster) {

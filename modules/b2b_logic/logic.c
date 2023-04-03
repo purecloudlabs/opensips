@@ -544,7 +544,7 @@ int process_bridge_dialog_end(b2bl_tuple_t* tuple, unsigned int hash_index,
 				tuple->bridge_entities[0]->peer = tuple->bridge_entities[1];
 
 				/* Disable bridging state */
-				tuple->state = B2B_NOTDEF_STATE;
+				tuple->state = B2B_BRIDGED_STATE;
 				tuple->bridge_initiator = 0;
 
 				return 1; // Don't delete tuple
@@ -575,7 +575,7 @@ int process_bridge_dialog_end(b2bl_tuple_t* tuple, unsigned int hash_index,
 			tuple->bridge_entities[0]->peer = tuple->bridge_entities[1];
 
 			/* Disable bridging state */
-			tuple->state = B2B_NOTDEF_STATE;
+			tuple->state = B2B_BRIDGED_STATE;
 			tuple->bridge_initiator = 0;
 
 			return 1; // Don't delete tuple
@@ -639,6 +639,7 @@ int process_bridge_notify(b2bl_entity_id_t *entity, unsigned int hash_index, str
 	memset(&req_data, 0, sizeof(b2b_req_data_t));
 	PREP_REQ_DATA(entity);
 	req_data.method = &method_notify;
+	req_data.no_cb = 1;
 	req_data.client_headers = &entity->hdrs;
 	req_data.body = 0;
 	if (!msg) {
@@ -868,7 +869,7 @@ int process_bridge_200OK(struct sip_msg* msg, str* extra_headers,
 			}
 			b2bl_htable[hash_index].locked_by = -1;
 			/* mark the scenario as completed */
-			tuple->state = B2B_NOTDEF_STATE;
+			tuple->state = B2B_BRIDGED_STATE;
 			LM_DBG("Finished the bridging\n");
 		} else if(bentity1->type == B2B_CLIENT && bentity1->state!=B2BL_ENT_CONFIRMED)
 		{
@@ -1079,7 +1080,7 @@ int process_bridge_200OK(struct sip_msg* msg, str* extra_headers,
 			} else {
 				/* bridging scenario should be done */
 
-				tuple->state = B2B_NOTDEF_STATE;
+				tuple->state = B2B_BRIDGED_STATE;
 				LM_DBG("Finished the bridging\n");
 			}
 		}
@@ -1223,6 +1224,158 @@ int post_cb_sanity_check(b2bl_tuple_t **tuple, unsigned int hash_index, unsigned
 	return -5;
 }
 
+int run_init_negreply_cb(struct sip_msg *msg, b2bl_tuple_t *tuple,
+	b2bl_entity_id_t *entity)
+{
+	b2bl_cback_f cbf = NULL;
+	str ekey= {NULL, 0};
+	b2bl_cb_params_t cb_params;
+	b2bl_dlg_stat_t stats;
+	int ret;
+	int entity_no;
+	int etype;
+
+	/* call the callback for brigding failure  */
+	cbf = tuple->cbf;
+	if(cbf && (tuple->cb_mask&B2B_REJECT_CB))
+	{
+		etype = entity->type;
+		entity_no = bridge_get_entityno(tuple, entity);
+
+		memset(&cb_params, 0, sizeof(b2bl_cb_params_t));
+		cb_params.param = tuple->cb_param;
+		stats.start_time =  entity->stats.start_time;
+		stats.setup_time = get_ticks() - entity->stats.start_time;
+		stats.key.s = NULL; stats.key.len = 0;
+		cb_params.stat = &stats;
+		ekey.s = (char*)pkg_malloc(entity->key.len);
+		if(ekey.s == NULL)
+		{
+			LM_ERR("No more memory\n");
+			return -1;
+		}
+		memcpy(ekey.s, entity->key.s, entity->key.len);
+		ekey.len = entity->key.len;
+		cb_params.msg = msg;
+		cb_params.entity = entity_no;
+
+		lock_release(&b2bl_htable[cur_route_ctx.hash_index].lock);
+
+		ret = cbf(&cb_params, B2B_REJECT_CB);
+		LM_DBG("ret = %d\n", ret);
+
+		lock_get(&b2bl_htable[cur_route_ctx.hash_index].lock);
+		/* must search the tuple again
+		 * you can't know what might have happened with it */
+		if (0!=post_cb_sanity_check(&tuple, cur_route_ctx.hash_index,
+			cur_route_ctx.local_index, &entity, etype, &ekey))
+		{
+			pkg_free(ekey.s);
+			return 1;
+		}
+		pkg_free(ekey.s);
+
+		if(ret == B2B_DROP_MSG_CB_RET)
+		{
+			/* drop the negative reply */
+			if(entity_no == 1)
+				b2bl_delete_entity(entity, tuple, cur_route_ctx.hash_index, 1);
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+int retry_init_bridge(struct sip_msg *msg, b2bl_tuple_t* tuple,
+	b2bl_entity_id_t *entity, struct b2bl_new_entity *new_entity)
+{
+	str *client_id= NULL;
+	str method = {INVITE, INVITE_LEN};
+	b2bl_entity_id_t* client_entity = NULL;
+	client_info_t ci;
+	str *hdrs;
+	struct sip_uri ct_uri;
+
+	b2bl_delete_entity(entity, tuple, tuple->hash_index, 1);
+
+	hdrs = b2b_scenario_hdrs(new_entity);
+
+	memset(&ci, 0, sizeof(client_info_t));
+	ci.method        = method;
+	ci.req_uri       = new_entity->dest_uri;
+	ci.to_uri        = tuple->bridge_entities[0]->to_uri;
+	ci.dst_uri       = new_entity->proxy;
+	ci.from_uri      = tuple->bridge_entities[0]->from_uri;
+	ci.from_dname    = tuple->bridge_entities[0]->from_dname;
+	ci.extra_headers = tuple->extra_headers;
+	ci.client_headers= hdrs;
+	ci.body          = &tuple->b1_sdp;
+	LM_DBG("XXX body=%.*s\n", tuple->b1_sdp.len, tuple->b1_sdp.s);
+	ci.send_sock     = msg ? (msg->force_send_socket?
+		msg->force_send_socket:msg->rcv.bind_address):NULL;
+
+	ci.maxfwd = tuple->bridge_entities[0]->init_maxfwd;
+
+	if (new_entity->adv_contact.s) {
+		ci.local_contact = new_entity->adv_contact;
+	} else {
+		if (ci.send_sock) {
+			memset(&ct_uri, 0, sizeof(struct sip_uri));
+			if (contact_user && parse_uri(ci.from_uri.s, ci.from_uri.len, &ct_uri) < 0)
+			{
+				LM_ERR("Not a valid sip uri [%.*s]\n", ci.from_uri.len, ci.from_uri.s);
+				goto error;
+			}
+			get_local_contact(ci.send_sock, &ct_uri.user, &ci.local_contact);
+		} else {
+			ci.local_contact = tuple->local_contact;
+		}
+	}
+
+	b2bl_htable[tuple->hash_index].locked_by = process_no;
+
+	client_id = b2b_api.client_new(&ci, b2b_client_notify, b2b_add_dlginfo,
+			&b2bl_mod_name, tuple->key, get_tracer(tuple));
+
+
+	b2bl_htable[tuple->hash_index].locked_by = -1;
+
+	if(client_id == NULL)
+	{
+		LM_ERR("failed to create new b2b client instance\n");
+		goto error;
+	}
+
+	client_entity = b2bl_create_new_entity(B2B_CLIENT, client_id,
+		&new_entity->dest_uri, 0, &tuple->bridge_entities[0]->from_uri, 0,
+		new_entity->id.s ? &new_entity->id : NULL, hdrs,
+		new_entity->adv_contact.s ? &new_entity->adv_contact : NULL, 0);
+	if(client_entity == NULL)
+	{
+		LM_ERR("failed to create new client entity\n");
+		pkg_free(client_id);
+		goto error;
+	}
+	pkg_free(client_id);
+
+	if (0 != b2bl_add_client(tuple, client_entity))
+		goto error;
+	client_entity->no = 1;
+	tuple->bridge_entities[1] = tuple->clients[0];
+
+	tuple->bridge_entities[0]->peer = tuple->bridge_entities[1];
+	tuple->bridge_entities[1]->peer = tuple->bridge_entities[0];
+
+	pkg_free(new_entities[0]);
+	new_entities[0] = NULL;
+
+	return 0;
+error:
+	pkg_free(new_entities[0]);
+	new_entities[0] = NULL;
+	return -1;
+}
 
 #define SEND_REPLY_TO_PEER_OR_GOTO_DONE				\
 do{								\
@@ -1246,6 +1399,32 @@ do{								\
 	}							\
 	b2bl_htable[cur_route_ctx.hash_index].locked_by = -1;	\
 }while(0)
+
+static int ack_and_term_entity(b2bl_tuple_t *tuple, b2bl_entity_id_t *entity,
+	unsigned int statuscode)
+{
+	b2b_req_data_t req_data;
+
+	if (statuscode >= 200 && statuscode < 300) {
+		memset(&req_data, 0, sizeof(b2b_req_data_t));
+		PREP_REQ_DATA(entity);
+		req_data.method = &str_init("ACK");
+		b2bl_htable[tuple->hash_index].locked_by = process_no;
+		b2b_api.send_request(&req_data);
+		b2bl_htable[tuple->hash_index].locked_by = -1;
+	}
+
+	memset(&req_data, 0, sizeof(b2b_req_data_t));
+	PREP_REQ_DATA(entity);
+	req_data.method = &str_init("BYE");
+	b2bl_htable[tuple->hash_index].locked_by = process_no;
+	b2b_api.send_request(&req_data);
+	b2bl_htable[tuple->hash_index].locked_by = -1;
+
+	entity->disconnected = 1;
+
+	return 0;
+}
 
 int _b2b_handle_reply(struct sip_msg *msg, b2bl_tuple_t *tuple,
 	b2bl_entity_id_t *entity, b2bl_entity_id_t **entity_head)
@@ -1309,10 +1488,6 @@ int _b2b_handle_reply(struct sip_msg *msg, b2bl_tuple_t *tuple,
 			statuscode);
 
 		/* if the scenario state is B2B_BRIDGING_STATE -> we should have a reply for INVITE */
-		/* extract the method from Cseq header */
-
-		if(method_value == METHOD_NOTIFY) goto done1; /* Silently ignore reply on NOTIFY */
-
 		if(method_value != METHOD_INVITE)
 		{
 			LM_ERR("Wrong scenario state [B2B_BRIDGING_STATE] for this"
@@ -1380,6 +1555,16 @@ int _b2b_handle_reply(struct sip_msg *msg, b2bl_tuple_t *tuple,
 		goto done;
 	}
 
+	if (peer->flags & ENTITY_FL_TERM_BYE) {
+		/* if not already terminated in BYE processing */
+		if (!entity->disconnected) {
+			ack_and_term_entity(tuple, entity, statuscode);
+			b2b_mark_todel(tuple);
+		}
+
+		goto done;
+	}
+
 	switch (method_value)
 	{
 	case METHOD_BYE:
@@ -1408,10 +1593,15 @@ int _b2b_handle_reply(struct sip_msg *msg, b2bl_tuple_t *tuple,
 				}
 				else
 				{
-					SEND_REPLY_TO_PEER_OR_GOTO_DONE;
-					LM_DBG("Negative reply [%d] - delete[%p]\n",
-						statuscode, tuple);
-					b2b_mark_todel(tuple);
+					ret = run_init_negreply_cb(msg, tuple, entity);
+					if (ret == -1) {
+						goto error;
+					} else if (ret == 0) {
+						SEND_REPLY_TO_PEER_OR_GOTO_DONE;
+						LM_DBG("Negative reply [%d] - delete[%p]\n",
+							statuscode, tuple);
+						b2b_mark_todel(tuple);
+					}
 				}
 				b2bl_print_tuple(tuple, L_DBG);
 			}
@@ -1480,6 +1670,9 @@ int _b2b_handle_reply(struct sip_msg *msg, b2bl_tuple_t *tuple,
 					b2b_mark_todel(tuple);
 					goto done;
 				}
+
+				/* initial bridging is done */
+				tuple->state = B2B_BRIDGED_STATE;
 
 				entity->state = B2BL_ENT_CONFIRMED;
 				peer->state = B2BL_ENT_CONFIRMED;
@@ -1574,6 +1767,7 @@ int _b2b_handle_reply(struct sip_msg *msg, b2bl_tuple_t *tuple,
 	}
 
 done:
+
 	if (tuple)
 		cur_route_ctx.flags |= B2BL_RT_DO_UPDATE;
 done1:
@@ -1594,6 +1788,7 @@ int b2b_logic_notify_reply(int src, struct sip_msg* msg, str* key, str* body, st
 	b2bl_entity_id_t** entity_head = NULL;
 	int_str avp_val;
 	int locked = 0;
+	int routeid;
 
 	if (parse_headers(msg, HDR_EOH_F, 0) < 0)
 	{
@@ -1636,6 +1831,11 @@ int b2b_logic_notify_reply(int src, struct sip_msg* msg, str* key, str* body, st
 		}
 	}
 
+	if (msg->first_line.u.reply.statuscode >= 200) {
+		entity->flags |= ENTITY_FL_REPLY_RECEIVED;
+		entity->last_rcv_code = msg->first_line.u.reply.statuscode;
+	}
+
 	/* if a disconnected entity -> do nothing */
 	if(entity->disconnected)
 	{
@@ -1672,11 +1872,13 @@ int b2b_logic_notify_reply(int src, struct sip_msg* msg, str* key, str* body, st
 			goto error;
 		}
 
+		routeid = tuple->reply_routeid;
+
 		lock_release(&b2bl_htable[hash_index].lock);
 		locked = 0;
 
 		cur_route_ctx.flags |= B2BL_RT_RPL_CTX;
-		run_top_route(sroutes->request[tuple->reply_routeid], msg);
+		run_top_route(sroutes->request[routeid], msg);
 		cur_route_ctx.flags &= ~B2BL_RT_RPL_CTX;
 
 		pkg_free(cur_route_ctx.entity_key.s);
@@ -1684,14 +1886,21 @@ int b2b_logic_notify_reply(int src, struct sip_msg* msg, str* key, str* body, st
 
 done:
 	if (tuple && cur_route_ctx.flags & B2BL_RT_DO_UPDATE) {
-		if (!locked) {
+		if (b2bl_db_mode != NO_DB && !locked) {
 			lock_get(&b2bl_htable[hash_index].lock);
 			locked = 1;
+
+			tuple = b2bl_search_tuple_safe(hash_index, local_index);
+			if(!tuple) {
+				LM_DBG("B2B logic record not found anymore\n");
+				lock_release(&b2bl_htable[hash_index].lock);
+				return 0;
+			}
 		}
 
 		if(b2bl_db_mode == WRITE_THROUGH)
 			b2bl_db_update(tuple);
-		else
+		else if (b2bl_db_mode == WRITE_BACK)
 			UPDATE_DBFLAG(tuple);
 	}
 	if (locked)
@@ -1789,6 +1998,8 @@ int _b2b_pass_request(struct sip_msg *msg, b2bl_tuple_t *tuple,
 			LM_ERR("Sending request failed [%.*s]\n", peer->key.len, peer->key.s);
 		}
 		b2bl_htable[cur_route_ctx.hash_index].locked_by = -1;
+		if (request_id != B2B_ACK)
+			peer->flags &= ~ENTITY_FL_REPLY_RECEIVED;
 		peer = peer->next;
 	}
 
@@ -1821,6 +2032,7 @@ int b2b_logic_notify_request(int src, struct sip_msg* msg, str* key, str* body, 
 	b2bl_dlg_stat_t stats;
 	b2b_rpl_data_t rpl_data;
 	int locked = 0;
+	int routeid;
 
 	lock_get(&b2bl_htable[hash_index].lock);
 	locked = 1;
@@ -1884,6 +2096,9 @@ int b2b_logic_notify_request(int src, struct sip_msg* msg, str* key, str* body, 
 				LM_DBG("ACK for a negative reply\n");
 				break;
 			case B2B_BYE:
+				if (flags & B2B_NOTIFY_FL_TERM_BYE)
+					break;
+
 				/* BYE already sent to this entity but we got no reply */
 				memset(&rpl_data, 0, sizeof(b2b_rpl_data_t));
 				PREP_RPL_DATA(entity);
@@ -1918,7 +2133,21 @@ int b2b_logic_notify_request(int src, struct sip_msg* msg, str* key, str* body, 
 
 	switch (request_id) {
 	case B2B_BYE:
+		if (flags & B2B_NOTIFY_FL_TERM_BYE) {
+			entity->flags |= ENTITY_FL_TERM_BYE;
+
+			/* if peer has already received a reply, terminate entity here */
+			if (peer && !peer->disconnected &&
+				(peer->flags & ENTITY_FL_REPLY_RECEIVED)) {
+				ack_and_term_entity(tuple, peer, peer->last_rcv_code);
+				b2b_mark_todel(tuple);
+			}
+
+			goto done;
+		}
+
 		entity->disconnected = 1;
+
 		if(cbf && (tuple->cb_mask&B2B_BYE_CB))
 		{
 			memset(&cb_params, 0, sizeof(b2bl_cb_params_t));
@@ -2100,7 +2329,7 @@ int b2b_logic_notify_request(int src, struct sip_msg* msg, str* key, str* body, 
 		}
 		goto send_usual_request;
 	} else {
-		if(tuple->state != B2B_NOTDEF_STATE && peer)
+		if(tuple->state == B2B_BRIDGED_STATE && peer && request_id == B2B_INVITE)
 			peer->sdp_type = body->len ? B2BL_SDP_NORMAL : B2BL_SDP_LATE;
 
 		cur_route_ctx.entity_type = src;
@@ -2117,11 +2346,13 @@ int b2b_logic_notify_request(int src, struct sip_msg* msg, str* key, str* body, 
 			}
 		}
 
+		routeid = tuple->req_routeid;
+
 		lock_release(&b2bl_htable[hash_index].lock);
 		locked = 0;
 
 		cur_route_ctx.flags = B2BL_RT_REQ_CTX;
-		run_top_route(sroutes->request[tuple->req_routeid], msg);
+		run_top_route(sroutes->request[routeid], msg);
 		cur_route_ctx.flags &= ~B2BL_RT_REQ_CTX;
 
 		pkg_free(cur_route_ctx.entity_key.s);
@@ -2138,13 +2369,20 @@ send_usual_request:
 done:
 	if(tuple && cur_route_ctx.flags & B2BL_RT_DO_UPDATE)
 	{
-		if (!locked) {
+		if (b2bl_db_mode != NO_DB && !locked) {
 			lock_get(&b2bl_htable[hash_index].lock);
 			locked = 1;
+
+			tuple = b2bl_search_tuple_safe(hash_index, local_index);
+			if(!tuple) {
+				LM_DBG("B2B logic record not found anymore\n");
+				lock_release(&b2bl_htable[hash_index].lock);
+				return 0;
+			}
 		}
 		if(b2bl_db_mode == WRITE_THROUGH)
 			b2bl_db_update(tuple);
-		else
+		else if (b2bl_db_mode == WRITE_BACK)
 			UPDATE_DBFLAG(tuple);
 	}
 	if (locked)
@@ -2186,9 +2424,13 @@ static struct b2bl_new_entity *get_ent_to_bridge(b2bl_tuple_t *tuple,
 	b2bl_entity_id_t *e;
 	int i;
 
-	if (cur_entity && !str_strcmp(ent_str, const_str("this"))) {
+	if (!str_strcmp(ent_str, const_str("this"))) {
+		if (!cur_entity) {
+			LM_ERR("Current entity not found anymore\n");
+			return NULL;
+		}
 		*old_ent = cur_entity;
-	} else if (cur_entity && !str_strcmp(ent_str, const_str("peer"))) {
+	} else if (!str_strcmp(ent_str, const_str("peer"))) {
 		*old_ent = b2bl_search_entity(tuple, &cur_route_ctx.peer_key,
 			cur_route_ctx.peer_type, &entity_head);
 		if(*old_ent == NULL)
@@ -2288,11 +2530,13 @@ int b2b_scenario_bridge(struct sip_msg *msg, str *br_ent1_str, str *br_ent2_str,
 
 	new_br_ent[0] = get_ent_to_bridge(tuple, entity, br_ent1_str, &e);
 
-
 	if (e)
 		old_entity = e;
-	else if (!new_br_ent[0])
+	else if (!new_br_ent[0]) {
+		LM_ERR("Failed to get entity to bridge: %.*s\n", br_ent1_str->len,
+			br_ent1_str->s);
 		goto done;
+	}
 
 	e = NULL;
 	new_br_ent[1] = get_ent_to_bridge(tuple, entity, br_ent2_str, &e);
@@ -2302,8 +2546,11 @@ int b2b_scenario_bridge(struct sip_msg *msg, str *br_ent1_str, str *br_ent2_str,
 			LM_ERR("At least one new client entity required for bridging\n");
 		else
 			old_entity = e;
-	} else if (!new_br_ent[1])
+	} else if (!new_br_ent[1]) {
+		LM_ERR("Failed to get entity to bridge: %.*s\n", br_ent2_str->len,
+			br_ent2_str->s);
 		goto done;
+	}
 
 	if (params->flags & B2BL_BR_FLAG_NOTIFY && entity)
 		process_bridge_notify(entity, cur_route_ctx.hash_index, NULL);
@@ -3465,6 +3712,15 @@ str* b2b_process_scenario_init(struct sip_msg* msg, b2bl_cback_f cbf,
 	else
 		tuple->lifetime = init_params->init_timeout + get_ticks();
 
+	tuple->b1_sdp.s	= (char*)shm_malloc(body.len);
+	if(tuple->b1_sdp.s == NULL)
+	{
+		LM_ERR("No more memory\n");
+		goto error;
+	}
+	memcpy(tuple->b1_sdp.s, body.s, body.len);
+	tuple->b1_sdp.len = body.len;
+
 	/* save tuple in global variable for accesss from local routes */
 	local_ctx_tuple = tuple;
 
@@ -4044,6 +4300,7 @@ int b2bl_bridge(str* key, str* new_dst, str *new_proxy, str* new_from_dname,
 	client_info_t ci;
 	b2b_req_data_t req_data;
 	b2b_rpl_data_t rpl_data;
+	struct b2bl_new_entity new_ent;
 
 	if(!key || !new_dst)
 	{
@@ -4080,6 +4337,24 @@ int b2bl_bridge(str* key, str* new_dst, str *new_proxy, str* new_from_dname,
 	}
 
 	local_ctx_tuple = tuple;
+
+	if (tuple->state == B2B_INIT_BRIDGING_STATE) {
+		memset(&new_ent, 0, sizeof new_ent);
+		new_ent.dest_uri = *new_dst;
+		new_ent.proxy = *new_proxy;
+		new_ent.from_dname = *new_from_dname;
+
+		if (retry_init_bridge(NULL, tuple, tuple->bridge_entities[1],
+			&new_ent) < 0) {
+			LM_ERR("Failed to retry initial bridge\n");
+			goto error;
+		}
+
+		local_ctx_tuple = NULL;
+		lock_release(&b2bl_htable[hash_index].lock);
+
+		return 0;
+	}
 
 	// FIXME: we may have no server at some point in time
 	if(tuple->servers[0] == NULL)
@@ -4713,6 +4988,13 @@ int b2bl_bridge_msg(struct sip_msg* msg, str* key, int entity_no, str *adv_ct)
 	b2bl_print_tuple(tuple, L_DBG);
 
 	b2b_api.apply_lumps(msg);
+    
+    if (b2b_msg_get_from(msg, &from_uri, &from_dname)< 0 ||
+	b2b_msg_get_to(msg, &to_uri, b2bl_htable[hash_index].flags)< 0)
+	{
+		LM_ERR("Failed to get to or from from the message\n");
+		goto error;
+	}
 
 	if (!adv_ct) {
 		memset(&ct_uri, 0, sizeof(struct sip_uri));
@@ -4729,12 +5011,6 @@ int b2bl_bridge_msg(struct sip_msg* msg, str* key, int entity_no, str *adv_ct)
 	}
 
 	/* create server entity from Invite */
-	if (b2b_msg_get_from(msg, &from_uri, &from_dname)< 0 ||
-	b2b_msg_get_to(msg, &to_uri, b2bl_htable[hash_index].flags)< 0)
-	{
-		LM_ERR("Failed to get to or from from the message\n");
-		goto error;
-	}
 	server_id = b2b_api.server_new(msg, adv_ct ? adv_ct : &local_contact,
 			b2b_server_notify, &b2bl_mod_name, tuple->key, get_tracer(tuple));
 	if(server_id == NULL)
