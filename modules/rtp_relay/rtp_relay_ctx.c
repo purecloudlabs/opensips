@@ -515,7 +515,7 @@ static int rtp_relay_delete(struct rtp_relay_session *info,
 	}
 	ret = sess->relay->binds.delete(info, &sess->server,
 			RTP_RELAY_FLAGS(RTP_RELAY_OFFER, RTP_RELAY_FLAGS_SELF),
-			RTP_RELAY_FLAGS(RTP_RELAY_ANSWER, RTP_RELAY_FLAGS_PEER));
+			/* RTP_RELAY_FLAGS(RTP_RELAY_ANSWER, RTP_RELAY_FLAGS_PEER) */ NULL);
 	if (ret < 0)
 		return -1;
 	rtp_sess_reset_pending(sess);
@@ -873,7 +873,7 @@ static void rtp_relay_sess_failed(struct rtp_relay_ctx *ctx,
 
 	rtp_sess_reset_pending(sess);
 	list_del(&sess->list);
-	if (rtp_relay_sess_last(ctx, NULL)) {
+	if (!list_empty(&ctx->sessions) && rtp_relay_sess_last(ctx, NULL)) {
 		last = list_last_entry(&ctx->sessions, struct rtp_relay_sess, list);
 		if (rtp_sess_success(last))
 			rtp_relay_sess_merge(ctx, last);
