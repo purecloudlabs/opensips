@@ -274,7 +274,7 @@ static cmd_export_t cmds[]={
 
 	{"ruri_del_param", (cmd_function)ruri_del_param, {
 		{CMD_PARAM_STR, 0, 0}, {0, 0, 0}},
-		REQUEST_ROUTE},
+		REQUEST_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
 
 	{"ruri_tel2sip", (cmd_function)ruri_tel2sip, {{0, 0, 0}},
 		REQUEST_ROUTE},
