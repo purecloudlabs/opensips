@@ -90,6 +90,7 @@ static int w_isdsturiset(struct sip_msg *msg);
 static int w_force_rport(struct sip_msg *msg);
 static int w_add_local_rport(struct sip_msg *msg);
 static int w_force_tcp_alias(struct sip_msg *msg, int *port);
+static int w_set_via_maddr_param(struct sip_msg *msg, str *maddr);
 static int w_set_adv_address(struct sip_msg *msg, str *adv_addr);
 static int w_set_adv_port(struct sip_msg *msg, str *adv_port);
 static int w_f_send_sock(struct sip_msg *msg, struct socket_info *si);
@@ -231,6 +232,9 @@ static cmd_export_t core_cmds[]={
 		ALL_ROUTES},
 	{"force_tcp_alias", (cmd_function)w_force_tcp_alias, {
 		{CMD_PARAM_INT|CMD_PARAM_OPT, 0, 0}, {0,0,0}},
+		ALL_ROUTES},
+	{"set_via_maddr_param", (cmd_function)w_set_via_maddr_param, {
+		{CMD_PARAM_STR, 0, 0}, {0,0,0}},
 		ALL_ROUTES},
 	{"set_advertised_address", (cmd_function)w_set_adv_address, {
 		{CMD_PARAM_STR, 0, 0}, {0,0,0}},
@@ -910,6 +914,23 @@ static int w_force_tcp_alias(struct sip_msg *msg, int *port)
 	}
 
 	return 1;	
+}
+
+static int w_set_via_maddr_param(struct sip_msg *msg, str *maddr) {
+	struct via_param *maddr_param = msg->via1->maddr;
+
+	size_t buff_size = MADDR_LEN + maddr->len + 1;
+	maddr_param->value.s = (char*)pkg_malloc(buff_size);
+	maddr_param->value.len = buff_size - 1;
+
+	if(maddr_param->value.s!=0) {
+		memcpy(maddr_param->value.s, MADDR, MADDR_LEN);
+		memcpy(maddr_param->value.s+MADDR_LEN, maddr, maddr->len);
+
+		maddr_param->value.s[maddr_param->value.len]='\0';
+	} else {
+		LM_ERR("maddr_param building failed\n");
+	}
 }
 
 static int w_set_adv_address(struct sip_msg *msg, str *adv_addr)

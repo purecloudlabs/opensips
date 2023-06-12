@@ -101,6 +101,9 @@
 #define RECEIVED        ";received="
 #define RECEIVED_LEN (sizeof(RECEIVED) - 1)
 
+#define MADDR        ";maddr="
+#define MADDR_LEN (sizeof(MADDR) - 1)
+
 #define TRANSPORT_PARAM ";transport="
 #define TRANSPORT_PARAM_LEN (sizeof(TRANSPORT_PARAM) - 1)
 
