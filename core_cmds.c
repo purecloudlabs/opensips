@@ -920,7 +920,7 @@ static int w_set_via_maddr_param(struct sip_msg *msg, str *maddr) {
 	struct via_param *maddr_param = msg->via1->maddr;
 
 	size_t buff_size = MADDR_LEN + maddr->len + 1;
-	maddr_param->value.s = (char*)pkg_malloc(buff_size);
+	maddr_param->value.s = (char*)pkg_malloc(sizeof(char)*buff_size);
 	maddr_param->value.len = buff_size - 1;
 
 	if(maddr_param->value.s!=0) {
