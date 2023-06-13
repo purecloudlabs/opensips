@@ -97,6 +97,7 @@ static int add_body_part_f(struct sip_msg *msg, str *body, str *mime,
                            str *extra_hdrs);
 static int is_audio_on_hold_f(struct sip_msg *msg);
 static int w_sip_validate(struct sip_msg *msg, void *flags, pv_spec_t* err_txt);
+static int set_via_maddr_param(struct sip_msg *msg, str *maddr);
 
 static int fixup_parse_hname(void** param);
 
@@ -111,6 +112,7 @@ static int list_hdr_add_option(struct sip_msg *msg, void *hdr, str *option);
 static int list_hdr_remove_option(struct sip_msg *msg, void *hdr, str *option);
 
 static int change_reply_status_f(struct sip_msg* msg, int* code, str* reason);
+
 
 static int mod_init(void);
 
@@ -282,6 +284,9 @@ static cmd_export_t cmds[]={
 	{"is_uri_user_e164", (cmd_function)is_uri_user_e164, {
 		{CMD_PARAM_STR, 0, 0}, {0, 0, 0}},
 		REQUEST_ROUTE|FAILURE_ROUTE|LOCAL_ROUTE},
+	{"set_via_maddr_param", (cmd_function)set_via_maddr_param, {
+		{CMD_PARAM_STR, 0, 0}, {0,0,0}},
+		ALL_ROUTES},
 
 	{0,0,{{0,0,0}},0}
 };
@@ -524,6 +529,69 @@ static int append_to_reply_f(struct sip_msg* msg, str* key)
 
 	return 1;
 }
+
+static int set_via_maddr_param(struct sip_msg *msg, str *maddr) {
+	char *buf, *tmp, msg_buf;
+	int len;
+	size_t buff_size;
+	size_t size;
+	struct lump *anchor, *via_insert_param;
+	// char *maddr_name = "maddr";
+	// struct via_body *maddr_param;
+
+	if (msg->via1 == NULL) {
+		LM_CRIT("via1 does not exist");
+		return 1;
+		// msg->via1->maddr = pkg_malloc(sizeof(struct via_param));
+		// memset(msg->via1->maddr, 0, sizeof(struct via_param));
+	}
+
+	buff_size = MADDR_LEN + maddr->len + 1;
+
+	buf = pkg_malloc(sizeof(char) * buff_size);
+	if (buf == NULL){
+		ser_error=E_OUT_OF_MEM;
+		LM_ERR("out of pkg memory\n");
+		return 0;
+	}
+	memcpy(buf, MADDR, MADDR_LEN);
+	len = MADDR_LEN + maddr->len;
+
+	memcpy(buf + MADDR_LEN, maddr->s, maddr->len);
+	buf[len] = 0; /*null terminate it */
+
+	size = msg->via1->params.s-msg->via1->hdr.s - 1;
+	msg_buf = msg->buf;
+	via_insert_param=anchor_lump(msg, msg->via1->hdr.s - msg_buf + size, HDR_VIA_T);
+
+	if (insert_new_lump_after(via_insert_param, buf, len, HDR_VIA_T) == 0) {
+		if (buf) pkg_free(buf);
+	} 
+
+	// msg->via1->maddr->value.s = buf;
+	// msg->via1->maddr->value.len = len;
+
+	// msg->via1->maddr->name.s = maddr_name;
+	// msg->via1->maddr->name.len = strlen(maddr_name);
+
+	return 1;
+	///////////////
+	// struct via_param *maddr_param = msg->via1->maddr;
+
+	// size_t buff_size = MADDR_LEN + maddr->len + 1;
+	// maddr_param->value.s = (char*)pkg_malloc(sizeof(char)*buff_size);
+	// maddr_param->value.len = buff_size - 1;
+
+	// if(maddr_param->value.s!=0) {
+	// 	memcpy(maddr_param->value.s, MADDR, MADDR_LEN);
+	// 	memcpy(maddr_param->value.s+MADDR_LEN, maddr, maddr->len);
+
+	// 	maddr_param->value.s[maddr_param->value.len]='\0';
+	// } else {
+	// 	LM_ERR("maddr_param building failed\n");
+	// }
+}
+
 
 
 /* add str1 to end of header or str1.r-uri.str2 */
