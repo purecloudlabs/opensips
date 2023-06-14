@@ -958,7 +958,7 @@ static int w_set_maddr_via_param(struct sip_msg *msg, str *maddr)
 {
 	LM_DBG("setting via maddr param '%.*s'\n", maddr->len, maddr->s);
 
-	/* duplicate the advertised port into private memory */
+	/* duplicate the maddr param into private memory */
 	if (maddr->len > msg->set_maddr_via_param.len) {
 		msg->set_maddr_via_param.s = pkg_realloc(msg->set_maddr_via_param.s, maddr->len);
 		if (!msg->set_maddr_via_param.s) {

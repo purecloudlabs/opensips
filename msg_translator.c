@@ -304,7 +304,7 @@ char* maddr_builder(struct sip_msg *msg, unsigned int *maddr_len)
 	tmp_len=msg->set_maddr_via_param.len;
 	len=MADDR_LEN+tmp_len;
 
-	memcpy(buf+RECEIVED_LEN, tmp, tmp_len);
+	memcpy(buf+MADDR_LEN, tmp, tmp_len);
 	buf[len]=0; /*null terminate it */
 
 	*maddr_len = len;
