@@ -288,6 +288,31 @@ char* rport_builder(struct sip_msg *msg, unsigned int *rport_len)
 
 
 
+char* maddr_builder(struct sip_msg *msg, unsigned int *maddr_len)
+{
+	char *buf, *tmp;
+	int  len, tmp_len;
+
+	buf=pkg_malloc(sizeof(char)*MAX_RECEIVED_SIZE);
+	if (buf==0){
+		ser_error=E_OUT_OF_MEM;
+		LM_ERR("out of pkg memory\n");
+		return 0;
+	}
+	memcpy(buf, MADDR, MADDR_LEN);
+	tmp = msg->set_maddr_via_param.s;
+	tmp_len=msg->set_maddr_via_param.len;
+	len=MADDR_LEN+tmp_len;
+
+	memcpy(buf+RECEIVED_LEN, tmp, tmp_len);
+	buf[len]=0; /*null terminate it */
+
+	*maddr_len = len;
+	return buf;
+}
+
+
+
 char* id_builder(struct sip_msg* msg, unsigned int *id_len)
 {
 	char* buf, *p;
@@ -2104,8 +2129,8 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 								struct socket_info* send_sock, int proto,
 								str *via_params, unsigned int flags)
 {
-	unsigned int len, new_len, received_len, rport_len, uri_len, via_len, body_delta;
-	char *line_buf, *received_buf, *rport_buf, *new_buf, *buf, *id_buf;
+	unsigned int len, new_len, received_len, rport_len, maddr_len, uri_len, via_len, body_delta;
+	char *line_buf, *received_buf, *rport_buf, *maddr_buf, *new_buf, *buf, *id_buf;
 	unsigned int offset, s_offset, size, id_len;
 	struct lump *anchor, *via_insert_param;
 	str branch, extra_params, body;
@@ -2121,9 +2146,11 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 	len=msg->len;
 	received_len=0;
 	rport_len=0;
+	maddr_len=0;
 	new_buf=0;
 	received_buf=0;
 	rport_buf=0;
+	maddr_buf=0;
 	line_buf=0;
 	int via1_deleted = 0;
 
@@ -2240,6 +2267,13 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 		}
 	}
 
+	if (msg->set_maddr_via_param.s != NULL && !via1_deleted){
+		if ((maddr_buf=maddr_builder(msg, &maddr_len))==0){
+			LM_ERR("maddr_builder failed\n");
+			goto error01; /* free everything */
+		}
+	}
+
 	/* add via header to the list */
 	/* try to add it before msg. 1st via */
 	/* add first via, as an anchor for second via*/
@@ -2289,6 +2323,22 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 		if (insert_new_lump_after(via_insert_param, rport_buf, rport_len,
 									HDR_VIA_T) ==0 )
 			goto error03; /* free rport_buf */
+	}
+
+	if (maddr_len){
+		if (msg->via1->maddr){ /* maddr already present */
+			via_insert_param=del_lump(msg,
+								msg->via1->maddr->start-buf-1, /*';'*/
+								msg->via1->maddr->size+1 /* ; */, HDR_VIA_T);
+		}else if (via_insert_param==0){ /*no maddr present */
+			/* no rport, add it */
+			via_insert_param=anchor_lump(msg,
+									msg->via1->hdr.s-buf+size, HDR_VIA_T);
+		}
+		if (via_insert_param==0) goto error04; /* free maddr_buf */
+		if (insert_new_lump_after(via_insert_param, maddr_buf, maddr_len,
+									HDR_VIA_T) ==0 )
+			goto error04; /* free rport_buf */
 	}
 
 build_msg:
@@ -2349,6 +2399,8 @@ error02:
 	if (received_buf) pkg_free(received_buf);
 error03:
 	if (rport_buf) pkg_free(rport_buf);
+error04:
+	if (maddr_buf) pkg_free(maddr_buf);
 error00:
 	if (extra_params.s) pkg_free(extra_params.s);
 error:

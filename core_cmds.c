@@ -92,6 +92,7 @@ static int w_add_local_rport(struct sip_msg *msg);
 static int w_force_tcp_alias(struct sip_msg *msg, int *port);
 static int w_set_adv_address(struct sip_msg *msg, str *adv_addr);
 static int w_set_adv_port(struct sip_msg *msg, str *adv_port);
+static int w_set_maddr_via_param(struct sip_msg *msg, str *maddr);
 static int w_f_send_sock(struct sip_msg *msg, struct socket_info *si);
 static int w_f_close_tcp_sock(struct sip_msg *msg, str *host, int *port);
 static int w_serialize_branches(struct sip_msg *msg, int *clear_prev,
@@ -236,6 +237,9 @@ static cmd_export_t core_cmds[]={
 		{CMD_PARAM_STR, 0, 0}, {0,0,0}},
 		ALL_ROUTES},
 	{"set_advertised_port", (cmd_function)w_set_adv_port, {
+		{CMD_PARAM_STR, 0, 0}, {0,0,0}},
+		ALL_ROUTES},
+	{"set_maddr_via_param", (cmd_function)w_set_maddr_via_param, {
 		{CMD_PARAM_STR, 0, 0}, {0,0,0}},
 		ALL_ROUTES},
 	{"force_send_socket", (cmd_function)w_f_send_sock, {
@@ -946,6 +950,24 @@ static int w_set_adv_port(struct sip_msg *msg, str *adv_port)
 	}
 	memcpy(msg->set_global_port.s, adv_port->s, adv_port->len);
 	msg->set_global_port.len = adv_port->len;
+
+	return 1;
+}
+
+static int w_set_maddr_via_param(struct sip_msg *msg, str *maddr)
+{
+	LM_DBG("setting via maddr param '%.*s'\n", maddr->len, maddr->s);
+
+	/* duplicate the advertised port into private memory */
+	if (maddr->len > msg->set_maddr_via_param.len) {
+		msg->set_maddr_via_param.s = pkg_realloc(msg->set_maddr_via_param.s, maddr->len);
+		if (!msg->set_maddr_via_param.s) {
+			LM_ERR("out of pkg mem\n");
+			return E_OUT_OF_MEM;
+		}
+	}
+	memcpy(msg->set_maddr_via_param.s, maddr->s, maddr->len);
+	msg->set_maddr_via_param.len = maddr->len;
 
 	return 1;
 }

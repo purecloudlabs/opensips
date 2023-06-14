@@ -830,6 +830,8 @@ void free_sip_msg(struct sip_msg* msg)
 		pkg_free(msg->set_global_address.s);
 	if (msg->set_global_port.s)
 		pkg_free(msg->set_global_port.s);
+	if (msg->set_maddr_via_param.s)
+		pkg_free(msg->set_maddr_via_param.s);
 	if (msg->dst_uri.s)
 		pkg_free(msg->dst_uri.s);
 	if (msg->path_vec.s)
