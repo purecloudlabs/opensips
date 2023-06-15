@@ -2199,6 +2199,43 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 		}
 	}
 
+	if (msg->set_maddr_via_param.s != NULL) {
+		if (msg->set_maddr_via_param.s != NULL && !via1_deleted){
+			if ((maddr_buf=maddr_builder(msg, &maddr_len))==0){
+				LM_ERR("maddr_builder failed\n");
+				goto error01; /* free everything */
+			}
+		}
+		
+		id_buf=extra_params.s;
+		id_len=extra_params.len;
+		if (via_params && !extra_params.len) {
+			/* if no other parameters were added yet, consider via_params */
+			extra_params.len = via_params->len;
+			/* otherwise, the via_params were already copied in the id block */
+		}
+		extra_params.len += maddr_len; /* last char in RPORT define is '='
+										which is not added, but the new buffer
+										will be null terminated */
+		extra_params.s = (char*)pkg_malloc(extra_params.len+1);
+		if(extra_params.s==0) {
+			LM_ERR("extra params building failed\n");
+			if (id_buf) pkg_free(id_buf);
+			goto error;
+		}
+
+		if(id_buf!=0) {
+			memcpy(extra_params.s, id_buf, id_len);
+			pkg_free(id_buf);
+		} else if (via_params) {
+			memcpy(extra_params.s, via_params->s, via_params->len);
+			id_len = via_params->len;
+		}
+		memcpy(extra_params.s+id_len, maddr_buf, maddr_len);
+		extra_params.s[extra_params.len]='\0';
+		LM_DBG("extra param added: <%.*s>\n",extra_params.len, extra_params.s);
+	}
+
 	/* check whether to add rport parameter to local via */
 	if(msg->msg_flags&FL_FORCE_LOCAL_RPORT) {
 		id_buf=extra_params.s;
@@ -2267,12 +2304,12 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 		}
 	}
 
-	if (msg->set_maddr_via_param.s != NULL && !via1_deleted){
-		if ((maddr_buf=maddr_builder(msg, &maddr_len))==0){
-			LM_ERR("maddr_builder failed\n");
-			goto error01; /* free everything */
-		}
-	}
+	// if (msg->set_maddr_via_param.s != NULL && !via1_deleted){
+	// 	if ((maddr_buf=maddr_builder(msg, &maddr_len))==0){
+	// 		LM_ERR("maddr_builder failed\n");
+	// 		goto error01; /* free everything */
+	// 	}
+	// }
 
 	/* add via header to the list */
 	/* try to add it before msg. 1st via */
@@ -2325,21 +2362,21 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 			goto error03; /* free rport_buf */
 	}
 
-	if (maddr_len){
-		if (msg->via1->maddr){ /* maddr already present */
-			via_insert_param=del_lump(msg,
-								msg->via1->maddr->start-buf-1, /*';'*/
-								msg->via1->maddr->size+1 /* ; */, HDR_VIA_T);
-		}else if (via_insert_param==0){ /*no maddr present */
-			/* no rport, add it */
-			via_insert_param=anchor_lump(msg,
-									msg->via1->hdr.s-buf+size, HDR_VIA_T);
-		}
-		if (via_insert_param==0) goto error04; /* free maddr_buf */
-		if (insert_new_lump_after(via_insert_param, maddr_buf, maddr_len,
-									HDR_VIA_T) ==0 )
-			goto error04; /* free rport_buf */
-	}
+	// if (maddr_len){
+	// 	if (msg->via1->maddr){ /* maddr already present */
+	// 		via_insert_param=del_lump(msg,
+	// 							msg->via1->maddr->start-buf-1, /*';'*/
+	// 							msg->via1->maddr->size+1 /* ; */, HDR_VIA_T);
+	// 	}else if (via_insert_param==0){ /*no maddr present */
+	// 		/* no rport, add it */
+	// 		via_insert_param=anchor_lump(msg,
+	// 								msg->via1->hdr.s-buf+size, HDR_VIA_T);
+	// 	}
+	// 	if (via_insert_param==0) goto error04; /* free maddr_buf */
+	// 	if (insert_new_lump_after(via_insert_param, maddr_buf, maddr_len,
+	// 								HDR_VIA_T) ==0 )
+	// 		goto error04; /* free rport_buf */
+	// }
 
 build_msg:
 	/* adjust len to the useful part of the message */
@@ -2399,8 +2436,8 @@ error02:
 	if (received_buf) pkg_free(received_buf);
 error03:
 	if (rport_buf) pkg_free(rport_buf);
-error04:
-	if (maddr_buf) pkg_free(maddr_buf);
+// error04:
+// 	if (maddr_buf) pkg_free(maddr_buf);
 error00:
 	if (extra_params.s) pkg_free(extra_params.s);
 error:
