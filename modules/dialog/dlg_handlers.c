@@ -722,6 +722,8 @@ static inline int update_msg_cseq(struct sip_msg *msg,str *new_cseq,
 	str final_cseq;
 	str pkg_cseq;
 
+	LM_DBG("DTRIHY new_cseq '%.*s' in dialog module\n", new_cseq->len, new_cseq->s);
+
 	if (!msg)
 	{
 		LM_ERR("null pointer provided\n");
@@ -741,18 +743,27 @@ static inline int update_msg_cseq(struct sip_msg *msg,str *new_cseq,
 	}
 	else
 	{
+		LM_DBG("DTRIHY before on line 746 ''%.*s''", new_cseq->len, new_cseq->s);
 		if( str2int(new_cseq, &loc_cseq) != 0){
 			LM_ERR("could not convert string cseq to number\n");
 			return -1;
 		}
 
+		LM_DBG("DTRIHY after on line 752  new_cseq = '%.*s' loc_cseq = '%d'", new_cseq->len, new_cseq->s, loc_cseq);
+
 		loc_cseq += value;
+
+		LM_DBG("DTRIHY after incrementing loc_cseq = '%d'",loc_cseq);
 		final_cseq.s = int2str(loc_cseq,&final_cseq.len);
+
+		LM_DBG("DTRIHY  final_cseq = '%.*s'", final_cseq.len, final_cseq.s);
 	}
 
 	buf = msg->buf;
 	len = ((struct cseq_body *)msg->cseq->parsed)->number.len;
 	offset = ((struct cseq_body *)msg->cseq->parsed)->number.s - buf;
+
+	LM_DBG("DTRIHY creating buffer for CSEQ of length (%d) with offset (%d)", len, offset);
 
 	if ((tmp = del_lump(msg,offset,len,0)) == 0)
 	{

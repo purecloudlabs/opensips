@@ -366,13 +366,15 @@ int uac_auth( struct sip_msg *msg, int algmask)
 		dlg = NULL;
 
 	if (ttag.s==NULL || dlg==NULL || (dlg->flags&DLG_FLAG_CSEQ_ENFORCE)==0) {
-
+		LM_DBG("Got to line 369 - first IF");
 		/* initial request or no dialog support
 		 * => do the changes over cseq from here */
 		if ( (new_cseq = apply_cseq_op(msg,1)) < 0) {
 			LM_WARN("Failure to increment the CSEQ header - continue \n");
 			goto error;
 		}
+
+		LM_DBG("new CSEQ (%d)\n",new_cseq);
 
 		/* only register the TMCB once per transaction */
 		if (!(msg->msg_flags & FL_USE_UAC_CSEQ || 
@@ -387,7 +389,9 @@ int uac_auth( struct sip_msg *msg, int algmask)
 		/* marking of the call (with or without dialog support) for further
 		 * CSEQ handling must be done only for intial request */
 		if (ttag.s==NULL) {
+			LM_DBG("On line 392 - ttag.s is NULL");
 			if (dlg) {
+				LM_DBG("On Line 394 - dlg is not null");
 				/* dlg->legs[dlg->legs_no[DLG_LEGS_USED]-1].last_gen_cseq = new_cseq; */
 				dlg->flags |= DLG_FLAG_CSEQ_ENFORCE;
 			} else {
@@ -414,12 +418,16 @@ int uac_auth( struct sip_msg *msg, int algmask)
 				pkg_free(param.s);
 			}
 		} else if (dlg) {
+			LM_DBG("On line 421 elif dlg");
 			/* a sequential that has updated the cseq - we need to
 			 * inform dialog as well */
 			dleg = uac_auth_dlg_leg(dlg, &ttag);
+			LM_DBG("Before new CSEQ (%d) last_gen_cseq (%d) last_inv_gen_cseq (%d)\n", new_cseq, dlg->legs[dleg].last_gen_cseq, dlg->legs[dleg].last_inv_gen_cseq);
 			dlg->legs[dleg].last_gen_cseq = new_cseq;
 			if (msg->REQ_METHOD == METHOD_INVITE)
 				dlg->legs[dleg].last_inv_gen_cseq = new_cseq;
+
+			LM_DBG("After new CSEQ (%d) last_gen_cseq (%d) last_inv_gen_cseq (%d)\n", new_cseq, dlg->legs[dleg].last_gen_cseq, dlg->legs[dleg].last_inv_gen_cseq);
 		}
 
 	} else {
@@ -428,15 +436,19 @@ int uac_auth( struct sip_msg *msg, int algmask)
 		 * is already managing the cseq => tell directly the dialog module
 		 * about the cseq increasing */
 		dleg = uac_auth_dlg_leg(dlg, &ttag);
+		LM_DBG("Before new CSEQ (%d) last_gen_cseq (%d) last_inv_gen_cseq (%d)\n", new_cseq, dlg->legs[dleg].last_gen_cseq, dlg->legs[dleg].last_inv_gen_cseq);
 		new_cseq = ++dlg->legs[dleg].last_gen_cseq;
 		if (msg->REQ_METHOD == METHOD_INVITE)
 			dlg->legs[dleg].last_inv_gen_cseq = new_cseq;
+
+		LM_DBG("After new CSEQ (%d) last_gen_cseq (%d) last_inv_gen_cseq (%d)\n", new_cseq, dlg->legs[dleg].last_gen_cseq, dlg->legs[dleg].last_inv_gen_cseq);
 
 		/* as we expect to have the request already altered (by the dialog 
 		 * module) with a new cseq, to invalidate that change, we do a trick
 		 * by adding a new set of lumps (del+add) to cover the old one
 		 * (as start+len), so let's change the whole cseq hdr - anyhow
 		 * this is a per-branch change, so it will be discarded afterwards */
+		LM_DBG("On line 451 force_master_cseq_change");
 		if ( (force_master_cseq_change( msg, new_cseq)) < 0) {
 			LM_ERR("failed to forced new in-dialog cseq\n");
 			goto error;
