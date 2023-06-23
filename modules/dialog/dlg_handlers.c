@@ -722,8 +722,6 @@ static inline int update_msg_cseq(struct sip_msg *msg,str *new_cseq,
 	str final_cseq;
 	str pkg_cseq;
 
-	LM_DBG("DTRIHY new_cseq '%.*s' in dialog module\n", new_cseq->len, new_cseq->s);
-
 	if (!msg)
 	{
 		LM_ERR("null pointer provided\n");
