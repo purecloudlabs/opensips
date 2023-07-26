@@ -1080,8 +1080,13 @@ void bin_rcv_cl_extra_packets(bin_packet_t *packet, int packet_type,
 			handle_remove_node(packet, cl);
 		else if (packet_type == CLUSTERER_GENERIC_MSG)
 			handle_cl_gen_msg(packet, cluster_id, source_id);
-		else if (packet_type == CLUSTERER_MI_CMD)
+		else if (packet_type == CLUSTERER_MI_CMD) {
+			/* we don't need to hold the lock while running an MI cmd, and in
+			 * case of clusterer's own cmds, it might even cause a deadlock */
+			lock_stop_read(cl_list_lock);
 			handle_cl_mi_msg(packet);
+			return;
+		}
 		else if (packet_type == CLUSTERER_SHTAG_ACTIVE)
 			handle_shtag_active(packet, cluster_id);
 		else if (packet_type == CLUSTERER_SYNC_REQ)
@@ -1717,6 +1722,9 @@ int preserve_reg_caps(cluster_info_t *new_info)
 					LM_ERR("Failed to duplicate capabilities info\n");
 					return -1;
 				}
+
+				update_shtags_sync_status_cap(cl->cluster_id,
+					new_cl->capabilities);
 			}
 
 	return 0;
