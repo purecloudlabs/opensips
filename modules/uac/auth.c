@@ -416,10 +416,16 @@ int uac_auth( struct sip_msg *msg, int algmask)
 		} else if (dlg) {
 			/* a sequential that has updated the cseq - we need to
 			 * inform dialog as well */
+			dlg->flags |= DLG_FLAG_CSEQ_ENFORCE;
 			dleg = uac_auth_dlg_leg(dlg, &ttag);
 			dlg->legs[dleg].last_gen_cseq = new_cseq;
 			if (msg->REQ_METHOD == METHOD_INVITE)
 				dlg->legs[dleg].last_inv_gen_cseq = new_cseq;
+			if ((force_master_cseq_change(msg, new_cseq)) < 0) {
+				LM_ERR("failed to forced new in-dialog cseq\n");
+				goto error;
+			}
+
 		}
 
 	} else {
