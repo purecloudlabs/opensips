@@ -3,7 +3,7 @@
 set -e
 
 PKGS=""
-for pkg in `grep -A 35 packages: .travis.yml  | grep -e '^ *[-]' | awk '{print $2}'`
+for pkg in `cat "$(dirname $0)/apt_requirements.txt"`
 do
   if [ "${BUILD_OS}" = ubuntu-22.04 -a "${pkg}" = python-dev ]
   then
@@ -20,6 +20,8 @@ then
 fi
 
 sudo apt-get update -y
+sudo apt-get -y remove libmemcached11 libpq5
+sudo apt-get -y autoremove
 sudo apt-get -y --allow-downgrades install ${PKGS}
 
 if [ ! -z "${POST_INSTALL_CMD}" ]
