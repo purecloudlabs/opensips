@@ -183,9 +183,10 @@ Chapter 1. Admin Guide
    Starting with version 2.1, the dispatcher module keeps its
    destination sets into different partitions. Each partition is
    described by its own "db_url", "table_name", "dst_avp",
-   "grp_avp", "cnt_avp", "sock_avp", "attr_avp" and "blacklists"
-   set of attributes. Setting any of these module parameters will
-   only alter the "default" partition's properties.
+   "grp_avp", "cnt_avp", "sock_avp", "attr_avp", "blacklists",
+   "ping_from", "ping_method" and "persistent_state" set of
+   attributes. Setting any of these module parameters will only
+   alter the "default" partition's properties.
 
    In order to create a new partition, the partition parameter can
    be used. If none of the 8 partition specific parameters are
@@ -348,6 +349,9 @@ modparam("dispatcher", "setid_pvar", "$var(setid)")
    probe the failed gateways. This method is only available, if
    compiled with the probing of failed gateways enabled.
 
+   Use the 'partition' parameter if you want to define the ping
+   method other partitions.
+
    Default value is “OPTIONS”.
 
    Example 1.8. Set the “ds_ping_method” parameter
@@ -361,6 +365,9 @@ modparam("dispatcher", "ds_ping_method", "INFO")
    request, sent to the failed gateways. This method is only
    available, if compiled with the probing of failed gateways
    enabled.
+
+   Use the 'partition' parameter if you want to define the "From:"
+   ping header of other partitions.
 
    Default value is “sip:dispatcher@localhost”.
 
@@ -583,7 +590,10 @@ modparam("dispatcher", "pvar_algo_pattern", "$stat(load_%u)")
 1.3.22. persistent_state (int)
 
    Specifies whether the state column should be loaded at startup
-   and flushed during runtime or not.
+   and flushed during runtime or not for the "default" partition.
+
+   Use the 'partition' parameter if you want to define the
+   persistent state of other partitions.
 
    Default value is “1” (enabled).
 
@@ -1215,10 +1225,15 @@ opensips-cli -x mi ds_list
 
    Parameters:
      * partition (optional) - name of the partition to be
-       reloaded.
+       reloaded. default partition is "default".
+     * inherit_state (optional) : whether inherit old state of the
+       destination , default is y.
+          + “n”: no inherit state
+          + “y”: inherit state
 
    MI FIFO Command Format:
 opensips-cli -x mi ds_reload
+opensips-cli -x mi ds_reload inherit_state=n
 
 1.5.4.  ds_push_script_attrs
 
@@ -1490,12 +1505,12 @@ Chapter 3. Contributors
    Table 3.1. Top contributors by DevScore^(1), authored
    commits^(2) and lines added/removed^(3)
      Name DevScore Commits Lines ++ Lines --
-   1. Bogdan-Andrei Iancu (@bogdan-iancu) 164 104 3289 1990
+   1. Bogdan-Andrei Iancu (@bogdan-iancu) 167 106 3320 2022
    2. Liviu Chircu (@liviuchircu) 106 68 1664 1429
    3. Daniel-Constantin Mierla (@miconda) 81 39 3372 844
    4. Andrei Datcu (@andrei-datcu) 47 15 2153 846
-   5. Ionut Ionita (@ionutrazvanionita) 43 17 1145 969
-   6. Razvan Crainea (@razvancrainea) 41 33 526 154
+   5. Razvan Crainea (@razvancrainea) 44 36 601 175
+   6. Ionut Ionita (@ionutrazvanionita) 43 17 1145 969
    7. Ovidiu Sas (@ovidiusas) 31 17 705 434
    8. Vlad Patrascu (@rvlad-patrascu) 19 11 378 236
    9. Vlad Paiu (@vladpaiu) 16 9 673 33
@@ -1503,13 +1518,14 @@ Chapter 3. Contributors
 
    All remaining contributors: Carsten Bock, Ionel Cerghit
    (@ionel-cerghit), Elena-Ramona Modroiu, John Burke
-   (@john08burke), Klaus Darilion, Anca Vamanu, Jarrod Baumann
-   (@jarrodb), Walter Doekes (@wdoekes), Nick Altmann (@nikbyte),
-   Jan Janak (@janakj), Andrei Pelinescu-Onciul, Peter Lemenkov
-   (@lemenkov), Stanislaw Pitucha, Federico Cabiddu, Konstantin
-   Bokarius, Andreas Granig, John Riordan, Aron Podrigal (@ar45),
-   Julián Moreno Patiño, Kevin McAllister, Roman Sevko, UnixDev,
-   David Sanders, Edson Gellert Schubert.
+   (@john08burke), Klaus Darilion, Maksym Sobolyev (@sobomax),
+   Anca Vamanu, Jarrod Baumann (@jarrodb), wangdd, Walter Doekes
+   (@wdoekes), Nick Altmann (@nikbyte), Jan Janak (@janakj),
+   Andrei Pelinescu-Onciul, Peter Lemenkov (@lemenkov), Stanislaw
+   Pitucha, Federico Cabiddu, Konstantin Bokarius, Andreas Granig,
+   John Riordan, Aron Podrigal (@ar45), Julián Moreno Patiño,
+   Kevin McAllister, Roman Sevko, UnixDev, David Sanders, Edson
+   Gellert Schubert.
 
    (1) DevScore = author_commits + author_lines_added /
    (project_lines_added / project_commits) + author_lines_deleted
@@ -1531,18 +1547,19 @@ Chapter 3. Contributors
 
    Table 3.2. Most recently active contributors^(1) to this module
                       Name                   Commit Activity
-   1.  Bogdan-Andrei Iancu (@bogdan-iancu) Oct 2005 - Oct 2022
-   2.  Razvan Crainea (@razvancrainea)     May 2011 - Aug 2022
-   3.  Liviu Chircu (@liviuchircu)         Aug 2012 - Aug 2022
-   4.  Vlad Patrascu (@rvlad-patrascu)     May 2017 - Jul 2022
-   5.  John Burke (@john08burke)           Feb 2021 - Jan 2022
-   6.  Vlad Paiu (@vladpaiu)               Mar 2012 - Apr 2020
-   7.  Peter Lemenkov (@lemenkov)          Jun 2018 - Feb 2020
-   8.  Roman Sevko                         Oct 2019 - Oct 2019
-   9.  Nick Altmann (@nikbyte)             Mar 2012 - Mar 2018
-   10. Ionel Cerghit (@ionel-cerghit)      Jul 2015 - Jun 2016
+   1.  Razvan Crainea (@razvancrainea)     May 2011 - Jul 2023
+   2.  Bogdan-Andrei Iancu (@bogdan-iancu) Oct 2005 - May 2023
+   3.  wangdd                              Apr 2023 - May 2023
+   4.  Maksym Sobolyev (@sobomax)          Feb 2023 - Feb 2023
+   5.  Liviu Chircu (@liviuchircu)         Aug 2012 - Aug 2022
+   6.  Vlad Patrascu (@rvlad-patrascu)     May 2017 - Jul 2022
+   7.  John Burke (@john08burke)           Feb 2021 - Jan 2022
+   8.  Vlad Paiu (@vladpaiu)               Mar 2012 - Apr 2020
+   9.  Peter Lemenkov (@lemenkov)          Jun 2018 - Feb 2020
+   10. Roman Sevko                         Oct 2019 - Oct 2019
 
-   All remaining contributors: Ionut Ionita (@ionutrazvanionita),
+   All remaining contributors: Nick Altmann (@nikbyte), Ionel
+   Cerghit (@ionel-cerghit), Ionut Ionita (@ionutrazvanionita),
    Julián Moreno Patiño, Jarrod Baumann (@jarrodb), Ovidiu Sas
    (@ovidiusas), David Sanders, Aron Podrigal (@ar45), Andrei
    Datcu (@andrei-datcu), Walter Doekes (@wdoekes), Stanislaw
@@ -1560,11 +1577,11 @@ Chapter 4. Documentation
 
 4.1. Contributors
 
-   Last edited by: Razvan Crainea (@razvancrainea), Liviu Chircu
-   (@liviuchircu), Vlad Patrascu (@rvlad-patrascu), Bogdan-Andrei
-   Iancu (@bogdan-iancu), John Burke (@john08burke), Vlad Paiu
-   (@vladpaiu), Roman Sevko, Peter Lemenkov (@lemenkov), Nick
-   Altmann (@nikbyte), Ionel Cerghit (@ionel-cerghit), Jarrod
+   Last edited by: Razvan Crainea (@razvancrainea), wangdd, Liviu
+   Chircu (@liviuchircu), Vlad Patrascu (@rvlad-patrascu),
+   Bogdan-Andrei Iancu (@bogdan-iancu), John Burke (@john08burke),
+   Vlad Paiu (@vladpaiu), Roman Sevko, Peter Lemenkov (@lemenkov),
+   Nick Altmann (@nikbyte), Ionel Cerghit (@ionel-cerghit), Jarrod
    Baumann (@jarrodb), Ovidiu Sas (@ovidiusas), Ionut Ionita
    (@ionutrazvanionita), Andrei Datcu (@andrei-datcu), Walter
    Doekes (@wdoekes), Stanislaw Pitucha, Anca Vamanu, Klaus

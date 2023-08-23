@@ -191,7 +191,7 @@ cdb_ctdict2info(const cdb_dict_t *ct_fields, str *contact)
 				break;
 			case 'f':
 				ci.cflags = flag_list_to_bitmask(str2const(&pair->val.val.st),
-				                                 FLAG_TYPE_BRANCH, FLAG_DELIM);
+				                                 FLAG_TYPE_BRANCH, FLAG_DELIM, 0);
 				break;
 			case 'o':
 				*contact = pair->val.val.st;
@@ -328,7 +328,7 @@ static inline ucontact_info_t* dbrow2info(db_val_t *vals, str *contact)
 		flags.len = strlen(flags.s);
 		LM_DBG("flag str: '%.*s'\n", flags.len, flags.s);
 
-		ci.cflags = flag_list_to_bitmask(&flags, FLAG_TYPE_BRANCH, FLAG_DELIM);
+		ci.cflags = flag_list_to_bitmask(&flags, FLAG_TYPE_BRANCH, FLAG_DELIM, 0);
 
 		LM_DBG("set flags: %d\n", ci.cflags);
 	}
@@ -1176,7 +1176,7 @@ int mem_timer_udomain(udomain_t* _d)
 			if (ptr->no_clear_ref <= 0 && ptr->contacts == NULL)
 			{
 				if (exists_ulcb_type(UL_AOR_EXPIRE))
-					run_ul_callbacks(UL_AOR_EXPIRE, ptr);
+					run_ul_callbacks(UL_AOR_EXPIRE, ptr, NULL);
 
 				if (location_cluster) {
 					if (cluster_mode == CM_FEDERATION_CACHEDB &&
@@ -1379,7 +1379,7 @@ int insert_urecord(udomain_t* _d, str* _aor, struct urecord** _r,
 	}
 
 	if (exists_ulcb_type(UL_AOR_INSERT))
-		run_ul_callbacks(UL_AOR_INSERT, *_r);
+		run_ul_callbacks(UL_AOR_INSERT, *_r, NULL);
 
 	return 0;
 }

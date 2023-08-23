@@ -255,28 +255,45 @@ static int set_dh_params_db(WOLFSSL_CTX * ctx, str *blob)
 	return 0;
 }
 
-static int set_ec_params(WOLFSSL_CTX * ctx, const char* curve_name)
+static int set_ec_params(WOLFSSL_CTX * ctx, enum tls_method method,
+	int is_server, char *curve_name)
 {
 	int curve = 0;
-	if (curve_name) {
-		curve = wolfSSL_OBJ_txt2nid(curve_name);
-	}
-	if (curve > 0) {
-		WOLFSSL_EC_KEY *ecdh = wolfSSL_EC_KEY_new_by_curve_name(curve);
-		if (! ecdh) {
-			LM_ERR("unable to create EC curve\n");
+
+	if (is_server) {
+		if (curve_name)
+			curve = wolfSSL_OBJ_txt2nid(curve_name);
+		if (curve > 0) {
+			WOLFSSL_EC_KEY *ecdh = wolfSSL_EC_KEY_new_by_curve_name(curve);
+			if (!ecdh) {
+				LM_ERR("unable to create EC curve\n");
+				return -1;
+			}
+			if (1 != wolfSSL_SSL_CTX_set_tmp_ecdh (ctx, ecdh)) {
+				LM_ERR("unable to set tmp_ecdh\n");
+				return -1;
+			}
+			wolfSSL_EC_KEY_free(ecdh);
+		} else {
+			LM_ERR("unable to find the EC curve\n");
 			return -1;
 		}
-		if (1 != wolfSSL_SSL_CTX_set_tmp_ecdh (ctx, ecdh)) {
-			LM_ERR("unable to set tmp_ecdh\n");
-			return -1;
+	} else {
+		if (method == TLS_USE_TLSv1_3) {
+			if (wolfSSL_CTX_set1_groups_list(ctx, curve_name) ==
+				WOLFSSL_FAILURE) {
+				LM_ERR("Failed to set EC curve\n");
+				return -1;
+			}
+		} else {
+			if (wolfSSL_CTX_set1_curves_list(ctx, curve_name) ==
+				WOLFSSL_FAILURE) {
+				LM_ERR("Failed to set EC curve\n");
+				return -1;
+			}
 		}
-		wolfSSL_EC_KEY_free(ecdh);
 	}
-	else {
-		LM_ERR("unable to find the EC curve\n");
-		return -1;
-	}
+
 	return 0;
 }
 
@@ -417,9 +434,11 @@ static int load_ca_dir(WOLFSSL_CTX * ctx, char *directory)
 {
 	int rc;
 
-	if ((rc = wolfSSL_CTX_load_verify_locations(ctx, 0, directory)) !=
+	if ((rc = wolfSSL_CTX_load_verify_locations_ex(ctx, 0, directory,
+		WOLFSSL_LOAD_FLAG_IGNORE_ERR|WOLFSSL_LOAD_FLAG_IGNORE_BAD_PATH_ERR|
+		WOLFSSL_LOAD_FLAG_IGNORE_ZEROFILE)) !=
 		SSL_SUCCESS) {
-		LM_WARN("unable to load ca directory '%s' (ret=%d)\n", directory, rc);
+		LM_ERR("unable to load ca directory '%s' (ret=%d)\n", directory, rc);
 		return -1;
 	}
 
@@ -430,7 +449,6 @@ static int load_ca_dir(WOLFSSL_CTX * ctx, char *directory)
 int _wolfssl_init_tls_dom(struct tls_domain *d, int init_flags)
 {
 	int verify_mode = 0;
-	int rc = -1;
 	int ret = -1;
 
 	if (d->method_str.s && tls_get_method(&d->method_str, &d->method,
@@ -503,7 +521,8 @@ int _wolfssl_init_tls_dom(struct tls_domain *d, int init_flags)
 
 	if (!d->tls_ec_curve)
 		LM_NOTICE("No EC curve defined\n");
-	else if (set_ec_params(d->ctx, d->tls_ec_curve) < 0)
+	else if (set_ec_params(d->ctx, d->method, d->flags & DOM_FLAG_SRV,
+		d->tls_ec_curve) < 0)
 		goto end;
 
 	if (d->ciphers_list != 0 &&
@@ -526,18 +545,15 @@ int _wolfssl_init_tls_dom(struct tls_domain *d, int init_flags)
 		goto end;
 
 	if (!(d->flags & DOM_FLAG_DB) || init_flags & TLS_DOM_CA_FILE_FL) {
-		if (d->ca.s && (rc = load_ca(d->ctx, d->ca.s)) < 0)
+		if (d->ca.s && load_ca(d->ctx, d->ca.s) < 0)
 			goto end;
 	} else {
-		if ((rc = load_ca_db(d->ctx, &d->ca)) < 0)
+		if (load_ca_db(d->ctx, &d->ca) < 0)
 			goto end;
 	}
 
-	if (d->ca_directory && load_ca_dir(d->ctx, d->ca_directory) < 0 &&
-		rc == -1) {
-		LM_ERR("No CA loaded\n");
+	if (d->ca_directory && load_ca_dir(d->ctx, d->ca_directory) < 0)
 		goto end;
-	}
 
 	ret = 0;
 end:

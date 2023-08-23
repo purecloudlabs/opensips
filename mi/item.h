@@ -53,7 +53,7 @@ typedef flush_fn mi_flush_f;
 
 typedef struct mi_params_ {
 	mi_item_t *item;
-	char **list;
+	char * const *list;
 } mi_params_t;
 
 /* The functions below can be used to build a MI Response
@@ -172,6 +172,9 @@ void free_shm_mi_item(mi_item_t *response);
  */
 int get_mi_string_param(const mi_params_t *params, char *name,
 					char **value, int *value_len);
+
+int get_mi_bool_like_param(const mi_params_t *params, char *name,
+					int default_value);
 
 int get_mi_int_param(const mi_params_t *params, char *name, int *value);
 

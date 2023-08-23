@@ -16,24 +16,22 @@ limitations under the License.
 #include "../ut.h"
 #include "../lib/csv.h"
 
-#include "../context.h"
 #include "../dprint.h"
 #include "../globals.h"
 #include "../lib/list.h"
 #include "../sr_module.h"
 #include "../sr_module_deps.h"
 
+#include "../test/fuzz/fuzz_standalone.h"
+
 int LLVMFuzzerTestOneInput(const char *data, size_t size) {
   // Ensure we have one byte for the "decider" variable
   if (size == 0) {
     return 0;
   }
-  char *decider = *data;
+  int decider = data[0];
   data++;
   size--;
-
-  ensure_global_context();
-  struct sip_uri u;
 
   char *new_str = (char *)malloc(size + 1);
   if (new_str == NULL) {
@@ -43,7 +41,7 @@ int LLVMFuzzerTestOneInput(const char *data, size_t size) {
   new_str[size] = '\0';
 
   csv_record *ret = NULL;
-  if (((int)decider % 2) == 0) {
+  if ((decider % 2) == 0) {
     ret = parse_csv_record(_str(new_str));
   }
   else {
@@ -51,4 +49,5 @@ int LLVMFuzzerTestOneInput(const char *data, size_t size) {
   }
   free_csv_record(ret);
   free(new_str);
+  return 0;
 }

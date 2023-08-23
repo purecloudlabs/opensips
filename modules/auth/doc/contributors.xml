@@ -45,26 +45,26 @@
 	<row>
 		<entry>4. </entry>
 		<entry>Maksym Sobolyev (<ulink url="https://github.com/sobomax">@sobomax</ulink>)</entry>
-		<entry align="center">28</entry>
-		<entry align="center">9</entry>
-		<entry align="center">566</entry>
-		<entry align="center">849</entry>
+		<entry align="center">33</entry>
+		<entry align="center">13</entry>
+		<entry align="center">587</entry>
+		<entry align="center">862</entry>
 	</row>
 	<row>
 		<entry>5. </entry>
+		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
+		<entry align="center">27</entry>
+		<entry align="center">20</entry>
+		<entry align="center">206</entry>
+		<entry align="center">284</entry>
+	</row>
+	<row>
+		<entry>6. </entry>
 		<entry>Jiri Kuthan (<ulink url="https://github.com/jiriatipteldotorg">@jiriatipteldotorg</ulink>)</entry>
 		<entry align="center">26</entry>
 		<entry align="center">19</entry>
 		<entry align="center">660</entry>
 		<entry align="center">51</entry>
-	</row>
-	<row>
-		<entry>6. </entry>
-		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
-		<entry align="center">26</entry>
-		<entry align="center">19</entry>
-		<entry align="center">199</entry>
-		<entry align="center">284</entry>
 	</row>
 	<row>
 		<entry>7. </entry>
@@ -129,17 +129,17 @@
 	<row>
 		<entry>1. </entry>
 		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
-		<entry align="center">Mar 2014 - Aug 2022</entry>
+		<entry align="center">Mar 2014 - Apr 2023</entry>
 	</row>
 	<row>
 		<entry>2. </entry>
-		<entry>Vlad Patrascu (<ulink url="https://github.com/rvlad-patrascu">@rvlad-patrascu</ulink>)</entry>
-		<entry align="center">May 2017 - Jun 2022</entry>
+		<entry>Maksym Sobolyev (<ulink url="https://github.com/sobomax">@sobomax</ulink>)</entry>
+		<entry align="center">Jan 2005 - Mar 2023</entry>
 	</row>
 	<row>
 		<entry>3. </entry>
-		<entry>Maksym Sobolyev (<ulink url="https://github.com/sobomax">@sobomax</ulink>)</entry>
-		<entry align="center">Jan 2005 - Nov 2021</entry>
+		<entry>Vlad Patrascu (<ulink url="https://github.com/rvlad-patrascu">@rvlad-patrascu</ulink>)</entry>
+		<entry align="center">May 2017 - Jun 2022</entry>
 	</row>
 	<row>
 		<entry>4. </entry>
@@ -190,7 +190,7 @@
 	<title>Documentation</title>
 <section id="documentation_contributors" xreflabel="documentation_contributors">
 	<title>Contributors</title>
-	<para><emphasis role='bold'>Last edited by:</emphasis> Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>), Maksym Sobolyev (<ulink url="https://github.com/sobomax">@sobomax</ulink>), Vlad Patrascu (<ulink url="https://github.com/rvlad-patrascu">@rvlad-patrascu</ulink>), Peter Lemenkov (<ulink url="https://github.com/lemenkov">@lemenkov</ulink>), Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>), Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>), Sergio Gutierrez, Dan Pascu (<ulink url="https://github.com/danpascu">@danpascu</ulink>), Anca Vamanu, Daniel-Constantin Mierla (<ulink url="https://github.com/miconda">@miconda</ulink>), Konstantin Bokarius, Edson Gellert Schubert, Henning Westerholt (<ulink url="https://github.com/henningw">@henningw</ulink>), Jan Janak (<ulink url="https://github.com/janakj">@janakj</ulink>).</para>
+	<para><emphasis role='bold'>Last edited by:</emphasis> Maksym Sobolyev (<ulink url="https://github.com/sobomax">@sobomax</ulink>), Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>), Vlad Patrascu (<ulink url="https://github.com/rvlad-patrascu">@rvlad-patrascu</ulink>), Peter Lemenkov (<ulink url="https://github.com/lemenkov">@lemenkov</ulink>), Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>), Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>), Sergio Gutierrez, Dan Pascu (<ulink url="https://github.com/danpascu">@danpascu</ulink>), Anca Vamanu, Daniel-Constantin Mierla (<ulink url="https://github.com/miconda">@miconda</ulink>), Konstantin Bokarius, Edson Gellert Schubert, Henning Westerholt (<ulink url="https://github.com/henningw">@henningw</ulink>), Jan Janak (<ulink url="https://github.com/janakj">@janakj</ulink>).</para>
 </section>
 
 </chapter>

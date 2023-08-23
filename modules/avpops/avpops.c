@@ -107,6 +107,7 @@ static int fixup_free_avp_subst_p1(void** param);
 static int fixup_free_avp_subst_p2(void** param);
 static int fixup_free_pvname_list(void** param);
 static int fixup_free_avp_dbparam(void** param);
+static int fixup_avp_shuffle_name(void** param);
 
 static int w_print_avps(struct sip_msg* msg, char* foo, char *bar);
 static int w_dbload_avps(struct sip_msg* msg, void* source,
@@ -121,13 +122,14 @@ static int w_async_dbquery_avps(struct sip_msg* msg, async_ctx *ctx,
                                 str* query, void* dest, void* url);
 static int w_delete_avps(struct sip_msg* msg, void* param);
 static int w_copy_avps(struct sip_msg* msg, void* name1, void *name2);
+static int w_shuffle_avps(struct sip_msg* msg, void* param);
 static int w_pushto_avps(struct sip_msg* msg, void* destination, void *param);
 static int w_check_avps(struct sip_msg* msg, void* param, void *check);
 static int w_op_avps(struct sip_msg* msg, char* param, char *op);
 static int w_subst(struct sip_msg* msg, char* src, char *subst);
 static int w_is_avp_set(struct sip_msg* msg, char* param, char *foo);
 
-static acmd_export_t acmds[] = {
+static const acmd_export_t acmds[] = {
 	{"avp_db_query", (acmd_function)w_async_dbquery_avps, {
 		{CMD_PARAM_STR, 0, 0},
 		{CMD_PARAM_STR|CMD_PARAM_OPT|CMD_PARAM_NO_EXPAND, fixup_pvname_list, fixup_free_pvname_list},
@@ -138,7 +140,7 @@ static acmd_export_t acmds[] = {
 /*! \brief
  * Exported functions
  */
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"avp_print", (cmd_function)w_print_avps, {{0, 0, 0}},
 		REQUEST_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|ONREPLY_ROUTE|LOCAL_ROUTE|
 		STARTUP_ROUTE|TIMER_ROUTE|EVENT_ROUTE},
@@ -183,6 +185,11 @@ static cmd_export_t cmds[] = {
 		REQUEST_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|ONREPLY_ROUTE|LOCAL_ROUTE|
 		STARTUP_ROUTE|TIMER_ROUTE|EVENT_ROUTE},
 
+	{"avp_shuffle",   (cmd_function)w_shuffle_avps,  {
+		{CMD_PARAM_STR|CMD_PARAM_NO_EXPAND, fixup_avp_shuffle_name, fixup_free_pkg}, {0, 0, 0}},
+		REQUEST_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|ONREPLY_ROUTE|LOCAL_ROUTE|
+		STARTUP_ROUTE|TIMER_ROUTE|EVENT_ROUTE},
+
 	{"avp_pushto", (cmd_function)w_pushto_avps, {
 		{CMD_PARAM_STR|CMD_PARAM_NO_EXPAND, fixup_pushto_avp_p1, fixup_free_pkg},
 		{CMD_PARAM_STR|CMD_PARAM_NO_EXPAND, fixup_pushto_avp_p2, fixup_free_pkg}, {0, 0, 0}},
@@ -219,7 +226,7 @@ static cmd_export_t cmds[] = {
 /*! \brief
  * Exported parameters
  */
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{"db_url",            STR_PARAM|USE_FUNC_PARAM, (void*)add_db_url },
 	{"avp_table",         STR_PARAM, &db_table.s      },
 	{"use_domain",        INT_PARAM, &use_domain      },
@@ -233,7 +240,7 @@ static param_export_t params[] = {
 	{0, 0, 0}
 };
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_NULL, NULL, 0 },
 	},
@@ -840,6 +847,44 @@ static int fixup_copy_avp(void** param, int param_no)
 
 err_free:
 	pkg_free(cpy.s);
+	return E_UNSPEC;
+}
+
+static int fixup_avp_shuffle_name(void** param)
+{
+	struct fis_param *ap=NULL;
+	char *s;
+	str cpy;
+
+	if (pkg_nt_str_dup(&cpy, (str *)*param) < 0) {
+		LM_ERR("oom\n");
+		return -1;
+	}
+	s = cpy.s;
+
+	ap = avpops_parse_pvar(s);
+	if (ap==0)
+	{
+		LM_ERR("unable to get"
+			" pseudo-variable in param \n");
+		goto err_free;
+	}
+	if (ap->u.sval.type!=PVT_AVP)
+	{
+		LM_ERR("bad param; expected : $avp(name)\n");
+		goto err_free;
+	}
+	ap->opd|=AVPOPS_VAL_PVAR;
+	ap->type = AVPOPS_VAL_PVAR;
+
+	*param=(void*)ap;
+	pkg_free(cpy.s);
+
+	return 0;
+
+err_free:
+	pkg_free(cpy.s);
+	pkg_free(ap);
 	return E_UNSPEC;
 }
 
@@ -1483,6 +1528,11 @@ static int w_copy_avps(struct sip_msg* msg, void* name1, void *name2)
 {
 	return ops_copy_avp ( msg, (struct fis_param*)name1,
 								(struct fis_param*)name2);
+}
+
+static int w_shuffle_avps(struct sip_msg* msg, void* param)
+{
+	return ops_shuffle_avp ( msg, (struct fis_param*)param);
 }
 
 static int w_pushto_avps(struct sip_msg* msg, void* destination, void *param)

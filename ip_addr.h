@@ -57,7 +57,7 @@
 
 enum sip_protos { PROTO_NONE = 0, PROTO_FIRST = 1, PROTO_UDP = 1, \
 	PROTO_TCP, PROTO_TLS, PROTO_SCTP, PROTO_WS, PROTO_WSS, PROTO_BIN,
-	PROTO_BINS, PROTO_HEP_UDP, PROTO_HEP_TCP, PROTO_SMPP, PROTO_MSRP,
+	PROTO_BINS, PROTO_HEP_UDP, PROTO_HEP_TCP, PROTO_HEP_TLS, PROTO_SMPP, PROTO_MSRP,
 	PROTO_MSRPS, PROTO_OTHER };
 #define PROTO_LAST PROTO_OTHER
 
@@ -89,7 +89,7 @@ union sockaddr_union{
 
 
 enum si_flags { SI_NONE=0, SI_IS_IP=1, SI_IS_LO=2, SI_IS_MCAST=4,
-	SI_IS_ANYCAST=8, SI_FRAG=16 };
+	SI_IS_ANYCAST=8, SI_FRAG=16, SI_REUSEPORT=32 };
 
 struct receive_info {
 	struct ip_addr src_ip;
@@ -180,7 +180,7 @@ void print_ip(char* prefix, struct ip_addr* ip, char* suffix);
 void stdout_print_ip(struct ip_addr* ip);
 void print_net(struct net* net);
 
-int ip_addr_is_1918(str *s_ip);
+int ip_addr_is_1918(str *s_ip, int check_rfc_6333);
 
 #ifdef USE_MCAST
 /*! \brief Returns 1 if the given address is a multicast address */
@@ -390,20 +390,25 @@ static inline int hostent2su( union sockaddr_union* su,
 
 /*! \brief maximum size of a str returned by ip_addr2a (including \\0') */
 #define IP_ADDR_MAX_STR_SIZE 40 /* 1234:5678:9012:3456:7890:1234:5678:9012\0 */
+#define IP_ADDR2STR_BUF_NO 4
 
 /*! \brief fast ip_addr -> string converter;
  * it uses an internal buffer
  */
-extern char _ip_addr_A_buff[IP_ADDR_MAX_STR_SIZE];
+extern char _ip_addr_A_buffs[IP_ADDR2STR_BUF_NO][IP_ADDR_MAX_STR_SIZE];
 static inline char* ip_addr2a(struct ip_addr* ip)
 {
+	static unsigned int it = 0;
 	int offset;
 	register unsigned char a,b,c;
 	register unsigned char d;
 	register unsigned short hex4;
 	int r;
+	char *_ip_addr_A_buff;
 	#define HEXDIG(x) (((x)>=10)?(x)-10+'A':(x)+'0')
 
+	if ((++it)==IP_ADDR2STR_BUF_NO) it = 0;
+	_ip_addr_A_buff = _ip_addr_A_buffs[it];
 
 	offset=0;
 	switch(ip->af){

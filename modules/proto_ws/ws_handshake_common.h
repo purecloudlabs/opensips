@@ -523,8 +523,10 @@ static int ws_server_handshake(struct tcp_connection *con)
 		}
 
 		con->msg_attempts = 0;
-		if (req != &_ws_common_tcp_current_req)
-			pkg_free(req);
+		if (req != &_ws_common_tcp_current_req) {
+			shm_free(req);
+			con->con_req = NULL;
+		}
 
 		/* handshake now completed, destroy the handshake data */
 		WS_STATE(con) = WS_CON_HANDSHAKE_DONE;
@@ -549,7 +551,7 @@ static int ws_server_handshake(struct tcp_connection *con)
 	if (!req->complete && (req == &_ws_common_tcp_current_req)) {
 		/* let's duplicate this - most likely another conn will come in */
 
-		con->con_req = pkg_malloc(sizeof(struct tcp_req));
+		con->con_req = shm_malloc(sizeof(struct tcp_req));
 		if (con->con_req == NULL) {
 			LM_ERR("No more mem for dynamic con request buffer\n");
 			goto error;
@@ -596,7 +598,7 @@ error:
 	if (WS_STATE(con) == WS_CON_BAD_REQ)
 		ws_bad_handshake(con);
 	if (req != &_ws_common_tcp_current_req) {
-		pkg_free(req);
+		shm_free(req);
 		con->con_req = NULL;
 	}
 	return -1;
@@ -1652,10 +1654,10 @@ static int trace_ws( struct tcp_connection* conn, trans_trace_event event, str* 
 			!WS_TRACE_IS_ON(conn) || ! (d = conn->proto_data) )
 		return 0;
 
-	if ( d->trace_route_id != -1 ) {
-		check_trace_route( d->trace_route_id, conn );
+	if ( ref_script_route_is_valid(d->trace_route_ref) ) {
+		check_trace_route( d->trace_route_ref, conn );
 		/* avoid doing this multiple times */
-		d->trace_route_id = -1;
+		d->trace_route_ref = NULL;
 	}
 
 	/* check if tracing is deactivated from the route for this connection */

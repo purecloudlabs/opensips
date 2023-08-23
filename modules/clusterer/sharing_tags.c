@@ -203,7 +203,8 @@ static struct sharing_tag *shtag_get_unsafe(str *tag_name, int c_id)
 		tag && (tag->cluster_id!=c_id || str_strcmp(&tag->name, tag_name));
 		tag = tag->next);
 	if (!tag && !(tag = shtag_create(tag_name, c_id))) {
-		LM_ERR("Failed to create sharing tag\n");
+		LM_ERR("Failed to create sharing tag %.*s(%p)\n",
+		       tag_name->len, tag_name->s, tag_name->s);
 		return NULL;
 	}
 
@@ -407,7 +408,8 @@ static struct sharing_tag *__shtag_get_safe(str *tag_name, int c_id)
 	if (!tag) {
 		lock_switch_write(shtags_lock, lock_old_flag);
 		if ((tag = shtag_create(tag_name, c_id)) == NULL) {
-			LM_ERR("Failed to create sharing tag\n");
+			LM_ERR("Failed to create sharing tag %.*s(%p)\n",
+			       tag_name->len, tag_name->s, tag_name->s);
 			lock_switch_read(shtags_lock, lock_old_flag);
 			lock_stop_sw_read(shtags_lock);
 			return NULL;
@@ -592,6 +594,29 @@ int shtag_set_sync_status(str *tag_name, int cluster_id, str *capability,
 	lock_stop_write(shtags_lock);
 
 	return 0;
+}
+
+void update_shtags_sync_status_cap(int cluster_id, struct local_cap *new_caps)
+{
+	struct sharing_tag *tag;
+	struct shtag_sync_status *status;
+	struct local_cap *cap;
+
+	lock_start_write(shtags_lock);
+
+	for (tag = *shtags_list; tag; tag = tag->next) {
+		if (tag->cluster_id != cluster_id)
+			continue;
+
+		for (status=tag->sync_status; status; status=status->next)
+			for (cap = new_caps; cap; cap = cap->next)
+				if (!str_strcmp(&cap->reg.name, &status->capability->reg.name)) {
+					status->capability = cap;
+					break;
+				}
+	}
+
+	lock_stop_write(shtags_lock);
 }
 
 int shtag_sync_all_backup(int cluster_id, str *capability)

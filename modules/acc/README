@@ -202,7 +202,7 @@ if ($ru=~"sip:+40") /* calls to Romania */ {
 
     if (is_method("INVITE") && $au!=$fU) {
         xlog("FROM URI != digest username\n");
-        sl_send_reply("403","Forbidden");
+        sl_send_reply(403,"Forbidden");
     }
 
     do_accounting("log"); /* set for accounting via syslog */
@@ -1055,16 +1055,16 @@ Chapter 3. Contributors
    Table 3.1. Top contributors by DevScore^(1), authored
    commits^(2) and lines added/removed^(3)
      Name DevScore Commits Lines ++ Lines --
-   1. Bogdan-Andrei Iancu (@bogdan-iancu) 222 111 4302 4578
+   1. Bogdan-Andrei Iancu (@bogdan-iancu) 226 114 4306 4609
    2. Jan Janak (@janakj) 145 16 5587 5074
    3. Ionut Ionita (@ionutrazvanionita) 139 39 3730 4180
    4. Razvan Crainea (@razvancrainea) 98 65 2702 662
-   5. Liviu Chircu (@liviuchircu) 63 49 604 549
+   5. Liviu Chircu (@liviuchircu) 67 51 615 559
    6. Jiri Kuthan (@jiriatipteldotorg) 56 26 2272 660
    7. Daniel-Constantin Mierla (@miconda) 26 23 115 88
    8. Elena-Ramona Modroiu 24 4 2267 5
-   9. Henning Westerholt (@henningw) 20 15 184 131
-   10. Vlad Patrascu (@rvlad-patrascu) 20 10 292 427
+   9. Vlad Patrascu (@rvlad-patrascu) 22 11 353 478
+   10. Henning Westerholt (@henningw) 20 15 184 131
 
    All remaining contributors: Vlad Paiu (@vladpaiu), Maksym
    Sobolyev (@sobomax), Irina-Maria Stanescu, Karel Kozlik, Andrei
@@ -1096,13 +1096,13 @@ Chapter 3. Contributors
 
    Table 3.2. Most recently active contributors^(1) to this module
                       Name                   Commit Activity
-   1.  Liviu Chircu (@liviuchircu)         Jan 2013 - Jul 2022
-   2.  Alexey Vasilyev (@vasilevalex)      Mar 2022 - Mar 2022
-   3.  Razvan Crainea (@razvancrainea)     Aug 2010 - Jun 2021
-   4.  Walter Doekes (@wdoekes)            Apr 2021 - Apr 2021
-   5.  Maksym Sobolyev (@sobomax)          Dec 2003 - Jan 2021
-   6.  Bogdan-Andrei Iancu (@bogdan-iancu) Dec 2003 - May 2020
-   7.  Vlad Patrascu (@rvlad-patrascu)     May 2017 - Nov 2019
+   1.  Liviu Chircu (@liviuchircu)         Jan 2013 - May 2023
+   2.  Bogdan-Andrei Iancu (@bogdan-iancu) Dec 2003 - May 2023
+   3.  Vlad Patrascu (@rvlad-patrascu)     May 2017 - Mar 2023
+   4.  Maksym Sobolyev (@sobomax)          Dec 2003 - Feb 2023
+   5.  Alexey Vasilyev (@vasilevalex)      Mar 2022 - Mar 2022
+   6.  Razvan Crainea (@razvancrainea)     Aug 2010 - Jun 2021
+   7.  Walter Doekes (@wdoekes)            Apr 2021 - Apr 2021
    8.  Dan Pascu (@danpascu)               Jul 2004 - Sep 2018
    9.  Peter Lemenkov (@lemenkov)          Jun 2018 - Jun 2018
    10. Ionut Ionita (@ionutrazvanionita)   Feb 2015 - May 2017

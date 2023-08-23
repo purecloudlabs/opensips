@@ -186,7 +186,6 @@ int srec_register_callbacks(struct src_sess *sess)
 	if (srec_dlg.register_dlgcb(sess->dlg, DLGCB_TERMINATED|DLGCB_EXPIRED|DLGCB_FAILED,
 			srec_dlg_end, sess, dlg_src_unref_session)){
 		LM_ERR("cannot register callback for dialog termination\n");
-		srec_hlog(ss, SREC_UNREF, "error registering callback for terminating");
 		return -1;
 	}
 
@@ -622,18 +621,17 @@ static void tm_update_recording(struct cell *t, int type, struct tmcb_params *ps
 
 void tm_start_recording(struct cell *t, int type, struct tmcb_params *ps)
 {
-	str *body;
 	struct src_sess *ss;
 
-	if (!is_invite(t) || ps->code >= 300)
+	if (!is_invite(t))
 		return;
-
-	/* check if we have a reply with body */
-	body = get_body_part(ps->rpl, TYPE_APPLICATION, SUBTYPE_SDP);
-	if (!body || body->len == 0)
-		return;
-
 	ss = (struct src_sess *)*ps->param;
+	if (ps->code >= 300) {
+		/* unref so we can release the dialog */
+		srec_dlg.dlg_unref(ss->dlg, 1);
+		return;
+	}
+
 	/* engage only on successful calls */
 	SIPREC_LOCK(ss);
 	/* if session has been started, do not start it again */

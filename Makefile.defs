@@ -65,7 +65,7 @@ MAIN_NAME=opensips
 
 #version number
 VERSION_MAJOR = 3
-VERSION_MINOR = 4
+VERSION_MINOR = 5
 VERSION_SUBMINOR = 0
 VERSION_BUILD = dev
 
@@ -228,7 +228,7 @@ sparc64_macros= __sparcv9 __sparc_v9__
 
 arm_macros= __arm__ __thumb__
 arm6_macros= __ARM_ARCH_6__
-arm7_macros= __ARM_ARCH_7__
+arm7_macros= __ARM_ARCH_7__ __ARM_ARCH_7A__
 
 arm64_macros= __AARCH64EL__
 
@@ -470,9 +470,9 @@ INSTALL_MAN ?= $(INSTALL) -m 644
 
 
 ifeq ($(VERSIONTYPE),)
-VERSIONTYPE = $(shell if [ -d ".svn" ]; then \
+VERSIONTYPE = $(shell if [ -d "${TOP_SRCDIR}/.svn" ]; then \
 			  		echo "svn"; \
-				elif [ -d ".git" ]; then \
+				elif [ -d "${TOP_SRCDIR}/.git" ]; then \
 					echo "git"; \
 				fi )
 endif
@@ -496,7 +496,7 @@ ifneq ($(VERSIONTYPE),)
   endif
 
   ifeq ($(THISREVISION),)
-  THISREVISION = $(shell if [ -f main.c -a -f Makefile.defs ] ; then \
+  THISREVISION = $(shell if [ -f ${TOP_SRCDIR}/main.c -a -f ${TOP_SRCDIR}/Makefile.defs ] ; then \
 				if [ -x "$(GETVERSION)" ] ; then \
 					$(GETVERSION) $(GETVERSIONOPTS) ;\
 				fi ;\
@@ -504,9 +504,9 @@ ifneq ($(VERSIONTYPE),)
   endif
 else
   # git is the default versioning method
-  VERSIONTYPE = $(shell [ -f ".gitrevision" ] && echo "git")
+  VERSIONTYPE = $(shell [ -f "${TOP_SRCDIR}/.gitrevision" ] && echo "git")
   ifneq ($(VERSIONTYPE),)
-    THISREVISION = $(shell cat .gitrevision)
+    THISREVISION = $(shell cat ${TOP_SRCDIR}/.gitrevision)
   endif
   OLDREVISION = "$(THISREVISION)"
 endif
@@ -1411,11 +1411,12 @@ endif
 DEFAULT_YACC=bison
 
 # on solaris add -lxnet (e.g. LIBS= -lxnet)
-LIBS= -ldl -lresolv
+_SAVE_LIBS := $(LIBS)
+LIBS+= -ldl -lresolv
 
 #os specific stuff
 ifeq ($(OS), linux)
-	DEFS+=-DHAVE_GETHOSTBYNAME2 -DHAVE_UNION_SEMUN -DHAVE_SCHED_YIELD \
+	DEFS+=-DHAVE_GETHOSTBYNAME2 -DHAVE_UNION_SEMUN \
 			-DHAVE_MSG_NOSIGNAL -DHAVE_MSGHDR_MSG_CONTROL -DHAVE_ALLOCA_H \
 			-DHAVE_TIMEGM
 	ifneq ($(found_lock_method), yes)
@@ -1424,6 +1425,9 @@ ifeq ($(OS), linux)
 	endif
 	ifneq (,$(findstring USE_PTHREAD_MUTEX, $(DEFS)))
 		LIBS += -pthread
+	endif
+	ifneq (,$(findstring PROFILING, $(DEFS)))
+		LIBS += -lprofiler
 	endif
 	# check for >= 2.5.44
 	ifeq ($(shell [ $(OSREL_N) -ge 2005044 ] && echo has_epoll), has_epoll)
@@ -1445,7 +1449,7 @@ ifeq ($(OS), linux)
 endif
 
 ifeq ($(OS), gnu_kfreebsd)
-	DEFS+=-DHAVE_GETHOSTBYNAME2 -DHAVE_UNION_SEMUN -DHAVE_SCHED_YIELD \
+	DEFS+=-DHAVE_GETHOSTBYNAME2 -DHAVE_UNION_SEMUN \
 			-DHAVE_MSG_NOSIGNAL -DHAVE_MSGHDR_MSG_CONTROL -DHAVE_ALLOCA_H \
 			-DHAVE_TIMEGM
 	ifneq ($(found_lock_method), yes)
@@ -1464,7 +1468,7 @@ ifeq ($(OS), gnu_kfreebsd)
 endif
 
 ifeq  ($(OS), solaris)
-	DEFS+= -DHAVE_GETIPNODEBYNAME -DHAVE_SYS_SOCKIO_H -DHAVE_SCHED_YIELD \
+	DEFS+= -DHAVE_GETIPNODEBYNAME -DHAVE_SYS_SOCKIO_H \
 			-DHAVE_ALLOCA_H -DUSE_SIGACTION -D_POSIX_PTHREAD_SEMANTICS
 	ifneq ($(found_lock_method), yes)
 		DEFS+= -DUSE_PTHREAD_MUTEX  # try pthread sems
@@ -1490,7 +1494,7 @@ ifeq  ($(OS), solaris)
 	DEFAULT_YACC=yacc
 
 ifeq ($(CC_NAME), suncc)
-	LIBS= -fast -ldl -lresolv
+	LIBS= $(_SAVE_LIBS) -fast -ldl -lresolv
 endif
 	OLD_SOLARIS= $(shell echo "$(OSREL)" | \
 				sed -e 's/^5\.[0-6][^0-9]*$$/yes/' )
@@ -1505,10 +1509,9 @@ endif
 
 ifeq ($(OS), freebsd)
 	DEFS+=-DHAVE_SOCKADDR_SA_LEN -DHAVE_GETHOSTBYNAME2 -DHAVE_UNION_SEMUN \
-		-DHAVE_SCHED_YIELD -DHAVE_MSGHDR_MSG_CONTROL \
-		-DHAVE_CONNECT_ECONNRESET_BUG -DHAVE_TIMEGM \
-		-DHAVE_NETINET_IN_SYSTM
-	LIBS=  #dlopen is in libc
+		-DHAVE_MSGHDR_MSG_CONTROL -DHAVE_CONNECT_ECONNRESET_BUG \
+		-DHAVE_TIMEGM -DHAVE_NETINET_IN_SYSTM
+	LIBS=  $(_SAVE_LIBS) #resolver & dlopen is in libc
 	ifneq ($(found_lock_method), yes)
 		DEFS+= -DUSE_PTHREAD_MUTEX  # try pthread sems
 		found_lock_method=yes
@@ -1592,8 +1595,7 @@ endif
 # OS X support, same as freebsd
 ifeq ($(OS), darwin)
 	DEFS+=-DHAVE_SOCKADDR_SA_LEN -DHAVE_GETHOSTBYNAME2 -DHAVE_UNION_SEMUN \
-		-DHAVE_SCHED_YIELD -DHAVE_MSGHDR_MSG_CONTROL \
-		-DUSE_ANON_MMAP \
+		-DHAVE_MSGHDR_MSG_CONTROL -DUSE_ANON_MMAP \
 		-DNDEBUG -DHAVE_CONNECT_ECONNRESET_BUG -DHAVE_TIMEGM
 	# -DNDEBUG used to turn off assert (assert wants to call
 	# eprintf which doesn't seem to be defined in any shared lib
@@ -1693,7 +1695,7 @@ endif
 
 
 ## Unit Testing - required extensions
-ifeq (1,$(shell grep -c '^\DEFS+= -DUNIT_TESTS' $(TOP_SRCDIR)/Makefile.conf))
+ifneq (,$(findstring UNIT_TESTS, $(DEFS)))
 DEFS := $(DEFS) -DUNIT_TESTS
 LIBS := $(LIBS) -ltap
 test_src := $(shell find . -wholename "*/test/*\.c" | grep -vE "^./(modules|test/fuzz)/")

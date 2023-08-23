@@ -69,7 +69,9 @@ dlg_t * build_dlg_t(struct dlg_cell * cell, int dst_leg, int src_leg)
 	if (cell->legs[dst_leg].last_gen_cseq != 0)
 	{
 		/* OPTIONS pings sent, use new cseq */
+		LM_DBG("last_gen_cseq is [%d]\n", cell->legs[dst_leg].last_gen_cseq);
 		td->loc_seq.value = ++(cell->legs[dst_leg].last_gen_cseq);
+		LM_DBG("incrementing last_gen_cseq to [%d]\n", td->loc_seq.value);
 		td->loc_seq.is_set=1;
 		dlg_unlock_dlg(cell);
 		goto after_strcseq;
@@ -153,8 +155,13 @@ dlg_t * build_dialog_info(struct dlg_cell * cell, int dst_leg, int src_leg,
 		}
 
 		cell->legs[dst_leg].last_gen_cseq = loc_seq+1;
-	} else if (inc_cseq)
+		LM_DBG("incrementing last_gen_cseq to [%d] from loc_seq\n",
+			cell->legs[dst_leg].last_gen_cseq);
+	} else if (inc_cseq) {
 		cell->legs[dst_leg].last_gen_cseq++;
+		LM_DBG("incrementing last_gen_cseq to [%d]\n",
+			cell->legs[dst_leg].last_gen_cseq);
+	}
 
 	if (reply_marker)
 		*reply_marker = DLG_PING_PENDING;
@@ -219,8 +226,8 @@ static void dual_bye_event(struct dlg_cell* dlg, struct sip_msg *req,
 		LM_DBG("removing dialog with h_entry %u and h_id %u\n",
 			dlg->h_entry, dlg->h_id);
 
-		if (dlg->rt_on_hangup)
-			run_dlg_script_route( dlg, dlg->rt_on_hangup);
+		if (ref_script_route_check_and_update(dlg->rt_on_hangup))
+			run_dlg_script_route( dlg, dlg->rt_on_hangup->idx);
 
 		/*destroy linkers */
 		destroy_linkers(dlg);

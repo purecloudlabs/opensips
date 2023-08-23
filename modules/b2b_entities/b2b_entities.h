@@ -51,8 +51,8 @@ extern unsigned int server_hsize;
 extern unsigned int client_hsize;
 extern struct tm_binds tmb;
 extern uac_auth_api_t uac_auth_api;
-extern int req_routeid;
-extern int reply_routeid;
+extern struct script_route_ref *req_route_ref;
+extern struct script_route_ref *reply_route_ref;
 extern str db_url;
 extern str b2be_cdb_url;
 extern db_con_t *b2be_db;
@@ -68,6 +68,10 @@ extern int passthru_prack;
 
 void *b2b_get_context(void);
 
+int mi_print_b2be_all_dlgs(mi_item_t *resp_arr, b2b_table htable,
+	unsigned int hsize, int ua_sessions);
+int mi_print_b2be_dlg(b2b_dlg_t* dlg, mi_item_t *to);
+
 #ifdef B2B_ENTITIES_LOCK_DBG
 #define B2BE_LOCK_DBG(op, table, index) \
 	LM_INFO("B2B_LOCK %s %s[%d] +%d\n", op, (table==server_htable)?"server":"client", index, __LINE__);
@@ -77,8 +81,8 @@ void *b2b_get_context(void);
 
 #define B2BE_LOCK_GET(table, hash_index) \
 	do { \
-		lock_get(&table[hash_index].lock); \
 		B2BE_LOCK_DBG("lock", table, hash_index); \
+		lock_get(&table[hash_index].lock); \
 	} while (0)
 
 #define B2BE_LOCK_RELEASE(table, hash_index) \

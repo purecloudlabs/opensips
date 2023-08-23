@@ -30,7 +30,7 @@ cfgutils Module
               1.4.10. set_count(var_to_count, ret_var)
               1.4.11. set_select_weight(int_list_var)
               1.4.12. ts_usec_delta(t1_sec, t1_usec, t2_sec,
-                      t2_usec, delta)
+                      t2_usec, [delta_str], [delta_int])
 
               1.4.13. check_time_rec(time_string, [timestamp])
               1.4.14. get_static_lock(key)
@@ -424,18 +424,23 @@ set_count($avp(dids), $var(num_dids));
 $var(next_gw_idx) = set_select_weight($avp(gw_success_rates));
 ...
 
-1.4.12.  ts_usec_delta(t1_sec, t1_usec, t2_sec, t2_usec, delta)
+1.4.12.  ts_usec_delta(t1_sec, t1_usec, t2_sec, t2_usec, [delta_str],
+[delta_int])
 
-   This function returns the difference between two timestamps,
-   specified in seconds and microseconds. The result is returned
-   in the last parameter, expressed in microseconds.
+   This function returns the absolute difference between the two
+   given timestamps. The result is expressed as microseconds and
+   can be returned as either string or integer.
+
+   WARNING: when using delta_int, the function will return error
+   code -1 in case the difference overflows the signed integer
+   holder! (i.e. a diff of ~35 minutes or more)
 
    This function can be used from REQUEST_ROUTE, ONREPLY_ROUTE,
    FAILURE_ROUTE, BRANCH_ROUTE.
 
    Example 1.18. ts_usec_delta usage
 ...
-ts_usec_delta($var(t1s), 300, 10, $var(t2ms), $var(result));
+ts_usec_delta($var(t1s), 300, 10, $var(t2us), $var(diff_str));
 ...
 
 1.4.13.  check_time_rec(time_string, [timestamp])
@@ -909,16 +914,16 @@ Chapter 2. Contributors
    Table 2.1. Top contributors by DevScore^(1), authored
    commits^(2) and lines added/removed^(3)
      Name DevScore Commits Lines ++ Lines --
-   1. Liviu Chircu (@liviuchircu) 89 40 2912 1491
+   1. Liviu Chircu (@liviuchircu) 91 41 2962 1508
    2. Henning Westerholt (@henningw) 29 18 1088 86
    3. Bogdan-Andrei Iancu (@bogdan-iancu) 27 22 367 109
    4. Razvan Crainea (@razvancrainea) 20 15 289 79
-   5. Vlad Patrascu (@rvlad-patrascu) 18 6 355 547
+   5. Vlad Patrascu (@rvlad-patrascu) 19 7 357 548
    6. Elena-Ramona Modroiu 14 3 1183 7
    7. Daniel-Constantin Mierla (@miconda) 12 10 84 32
-   8. Anca Vamanu 6 3 220 14
-   9. Ionel Cerghit (@ionel-cerghit) 5 1 18 161
-   10. Maksym Sobolyev (@sobomax) 4 2 15 8
+   8. Maksym Sobolyev (@sobomax) 6 4 20 14
+   9. Anca Vamanu 6 3 220 14
+   10. Ionel Cerghit (@ionel-cerghit) 5 1 18 161
 
    All remaining contributors: Vlad Paiu (@vladpaiu), Sergio
    Gutierrez, Konstantin Bokarius, Walter Doekes (@wdoekes), Peter
@@ -944,11 +949,11 @@ Chapter 2. Contributors
 
    Table 2.2. Most recently active contributors^(1) to this module
                       Name                   Commit Activity
-   1.  Liviu Chircu (@liviuchircu)         Sep 2012 - Aug 2022
-   2.  Maksym Sobolyev (@sobomax)          Dec 2015 - Jan 2021
-   3.  Razvan Crainea (@razvancrainea)     Oct 2010 - Jan 2020
-   4.  Bogdan-Andrei Iancu (@bogdan-iancu) Jul 2007 - Oct 2019
-   5.  Vlad Patrascu (@rvlad-patrascu)     May 2017 - Apr 2019
+   1.  Vlad Patrascu (@rvlad-patrascu)     May 2017 - May 2023
+   2.  Liviu Chircu (@liviuchircu)         Sep 2012 - Apr 2023
+   3.  Maksym Sobolyev (@sobomax)          Dec 2015 - Feb 2023
+   4.  Razvan Crainea (@razvancrainea)     Oct 2010 - Jan 2020
+   5.  Bogdan-Andrei Iancu (@bogdan-iancu) Jul 2007 - Oct 2019
    6.  Peter Lemenkov (@lemenkov)          Jun 2018 - Jun 2018
    7.  Ionel Cerghit (@ionel-cerghit)      Dec 2015 - Dec 2015
    8.  Walter Doekes (@wdoekes)            Jan 2015 - Jan 2015

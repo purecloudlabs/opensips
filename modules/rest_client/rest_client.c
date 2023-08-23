@@ -57,8 +57,8 @@ unsigned int max_transfer_size = 10240; /* KB (10MB) */
  * curl_multi_perform() may indicate a "try again" response even
  * when resuming transfers with pending data
  */
-int _async_resume_retr_timeout = 500000; /* us */
-int _async_resume_retr_itv = 100; /* us */
+int _async_resume_retr_timeout; /* us; equal to @curl_timeout */
+int _async_resume_retr_itv = 500; /* us */
 
 /* libcurl enables these by default */
 int ssl_verifypeer = 1;
@@ -108,7 +108,7 @@ static int w_rest_init_client_tls(struct sip_msg *msg, str *tls_client_dom);
 int validate_curl_http_version(const int *http_version);
 
 /* module dependencies */
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "tracer", DEP_SILENT },
 		{ MOD_TYPE_NULL, NULL, 0 }
@@ -118,7 +118,7 @@ static dep_export_t deps = {
 	}
 };
 
-static acmd_export_t acmds[] = {
+static const acmd_export_t acmds[] = {
 	{"rest_get",(acmd_function)w_async_rest_get, {
 		{CMD_PARAM_STR,0,0},
 		{CMD_PARAM_VAR,0,0},
@@ -145,7 +145,7 @@ static acmd_export_t acmds[] = {
  * Exported functions
  */
 
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"rest_get",(cmd_function)w_rest_get, {
 		{CMD_PARAM_STR,0,0},
 		{CMD_PARAM_VAR,0,0},
@@ -184,15 +184,15 @@ int tr_rest_parse(str* in, trans_t *t);
 int tr_rest_eval(struct sip_msg *msg, tr_param_t *tp, int subtype,
 		pv_value_t *val);
 
-static trans_export_t trans[] = {
-	{str_init("rest"), tr_rest_parse, tr_rest_eval},
+static const trans_export_t trans[] = {
+	{str_const_init("rest"), tr_rest_parse, tr_rest_eval},
 	{{0,0},0,0}
 };
 
 /*
  * Exported parameters
  */
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{ "connection_timeout",	INT_PARAM, &connection_timeout	},
 	{ "connect_poll_interval", INT_PARAM, &connect_poll_interval },
 	{ "max_async_transfers", INT_PARAM, &max_async_transfers },
@@ -240,6 +240,7 @@ static int mod_init(void)
 	LM_DBG("Initializing...\n");
 
 	connection_timeout_ms = connection_timeout * 1000L;
+	_async_resume_retr_timeout = curl_timeout * 1000000U;
 
 	if (connect_poll_interval < 0) {
 		LM_ERR("Bad connect_poll_interval (%ldms), setting to 20ms\n",

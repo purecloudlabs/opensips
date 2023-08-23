@@ -33,6 +33,11 @@
 #include "b2b_logic.h"
 #include "b2b_load.h"
 
+/* flags used for terminating an entity after it's peer
+ * has already been terminated from b2b_entities; see B2B_NOTIFY_FL_TERM_BYE */
+#define ENTITY_FL_TERM_BYE       (1<<0)
+#define ENTITY_FL_REPLY_RECEIVED (1<<1)
+
 typedef struct b2bl_entity_id
 {
 	str scenario_id;
@@ -43,11 +48,15 @@ typedef struct b2bl_entity_id
 	str from_dname;
 	str hdrs;
 	str adv_contact;
+	str in_sdp;
+	str out_sdp;
 	b2b_dlginfo_t* dlginfo;
 	int rejected;
 	int disconnected;
 	int state;
 	int init_maxfwd;
+	unsigned int flags;
+	unsigned int last_rcv_code;
 	unsigned short no;
 	unsigned short sdp_type;
 	enum b2b_entity_type type;
@@ -70,7 +79,6 @@ struct b2bl_new_entity {
 
 #define B2BL_SDP_NORMAL     0
 #define B2BL_SDP_LATE       1
-#define B2BL_SDP_RENEW      2
 
 #define NO_UPDATEDB_FLAG    0
 #define UPDATEDB_FLAG       1
@@ -104,10 +112,9 @@ typedef struct b2bl_tuple
 	unsigned int hash_index;
 	str* key;
 	str *scenario_id;
-	str init_sdp;
-	int state;
-	int req_routeid;
-	int reply_routeid;
+	enum b2b_tuple_state state;
+	struct script_route_ref *req_route;
+	struct script_route_ref *reply_route;
 	b2bl_entity_id_t* servers[MAX_B2BL_ENT];
 	b2bl_entity_id_t* clients[MAX_B2BL_ENT];
 	b2bl_entity_id_t* bridge_entities[MAX_BRIDGE_ENT];
@@ -119,8 +126,6 @@ typedef struct b2bl_tuple
 	struct b2bl_tuple* prev;
 	unsigned int lifetime;
 	str local_contact;
-	str sdp;
-	str b1_sdp; /* used for multiple attempts to bridge the first entity */
 	int db_flag;
 	int repl_flag;  /* sent/received through entities replication */
 	struct b2b_ctx_val *vals;
@@ -178,7 +183,7 @@ static inline int bridge_get_entityno(b2bl_tuple_t* tuple, b2bl_entity_id_t* ent
 void b2bl_print_tuple(b2bl_tuple_t* tuple, int log_level);
 
 b2bl_tuple_t* b2bl_insert_new(struct sip_msg* msg, unsigned int hash_index,
-	struct b2b_params *init_params, str* body, str* custom_hdrs, int local_index,
+	struct b2b_params *init_params, str* custom_hdrs, int local_index,
 	str** b2bl_key_s, int db_flag, int repl_flag);
 
 str* b2bl_generate_key(unsigned int hash_index, unsigned int local_index);
@@ -197,14 +202,6 @@ int init_b2bl_htable(void);
 extern b2bl_table_t b2bl_htable;
 extern unsigned int b2bl_hsize;
 
-int process_bridge_action(struct sip_msg* msg, b2bl_tuple_t* tuple,
-	unsigned hash_index, b2bl_entity_id_t *old_entity,
-	struct b2bl_new_entity *new_br_ent[2], str *provmedia_uri, int lifetime);
-
-str* b2bl_bridge_extern(struct b2b_params *init_params,
-	b2bl_init_params_t *scen_params, str *e1_id, str *e2_id,
-	b2bl_cback_f cbf, void* cb_param, unsigned int cb_mask);
-
 void destroy_b2bl_htable(void);
 
 b2bl_entity_id_t* b2bl_create_new_entity(enum b2b_entity_type type, str* entity_id,
@@ -217,6 +214,7 @@ void b2bl_remove_single_entity(b2bl_entity_id_t *entity, b2bl_entity_id_t **head
 int b2bl_drop_entity(b2bl_entity_id_t* entity, b2bl_tuple_t* tuple);
 void b2bl_delete_entity(b2bl_entity_id_t* entity, b2bl_tuple_t* tuple,
 	unsigned int hash_index, int b2be_del1);
+void b2bl_free_entity(b2bl_entity_id_t *entity);
 
 int b2b_extra_headers(struct sip_msg* msg, str* b2bl_key, str* custom_hdrs, str* extra_headers);
 
@@ -237,5 +235,8 @@ int b2bl_register_new_tuple_cb(b2bl_cback_f f, void *param);
 int b2bl_run_new_tuple_cb(str *key);
 
 b2bl_tuple_t *b2bl_get_tuple(str *key);
+
+int get_new_entities(struct b2bl_new_entity **entity1,
+	struct b2bl_new_entity **entity2);
 
 #endif

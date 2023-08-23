@@ -709,6 +709,9 @@ static void stream_cleanup_old(void)
 
 void stream_process(int rank)
 {
+	/* suppress the E_CORE_LOG event for new logs while handling
+	 * the event itself */
+	suppress_proc_log_event();
 
 	if (init_worker_reactor("event_stream Sender", RCT_PRIO_MAX) != 0) {
 		LM_BUG("failed to init event_stream reactor");
@@ -725,5 +728,6 @@ void stream_process(int rank)
 
 out_err:
 	destroy_io_wait(&_worker_io);
+	reset_proc_log_event();
 	abort();
 }

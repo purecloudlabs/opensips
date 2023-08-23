@@ -772,7 +772,7 @@ int run_route_algo(struct sip_msg *msg, int rt_idx,ds_dest_p entry)
 int ds_route_algo(struct sip_msg *msg, ds_set_p set, 
 		ds_dest_p **sorted_set,	int ds_use_default)
 {
-	int i, j, k, end_idx, cnt, rt_idx, fret;
+	int i, j, k, end_idx, cnt, fret;
 	ds_dest_p *sset;
 
 	if (!set) {
@@ -780,9 +780,8 @@ int ds_route_algo(struct sip_msg *msg, ds_set_p set,
 		return -1;
 	}
 
-	if ((rt_idx = get_script_route_ID_by_name(algo_route_param.s,
-	sroutes->request, RT_NO)) == -1) {
-		LM_ERR("Invalid route parameter \n");
+	if (!ref_script_route_is_valid(algo_route)) {
+		LM_ERR("Undefined route <%s>, failing\n", algo_route->name.s);
 		return -1;
 	}
 
@@ -806,7 +805,7 @@ int ds_route_algo(struct sip_msg *msg, ds_set_p set,
 			continue;
 		}
 
-		fret = run_route_algo(msg, rt_idx, &set->dlist[i]);
+		fret = run_route_algo(msg, algo_route->idx, &set->dlist[i]);
 		set->dlist[i].route_algo_value = fret;
 
 		/* search the proper position */
@@ -938,7 +937,7 @@ void ds_flusher_routine(unsigned int ticks, void* param)
 
 	ds_partition_t *partition;
 	for (partition = partitions; partition; partition = partition->next){
-		if (*partition->db_handle==NULL)
+		if (*partition->db_handle==NULL || !partition->persistent_state)
 			continue;
 
 		val_cmp[0].type = DB_INT;
@@ -1003,7 +1002,7 @@ void ds_flusher_routine(unsigned int ticks, void* param)
 
 
 /*load groups of destinations from DB*/
-static ds_data_t* ds_load_data(ds_partition_t *partition, int use_state_col)
+static ds_data_t* ds_load_data(ds_partition_t *partition)
 {
 	ds_data_t *d_data;
 	int i, id, nr_rows, cnt, nr_cols = 9;
@@ -1025,7 +1024,7 @@ static ds_data_t* ds_load_data(ds_partition_t *partition, int use_state_col)
 			&ds_dest_prio_col, &ds_dest_description_col,
 			&ds_dest_probe_mode_col, &ds_dest_state_col};
 
-	if (!use_state_col)
+	if (!partition->persistent_state)
 		nr_cols--;
 
 	if(*partition->db_handle == NULL){
@@ -1127,7 +1126,7 @@ static ds_data_t* ds_load_data(ds_partition_t *partition, int use_state_col)
 			probe_mode = VAL_INT(values+7);
 
 		/* state */
-		if (!use_state_col || VAL_NULL(values+8))
+		if (!partition->persistent_state || VAL_NULL(values+8))
 			/* active state */
 			state = 0;
 		else
@@ -1178,7 +1177,7 @@ error:
 }
 
 
-int ds_reload_db(ds_partition_t *partition, int initial)
+int ds_reload_db(ds_partition_t *partition, int initial, int is_inherit_state)
 {
 	ds_data_t *old_data;
 	ds_data_t *new_data;
@@ -1190,7 +1189,7 @@ int ds_reload_db(ds_partition_t *partition, int initial)
 		sr_set_status( ds_srg, STR2CI(partition->name),
 			SR_STATUS_RELOADING_DATA, CHAR_INT("data re-loading"), 0);
 
-	new_data = ds_load_data(partition, ds_persistent_state);
+	new_data = ds_load_data(partition);
 	if (new_data==NULL) {
 		LM_ERR("failed to load the new data, dropping the reload\n");
 		if (initial)
@@ -1214,7 +1213,10 @@ int ds_reload_db(ds_partition_t *partition, int initial)
 	if (old_data) {
 		/* copy the state of the destinations from the old set
 		 * (for the matching ids) */
-		ds_inherit_state( old_data, new_data);
+		if (is_inherit_state) {
+			ds_inherit_state( old_data, new_data);
+		}
+		
 		ds_destroy_data_set( old_data );
 	}
 
@@ -1848,8 +1850,8 @@ int ds_select_dst(struct sip_msg *msg, ds_select_ctl_p ds_select_ctl,
 			ds_id = 0;
 		break;
 		case 10:
-			if (algo_route_param.s == NULL || algo_route_param.len == 0) {
-				LM_ERR("No hash_route param provided \n");
+			if (!ref_script_route_is_valid(algo_route)) {
+				LM_ERR("No algo_route param provided or not defined\n");
 				goto error;
 			}
 			if (ds_route_algo(msg, idx, &sorted_set, ds_flags&DS_USE_DEFAULT)
@@ -2599,9 +2601,7 @@ error:
 static void ds_options_callback( struct cell *t, int type,
 		struct tmcb_params *ps )
 {
-	str uri = {0, 0};
-
-	/* The Param does contain the group, in which the failed host
+	/* The Param contains the URI+ group, in which the failed host
 	 * can be found.*/
 	if (!ps->param) {
 		LM_DBG("No parameter provided, OPTIONS-Request was finished"
@@ -2615,13 +2615,8 @@ static void ds_options_callback( struct cell *t, int type,
 	ds_options_callback_param_t *cb_param =
 		(ds_options_callback_param_t*)(*ps->param);
 
-	/* The SIP-URI is taken from the Transaction.
-	 * Remove the "To: " (s+4) and the trailing new-line (s - 4 (To: )
-	 * - 2 (\r\n)). */
-	uri.s = t->to.s + 4;
-	uri.len = t->to.len - 6;
 	LM_DBG("OPTIONS-Request was finished with code %d (to %.*s, group %d)\n",
-			ps->code, uri.len, uri.s, cb_param->set_id);
+			ps->code, cb_param->uri.len, cb_param->uri.s, cb_param->set_id);
 
 	/* ps->code contains the result-code of the request;
 	 * We accept "200 OK" by default and the custom codes
@@ -2629,13 +2624,13 @@ static void ds_options_callback( struct cell *t, int type,
 	if ((ps->code == 200) || check_options_rplcode(ps->code)) {
 		/* Set the according entry back to "Active":
 		 *  remove the Probing/Inactive Flag and reset the failure counter. */
-		if (ds_set_state(cb_param->set_id, &uri,
+		if (ds_set_state(cb_param->set_id, &cb_param->uri,
 			DS_INACTIVE_DST|DS_PROBING_DST|DS_RESET_FAIL_DST, 0,
 			cb_param->partition, 1, 0, MI_SSTR("200 OK probing reply")
 					) != 0)
 		{
-			LM_ERR("Setting the state failed (%.*s, group %d)\n", uri.len,
-					uri.s, cb_param->set_id);
+			LM_ERR("Setting the state failed (%.*s, group %d)\n",
+				cb_param->uri.len, cb_param->uri.s, cb_param->set_id);
 		}
 	}
 	/* if we always probe, and we get a timeout
@@ -2644,11 +2639,11 @@ static void ds_options_callback( struct cell *t, int type,
 	if((ds_probing_mode==1 || cb_param->always_probe) && ps->code != 200 &&
 	(ps->code == 408 || !check_options_rplcode(ps->code)))
 	{
-		if (ds_set_state(cb_param->set_id, &uri, DS_PROBING_DST, 1,
+		if (ds_set_state(cb_param->set_id, &cb_param->uri, DS_PROBING_DST, 1,
 			cb_param->partition, 1, 0, MI_SSTR("negative probing reply")) != 0)
 		{
 			LM_ERR("Setting the probing state failed (%.*s, group %d)\n",
-					uri.len, uri.s, cb_param->set_id);
+				cb_param->uri.len, cb_param->uri.s, cb_param->set_id);
 		}
 	}
 
@@ -2668,7 +2663,6 @@ void ds_check_timer(unsigned int ticks, void* param)
 		ds_options_callback_param_t params;
 
 		struct socket_info *sock;
-		str uri;
 		struct usr_avp *avps;
 
 		struct gw_prob_pack *next;
@@ -2732,11 +2726,6 @@ void ds_check_timer(unsigned int ticks, void* param)
 						break;
 					}
 
-					pack->uri.s = (char*)(pack+1);
-					memcpy(pack->uri.s, list->dlist[j].uri.s,
-						list->dlist[j].uri.len);
-					pack->uri.len = list->dlist[j].uri.len;
-
 					pack->sock = list->dlist[j].sock;
 
 					if (partition->attrs_avp_name>=0) {
@@ -2750,6 +2739,11 @@ void ds_check_timer(unsigned int ticks, void* param)
 							pack->avps->next = NULL;
 					} else
 						pack->avps = NULL;
+
+					pack->params.uri.s = (char*)(pack+1);
+					memcpy(pack->params.uri.s, list->dlist[j].uri.s,
+						list->dlist[j].uri.len);
+					pack->params.uri.len = list->dlist[j].uri.len;
 
 					pack->params.partition = partition;
 					pack->params.set_id = list->id;
@@ -2777,8 +2771,10 @@ void ds_check_timer(unsigned int ticks, void* param)
 
 			/* Execute the Dialog using the "request"-Method of the
 			 * TM-Module.*/
-			if (tmb.new_auto_dlg_uac(&ds_ping_from,
-			&pack->uri, NULL, NULL,
+			if (tmb.new_auto_dlg_uac((partition->ping_from.len?
+							&partition->ping_from:
+							&ds_ping_from),
+			&pack->params.uri, NULL, NULL,
 			pack->sock?pack->sock:probing_sock,
 			&dlg) != 0 ) {
 				LM_ERR("failed to create new TM dlg\n");
@@ -2793,7 +2789,9 @@ void ds_check_timer(unsigned int ticks, void* param)
 			dlg->avps = pack->avps;
 			pack->avps = NULL;
 
-			if (tmb.t_request_within(&ds_ping_method,
+			if (tmb.t_request_within((partition->ping_method.len?
+							&partition->ping_method:
+							&ds_ping_method),
 					NULL,
 					NULL,
 					dlg,

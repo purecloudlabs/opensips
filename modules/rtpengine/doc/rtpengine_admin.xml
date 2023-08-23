@@ -103,7 +103,9 @@
 		<title><varname>rtpengine_sock</varname> (string)</title>
 		<para>
 		Definition of socket(s) used to connect to (a set) &rtp; proxy. It may
-		specify a UNIX socket or an IPv4/IPv6 UDP socket.
+		specify a UNIX socket or an IPv4/IPv6 UDP socket. If the protocol part
+		(i.e. <quote>udp:</quote>) is missing, the socket is treated as a
+		UNIX socket.
 		</para>
 		<para>
 		<emphasis>
@@ -373,31 +375,6 @@ modparam("rtpengine", "set_column", "set_new")
 
 	</section>
 
-	<section id="exported_events" xreflabel="Exported Events">
-	<title>Exported Events</title>
-	<section id="event_E_RTPENGINE_STATUS" xreflabel="E_RTPENGINE_STATUS">
-		<title>
-		<function moreinfo="none">E_RTPENGINE_STATUS</function>
-		</title>
-		<para>
-			This event is raised when a RTPEngine server changes it's status to
-			active/inactive.
-		</para>
-		<para>Parameters:</para>
-		<itemizedlist>
-			<listitem><para>
-				<emphasis>socket</emphasis> - the socket that identifies the
-				RTPEngine instance.
-			</para></listitem>
-			<listitem><para>
-				<emphasis>status</emphasis> - <emphasis>active</emphasis> if
-				the RTPEngine instance responds to probing or
-				<emphasis>inactive</emphasis> if the instance was deactivated.
-			</para></listitem>
-		</itemizedlist>
-	</section>
-	</section>
-
 	<section>
 	<title>Exported Functions</title>
 	<section id="func_rtpengine_use_set" xreflabel="rtpengine_use_set()">
@@ -466,6 +443,10 @@ rtpengine_offer();
 				delete the full call, breaking the subsequent <quote>answer</quote> for the
 				new branch. <emphasis>This flag is only supported by the Sipwise rtpengine
 				&rtp; proxy at the moment!</emphasis>
+				</para></listitem>
+				<listitem><para>
+				<emphasis>via-branch-param=...</emphasis> - provide a custom value for the
+				<emphasis>via-branch</emphasis> param.
 				</para></listitem>
 				<listitem><para>
 				<emphasis>call-id</emphasis> - provide a custom Call-ID for the session. If
@@ -1472,6 +1453,15 @@ $ opensips-cli -x mi rtpengine_show
 			Reloads all rtpengine sets from the database. Used only when the
 			<quote><xref linkend="param_db_url"/></quote> parameter is set.
 			</para>
+			<para>Parameters:</para>
+			<itemizedlist>
+				<listitem><para>
+					<emphasis>type</emphasis> (optional) soft - when reloading nodes
+					from the database, reuse any existing sockets and keep existing
+					node disabled state. If not provided, then all nodes and sockets
+					will first be torndown and then nodes will be loaded from the database.
+				</para></listitem>
+			</itemizedlist>
 			<para>
 			No parameter.
 			</para>
@@ -1481,6 +1471,7 @@ $ opensips-cli -x mi rtpengine_show
 			<programlisting format="linespecific">
 ...
 $ opensips-cli -x mi rtpengine_reload
+$ opensips-cli -x mi rtpengine_reload type=soft
 ...
 			</programlisting>
 			</example>
@@ -1561,6 +1552,28 @@ $ opensips-cli -x mi teardown Y2IwYjQ2YmE2ZDg5MWVkNDNkZGIwZjAzNGM1ZDY0ZDQ
 			</para></listitem>
 			<listitem><para>
 				<emphasis>volume</emphasis> - volume of the tone
+			</para></listitem>
+		</itemizedlist>
+	</section>
+
+	<section id="event_E_RTPENGINE_STATUS" xreflabel="E_RTPENGINE_STATUS">
+		<title>
+		<function moreinfo="none">E_RTPENGINE_STATUS</function>
+		</title>
+		<para>
+			This event is raised when a RTPEngine server changes it's status to
+			active/inactive.
+		</para>
+		<para>Parameters:</para>
+		<itemizedlist>
+			<listitem><para>
+				<emphasis>socket</emphasis> - the socket that identifies the
+				RTPEngine instance.
+			</para></listitem>
+			<listitem><para>
+				<emphasis>status</emphasis> - <emphasis>active</emphasis> if
+				the RTPEngine instance responds to probing or
+				<emphasis>inactive</emphasis> if the instance was deactivated.
 			</para></listitem>
 		</itemizedlist>
 	</section>

@@ -11,13 +11,41 @@
 		sessions using the MSRP(RFC 4976) protocol.
     </para>
     <para>
-    	Through the exported script and MI functions, the module allows OpenSIPS
-    	to set up MSRP sessions via SIP and exchange messages as an MSRP endpoint.
+		Through an internal API and exported script and MI functions, the module
+		allows OpenSIPS to set up MSRP sessions via SIP and exchange messages as
+		an MSRP endpoint.
     </para>
     <para>
     	The module makes use of the <emphasis>proto_msrp</emphasis> module for
     	the MSRP protocol stack and the <emphasis>b2b_entities</emphasis> module 
     	for the SIP UAC/UAS functionalities.
+    </para>
+	</section>
+
+	<section id="usage_script_external" xreflabel="Usage from Script and External API">
+	<title>Usage from Script and External API</title>
+	<para>
+	In order to start a SIP call carying MSRP from OpenSIPS you can use the
+	<xref linkend="mi_msrp_ua_start_session"/> MI function. Alternatively, to
+	answer a SIP session with MSRP you can use the
+	<xref linkend="func_msrp_ua_answer"/> script function.
+	</para>
+	<para>
+	When a UAC or UAS session is successfully established(ACK sent/received) the
+	<xref linkend="event_E_MSRP_SESSION_NEW"/> event is triggered. After this point,
+	you may receive MSRP messages or Reports, signaled by the
+	<xref linkend="event_E_MSRP_MSG_RECEIVED"/> and
+	<xref linkend="event_E_MSRP_REPORT_RECEIVED"/> events.
+    </para>
+    <para>
+    Note that the <emphasis>E_MSRP_REPORT_RECEIVED</emphasis> event covers both actual MSRP
+    REPORT requests as well as negative MSRP transaction responses and local send
+    timeouts(which should be treated the same as a received timeout transaction
+    response).
+    </para>
+    <para>
+    You can send MSRP messages to the peer with the
+    <xref linkend="mi_msrp_ua_send_message"/> MI function.
     </para>
 	</section>
 
@@ -249,15 +277,31 @@ if (!has_totag() &amp;&amp; is_method("INVITE")) {
 				<emphasis>body</emphasis> (string, optional) - actual message
 				body. If missing, an empty message will be sent.
 			</para></listitem>
+			<listitem><para>
+				<emphasis>success_report</emphasis> (string, optional) - string
+				indicating whether to request an MSRP Success Report. Possible
+				values are <emphasis>yes</emphasis> or <emphasis>no</emphasis>.
+				If the parameter is missing or is set to "no" the SEND request
+				will not include a Success-Report header.
+			</para></listitem>
+			<listitem><para>
+				<emphasis>failure_report</emphasis> (string, optional) - string
+				indicating whether to request an MSRP Failure Report. Possible
+				values are <emphasis>yes</emphasis>, <emphasis>no</emphasis> or
+				<emphasis>partial</emphasis>, as specified in MSRP.
+				If the parameter is missing or is set to "yes" the SEND request
+				will not include a Failure-Report header. Note that if the header
+				field is not present, the receving MSRP endpoint must treat it the
+				same as a Failure-Report header with a value of "yes".
+			</para></listitem>
 		</itemizedlist>
 		<para>
 		MI FIFO Command Format:
 		</para>
 		<programlisting  format="linespecific">
 opensips-cli -x mi msrp_ua_send_message \
-	5addd9e7b74fa44fbace68a4fc562293 \
-	text/plain \
-	Hello
+	session_id=5addd9e7b74fa44fbace68a4fc562293 \
+	mime=text/plain body=Hello success_report=yes
 		</programlisting>
 		</section>
 
@@ -418,8 +462,8 @@ opensips-cli -x mi msrp_ua_end_session \
 		<function moreinfo="none">E_MSRP_MSG_RECEIVED</function>
 		</title>
 		<para>
-			This event is triggered when receiving a new, non-empty MSRP message
-			from the peer.
+			This event is triggered when receiving a new, non-empty MSRP SEND
+			request from the peer.
 		</para>
 		<para>Parameters:</para>
 		<itemizedlist>
@@ -432,6 +476,44 @@ opensips-cli -x mi msrp_ua_end_session \
 			</para></listitem>
 			<listitem><para>
 				<emphasis>body</emphasis> - The actual message body.
+			</para></listitem>
+		</itemizedlist>
+	</section>
+
+	<section id="event_E_MSRP_REPORT_RECEIVED" xreflabel="E_MSRP_REPORT_RECEIVED">
+		<title>
+		<function moreinfo="none">E_MSRP_REPORT_RECEIVED</function>
+		</title>
+		<para>
+			This event is triggered when:
+			<itemizedlist>
+				<listitem><para>
+				a MSRP REPORT request is received
+				</para></listitem>
+				<listitem><para>
+				a failure transaction response is received
+				</para></listitem>
+				<listitem><para>
+				a local timeout for a SEND request occured.
+				</para></listitem>
+			</itemizedlist>
+		</para>
+		<para>Parameters:</para>
+		<itemizedlist>
+			<listitem><para>
+				<emphasis>session_id</emphasis> - The MSRP session identifier
+				("session-id" part of the MSRP URI).
+			</para></listitem>
+			<listitem><para>
+				<emphasis>message_id</emphasis> - The value of the Message-ID
+				header field.
+			</para></listitem>
+			<listitem><para>
+				<emphasis>status</emphasis> - The value of the Status header field.
+			</para></listitem>
+			<listitem><para>
+				<emphasis>byte_range</emphasis> - The value of the Byte-Range header
+				field.
 			</para></listitem>
 		</itemizedlist>
 	</section>	

@@ -50,8 +50,8 @@ static inline void tls_append_cert_info(WOLFSSL_X509 *cert, char client,
 		add_trace_data(message, "server-issuer", &issuer);
 	}
 
-	wolfSSL_Free(subj.s);
-	wolfSSL_Free(issuer.s);
+	oss_wolfSSL_Free(subj.s);
+	oss_wolfSSL_Free(issuer.s);
 }
 
 static inline void tls_append_master_secret(WOLFSSL *ssl, struct tls_data* data)
@@ -95,10 +95,10 @@ static inline int _wolfssl_trace_tls(struct tcp_connection* conn, WOLFSSL *ssl,
 	if ( !conn || !TLS_TRACE_IS_ON(conn) || !(data=conn->proto_data) )
 		return 0;
 
-	if ( data->trace_route_id != -1 ) {
-		check_trace_route( data->trace_route_id, conn );
+	if ( data->trace_route_ref) {
+		check_trace_route( data->trace_route_ref, conn );
 		/* avoid doing this multiple times */
-		data->trace_route_id = -1;
+		data->trace_route_ref = NULL;
 	}
 
 	/* check if tracing is deactivated from the route for this connection */

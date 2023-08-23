@@ -45,8 +45,8 @@ async_script_resume_function *async_script_resume_f = NULL;
 typedef struct _async_launch_ctx {
 	/* generic async context - MUST BE FIRST */
 	async_ctx  async;
-	/* the ID of the report script route (-1 if none) */
-	int report_route;
+	/* ref to the report script route (NULL if none) */
+	struct script_route_ref *report_route;
 	str report_route_param;
 } async_launch_ctx;
 
@@ -79,6 +79,8 @@ int register_async_fd(int fd, async_resume_fd *f, void *resume_param)
 		LM_ERR("failed to allocate new async_ctx\n");
 		return -1;
 	}
+
+	memset(ctx,0,sizeof(async_ctx));
 
 	ctx->resume_f = f;
 	ctx->resume_param = resume_param;
@@ -174,6 +176,7 @@ int async_launch_resume(int fd, void *param)
 {
 	struct sip_msg *req;
 	async_launch_ctx *ctx = (async_launch_ctx *)param;
+	int bk_rt;
 
 	LM_DBG("resume for a launch job\n");
 
@@ -239,18 +242,19 @@ run_route:
 	if (async_status == ASYNC_DONE_CLOSE_FD)
 		close(fd);
 
-	if (ctx->report_route!=-1) {
+	if (ref_script_route_check_and_update(ctx->report_route)) {
 		LM_DBG("runinng report route for a launch job,"
 			" route <%s>, param [%.*s]\n",
-			sroutes->request[ctx->report_route].name, 
+			ctx->report_route->name.s,
 			ctx->report_route_param.len, ctx->report_route_param.s);
-		set_route_type( REQUEST_ROUTE );
 		if (ctx->report_route_param.s)
 			route_params_push_level(
-				sroutes->request[ctx->report_route].name, 
+				sroutes->request[ctx->report_route->idx].name, 
 				&ctx->report_route_param, NULL,
 				launch_route_param_get);
-		run_top_route( sroutes->request[ctx->report_route], req);
+		swap_route_type( bk_rt, REQUEST_ROUTE);
+		run_top_route( sroutes->request[ctx->report_route->idx], req);
+		set_route_type( bk_rt );
 		if (ctx->report_route_param.s)
 			route_params_pop_level();
 
@@ -259,6 +263,8 @@ run_route:
 	}
 
 	/* no need for the context anymore */
+	if (ctx->report_route)
+		shm_free(ctx->report_route);
 	shm_free(ctx);
 	LM_DBG("done with a launch job\n");
 
@@ -271,12 +277,14 @@ restore:
 
 
 int async_script_launch(struct sip_msg *msg, struct action* a,
-					int report_route, str *report_route_param, void **params)
+								struct script_route_ref *report_route,
+								str *report_route_param, void **params)
 {
 	struct sip_msg *req;
 	struct usr_avp *report_avps = NULL, **bak_avps = NULL;
 	async_launch_ctx *ctx;
 	int fd = -1;
+	int bk_rt;
 
 	/* run the function (the action) and get back from it the FD,
 	 * resume function and param */
@@ -292,9 +300,11 @@ int async_script_launch(struct sip_msg *msg, struct action* a,
 		return -1;
 	}
 
+	memset(ctx,0,sizeof(async_launch_ctx));
+
 	async_status = ASYNC_NO_IO; /*assume defauly status "no IO done" */
 
-	return_code = ((acmd_export_t*)(a->elem[0].u.data))->function(msg,
+	return_code = ((const acmd_export_t*)(a->elem[0].u.data_const))->function(msg,
 			(async_ctx*)ctx,
 			params[0], params[1], params[2],
 			params[3], params[4], params[5],
@@ -328,7 +338,12 @@ int async_script_launch(struct sip_msg *msg, struct action* a,
 	}
 
 	/* ctx is to be used from this point further */
-	ctx->report_route = report_route;
+
+	ctx->report_route = dup_ref_script_route_in_shm( report_route, 0);
+	if (!ref_script_route_is_valid(ctx->report_route)) {
+		LM_ERR("failed dup resume route -> act in sync mode\n");
+		goto sync;
+	}
 
 	if (report_route_param) {
 		ctx->report_route_param.s = (char *)(ctx+1);
@@ -363,8 +378,10 @@ sync:
 	} while(async_status==ASYNC_CONTINUE||async_status==ASYNC_CHANGE_FD);
 	/* the IO completed, so report now */
 report:
+	if (ctx->report_route)
+		shm_free(ctx->report_route);
 	shm_free(ctx);
-	if (report_route==-1)
+	if (report_route==NULL)
 		return 1;
 
 	/* run the report route inline */
@@ -374,11 +391,12 @@ report:
 		return -1;
 	}
 
-	set_route_type( REQUEST_ROUTE );
 	bak_avps = set_avp_list(&report_avps);
+	swap_route_type( bk_rt, REQUEST_ROUTE);
 
-	run_top_route( sroutes->request[report_route], req);
+	run_top_route( sroutes->request[report_route->idx], req);
 
+	set_route_type( bk_rt );
 	destroy_avp_list(&report_avps);
 	set_avp_list(bak_avps);
 

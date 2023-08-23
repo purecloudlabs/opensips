@@ -74,15 +74,15 @@ do { \
 	str __s; \
 	DLG_BIN_POP(str, _packet, __s, _pre_linking_error);\
 	if (__s.len) {\
-		_dlg->rt_ ## _type = get_script_route_ID_by_name_str( &__s, \
-			sroutes->request, RT_NO); \
-		if (_dlg->rt_ ## _type==-1) { \
+		_dlg->rt_ ## _type = ref_script_route_by_name_str( &__s, \
+			sroutes->request, RT_NO, REQUEST_ROUTE, 1); \
+		if (!ref_script_route_is_valid( _dlg->rt_ ## _type)) { \
 			LM_WARN("replicated <%.*s>  ## _type route not found " \
 				"in the script\n", __s.len, __s.s); \
-			_dlg->rt_ ## _type = 0; \
+			_dlg->rt_ ## _type = NULL; \
 		} \
 	} else \
-		_dlg->rt_ ## _type = 0; \
+		_dlg->rt_ ## _type = NULL; \
 } while(0)
 
 static struct dlg_cell *lookup_dlg_unsafe(unsigned int h_entry, unsigned int h_id)
@@ -178,11 +178,12 @@ int dlg_replicated_create(bin_packet_t *packet, struct dlg_cell *cell,
 	struct dlg_cell *dlg = NULL;
 	struct socket_info *caller_sock, *callee_sock;
 	struct dlg_entry *d_entry;
-	str tag_name;
+	int_str tag_name;
 	unsigned int h_id;
 	unsigned int state;
 	unsigned int start_ts;
 	short pkg_ver = get_bin_pkg_version(packet);
+	int dlg_val_type;
 
 	LM_DBG("Received replicated dialog!\n");
 
@@ -348,15 +349,15 @@ int dlg_replicated_create(bin_packet_t *packet, struct dlg_cell *cell,
 				NULL, DLG_DIR_NONE, NULL, 1, 0);
 	}
 
-	dlg->locked_by = process_no;
-
-	if ((rc = fetch_dlg_value(dlg, &shtag_dlg_val, &tag_name, 0)) == 0) {
-		if (shm_str_dup(&dlg->shtag, &tag_name) < 0)
+	if ((rc = fetch_dlg_value(dlg, &shtag_dlg_val, &dlg_val_type, &tag_name, 0)) == 0) {
+		if (dlg_val_type != DLG_VAL_TYPE_STR) {
+			LM_ERR("Bad dialog value type\n");
+		} else if (shm_str_dup(&dlg->shtag, &tag_name.s) < 0) {
 			LM_ERR("No more shm memory\n");
+		}
 	} else if (rc == -1)
-		LM_ERR("Failed to get dlg value for sharing tag\n");
-
-	dlg->locked_by = 0;
+		LM_ERR("Failed to get dlg value for sharing tag %.*s\n",
+		       tag_name.s.len, tag_name.s.s);
 
 	if (from_sync) {
 		dlg->flags |= DLG_FLAG_SYNCED;
@@ -611,7 +612,7 @@ int dlg_replicated_delete(bin_packet_t *packet)
 		DLG_BIN_POP(int, packet, h_id, malformed);
 
 		h_entry = dlg_hash(&call_id);
-		dlg = lookup_dlg(h_entry, h_id);
+		dlg = lookup_dlg(h_entry, h_id, 1);
 	} else {
 		dlg = get_dlg(&call_id, &from_tag, &to_tag, &dir, &dst_leg);
 	}
@@ -734,11 +735,8 @@ malformed:
 
 #define DLG_BIN_PUSH_ROUTE(_packet, _dlg, _type) \
 do { \
-	str __s; \
 	if (_dlg->rt_ ## _type>0) { \
-		__s.s = sroutes->request[_dlg->rt_ ## _type].name; \
-		__s.len = strlen(__s.s); \
-		bin_push_str(_packet, &__s); \
+		bin_push_str(_packet, &_dlg->rt_ ## _type->name); \
 	} else { \
 		bin_push_str(_packet, NULL); \
 	} \
@@ -748,6 +746,7 @@ void bin_push_dlg(bin_packet_t *packet, struct dlg_cell *dlg)
 {
 	int callee_leg;
 	str *vars, *profiles;
+	int_str isval;
 
 	callee_leg = callee_idx(dlg);
 
@@ -789,10 +788,13 @@ void bin_push_dlg(bin_packet_t *packet, struct dlg_cell *dlg)
 	run_dlg_callbacks(DLGCB_WRITE_VP, dlg, NULL, DLG_DIR_NONE, NULL, 1, 1);
 
    /* save sharing tag name as dlg val */
-	if (dlg->shtag.s && store_dlg_value_unsafe(dlg, &shtag_dlg_val, &dlg->shtag) < 0)
-		LM_ERR("Failed to store sharing tag name as dlg val\n");
+	isval.s = dlg->shtag;
+	if (dlg->shtag.s && store_dlg_value(dlg, &shtag_dlg_val, &isval,
+		DLG_VAL_TYPE_STR) < 0)
+		LM_ERR("Failed to store sharing tag %.*s(%p) as dlg val\n",
+		       dlg->shtag.len, dlg->shtag.s, dlg->shtag.s);
 
-	vars = write_dialog_vars(dlg->vals);
+	vars = write_dialog_vars(dlg);
 	profiles = write_dialog_profiles(dlg->profile_links);
 
 	bin_push_str(packet, vars);

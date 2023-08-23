@@ -129,13 +129,13 @@ static int fixup_whitelist_compress(void**);
 static int fixup_whitelist_free(void **);
 static int fixup_mc_compact_flags(void **);
 
-static int mc_compact(struct sip_msg* msg, mc_whitelist_p wh_list, int* flags_p);
+static int mc_compact(struct sip_msg* msg, mc_whitelist_p wh_list, void* flags_p);
 static int mc_compact_cb(char** buf, struct mc_compact_args* mc_compact_args, int, int*);
 
 static int mc_compress(struct sip_msg* msg, int* algo, int* flags,
 		mc_whitelist_p wh_list);
 int mc_compress_cb(char** buf, void* param, int type, int* olen);
-static inline int mc_ndigits(int x);
+static inline unsigned int mc_ndigits(int x);
 static inline void parse_algo_hdr(struct hdr_field* algo_hdr, int* algo, int* b64_required);
 
 static int mc_decompress(struct sip_msg*);
@@ -155,12 +155,12 @@ static str body_in  = {NULL, 0},
 	   hdr_out  = {NULL, 0},
 	   buf_out  = {NULL, 0};
 
-static param_export_t mod_params[]={
+static const param_export_t mod_params[]={
 	{ "compression_level", INT_PARAM, &mc_level},
 	{0,0,0}
 };
 
-static cmd_export_t cmds[]={
+static const cmd_export_t cmds[]={
 	{"mc_compact",	  (cmd_function)mc_compact, {
 		{CMD_PARAM_STR|CMD_PARAM_OPT|CMD_PARAM_FIX_NULL,
 			fixup_whitelist_compact, fixup_whitelist_free},
@@ -466,7 +466,7 @@ static int fixup_mc_compact_flags(void **param)
 {
 	str *s = (str *) *param;
 	int st;
-	long flags = 0;
+	unsigned long flags = 0;
 
 	if (s) {
 		for (st = 0; st < s->len; st++) {
@@ -478,8 +478,9 @@ static int fixup_mc_compact_flags(void **param)
 						LM_WARN("unknown option `%c'\n", s->s[st]);
 			}
 		}
-		*param = (void *) flags;
 	}
+
+	*param = (void *)flags;
 	return 0;
 }
 
@@ -623,7 +624,7 @@ error:
  * 3) Headers which not in whitelist will be removed
  * 4) Unnecessary sdp body codec attributes lower than 96 removed
  */
-static int mc_compact(struct sip_msg* msg, mc_whitelist_p wh_list, int* flags_p)
+static int mc_compact(struct sip_msg* msg, mc_whitelist_p wh_list, void* flags_p)
 {
 	struct mc_compact_args *mc_compact_args_p;
 
@@ -643,7 +644,7 @@ static int mc_compact(struct sip_msg* msg, mc_whitelist_p wh_list, int* flags_p)
 		goto error;
 	}
 
-	mc_compact_args_p->flags = *flags_p;
+	mc_compact_args_p->flags = (unsigned int)(unsigned long)flags_p;
 	SET_GLOBAL_CTX(compact_ctx_pos, (void*)mc_compact_args_p);
 
 	/* register stateless callbacks */
@@ -652,7 +653,7 @@ static int mc_compact(struct sip_msg* msg, mc_whitelist_p wh_list, int* flags_p)
 		goto error;
 	}
 
-	if (tm_api.t_gett && msg->flags&FL_TM_CB_REGISTERED)
+	if (tm_api.t_gett && msg->msg_flags&FL_TM_CB_REGISTERED)
 		goto error;
 
 	/*register tm callback if tm api */
@@ -660,7 +661,7 @@ static int mc_compact(struct sip_msg* msg, mc_whitelist_p wh_list, int* flags_p)
 			tm_api.register_tmcb( msg, 0, TMCB_PRE_SEND_BUFFER,
 				wrap_tm_compact, NULL, 0) != 1) {
 		LM_ERR("failed to add tm TMCB_PRE_SEND_BUFFER callback\n");
-		msg->flags |= FL_TM_CB_REGISTERED;
+		msg->msg_flags |= FL_TM_CB_REGISTERED;
 		goto error;
 	}
 
@@ -1018,14 +1019,16 @@ free_mem:
 /*
  *
  */
-static inline int mc_ndigits(int x)
+static inline unsigned int mc_ndigits(int x)
 {
-	if (x == 0)
-		return 1;
+	unsigned int n = 0;
 
-	if (x > 10)
-		return 1 + mc_ndigits(x/10);
-	else return 1;
+	while (x >= 10) {
+		x /= 10;
+		n++;
+	}
+
+	return n + 1;
 }
 
 /*
@@ -1099,7 +1102,7 @@ static int mc_compress(struct sip_msg* msg, int *algo_p, int *flags_p,
 		goto end;
 	}
 
-	if (tm_api.t_gett && msg->flags&FL_TM_CB_REGISTERED) {
+	if (tm_api.t_gett && msg->msg_flags&FL_TM_CB_REGISTERED) {
 		ret = 1;
 		goto end;
 	}
@@ -1109,7 +1112,7 @@ static int mc_compress(struct sip_msg* msg, int *algo_p, int *flags_p,
 			tm_api.register_tmcb( msg, 0, TMCB_PRE_SEND_BUFFER,
 				wrap_tm_compress, NULL, 0) != 1) {
 		LM_ERR("failed to add tm TMCB_PRE_SEND_BUFFER callback\n");
-		msg->flags |= FL_TM_CB_REGISTERED;
+		msg->msg_flags |= FL_TM_CB_REGISTERED;
 		goto end;
 	}
 

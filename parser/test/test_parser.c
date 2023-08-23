@@ -159,16 +159,30 @@ static const struct tts {
 		/* test for read overflows on bad header body (no \n ending) */
 		"m  r\nu:c \x1b\r   : ]",
 		-1,
+	}, {
+		/* test for read overflow on Via header (the @end pointer) */
+		"Q e  M\nV:SIP/2.0  /1P 4rr;TT;TT;TT;TT;TT;TT;T\xd2;TT;",
+		-1,
+	}, {
+		/* test for read overflow on Via header param (the @end pointer) */
+		"A  !\nV:SIP/2.0/? M;recEIVeD\n ",
+		-1,
+	}, {
+		/* test for read overflow on Content-Length parsing error (@end) */
+		"v D \xd7\r\xeeV:1\r\nl:5\r*",
+		-1,
+	}, {
+		/* test for read overflow during Content-Length ws trimming (@end) */
+		"abcde J    \x09:5\nL\x09:\x09\n",
+		-1,
 	},
-
-	{"\0", 0},
 };
 
 void test_parse_msg(void)
 {
 	int i;
 
-	for (i = 0; tset[i].tmsg[0]; i++) {
+	for (i = 0; i < sizeof tset/sizeof *tset; i++) {
 		struct sip_msg msg;
 
 		memset(&msg, 0, sizeof msg);
