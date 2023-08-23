@@ -108,6 +108,10 @@ static int cfg_validate(void);
 
 static int domain_fixup(void** param);
 static int fix_out_expires(void **out_exp);
+static int save_flags_fixup(void** param);
+static int save_flags_fixup_free(void** param);
+static int lookup_flags_fixup(void** param);
+static int lookup_flags_fixup_free(void** param);
 
 int solve_avp_defs(void);
 
@@ -127,28 +131,28 @@ char *mp_ctid_insertion = "ct-param";
 str ctid_param = str_init("ctid");
 str at_escape_str = str_init("%40");
 
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"mid_registrar_save", (cmd_function)mid_reg_save, {
 		{CMD_PARAM_STR|CMD_PARAM_STATIC, domain_fixup, 0},
-		{CMD_PARAM_STR|CMD_PARAM_OPT, 0 ,0},
+		{CMD_PARAM_STR|CMD_PARAM_OPT, save_flags_fixup, save_flags_fixup_free},
 		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0},
 		{CMD_PARAM_INT|CMD_PARAM_OPT, fix_out_expires, 0},
 		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0}, {0,0,0}},
 		REQUEST_ROUTE},
 	{"mid_registrar_lookup", (cmd_function)mid_reg_lookup, {
 		{CMD_PARAM_STR|CMD_PARAM_STATIC, domain_fixup, 0},
-		{CMD_PARAM_STR|CMD_PARAM_OPT, 0 ,0},
+		{CMD_PARAM_STR|CMD_PARAM_OPT, lookup_flags_fixup, lookup_flags_fixup_free},
 		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0}, {0,0,0}},
 		REQUEST_ROUTE},
 	{0,0,{{0,0,0}},0}
 };
 
-static acmd_export_t acmds[] = {
+static const acmd_export_t acmds[] = {
 	pn_async_cmds,
 	{0,0,{{0,0,0}}}
 };
 
-static param_export_t mod_params[] = {
+static const param_export_t mod_params[] = {
 	{ "mode",                 INT_PARAM, &reg_mode },
 	{ "default_expires",      INT_PARAM, &default_expires },
 	{ "min_expires",          INT_PARAM, &min_expires },
@@ -178,7 +182,7 @@ static param_export_t mod_params[] = {
 	{ 0,0,0 }
 };
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "usrloc",    DEP_ABORT  },
 		{ MOD_TYPE_DEFAULT, "signaling", DEP_ABORT  },
@@ -271,6 +275,31 @@ static int fix_out_expires(void **out_exp)
 	return 0;
 }
 
+static int save_flags_fixup(void **param)
+{
+	struct save_flags default_flags;
+
+	memset(&default_flags, 0, sizeof default_flags);
+	default_flags.cmatch.mode = CT_MATCH_NONE;
+	default_flags.max_contacts = max_contacts;
+
+	return reg_fixup_save_flags(param, &default_flags);
+}
+
+static int save_flags_fixup_free(void **param)
+{
+	return reg_fixup_free_save_flags(param);
+}
+
+static int lookup_flags_fixup(void **param)
+{
+	return reg_fixup_lookup_flags(param);
+}
+
+static int lookup_flags_fixup_free(void **param)
+{
+	return reg_fixup_free_lookup_flags(param);
+}
 
 static int mid_reg_pre_script(struct sip_msg *foo, void *bar)
 {

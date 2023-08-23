@@ -26,6 +26,7 @@
 #include <signal.h>
 #include <unistd.h>
 
+#include "lib/dbg/profiling.h"
 #include "config.h"
 #include "dprint.h"
 #include "daemonize.h"
@@ -51,11 +52,18 @@ void cleanup(int show_status)
 
 	/*clean-up*/
 
+#ifdef DBG_MALLOC
+	if (shm_memlog_size && mem_dbg_lock)
+		shm_dbg_unlock();
+#endif
+
 	handle_ql_shutdown();
 	destroy_modules();
 	udp_destroy();
 	tcp_destroy();
 	destroy_timer();
+	if (shm_memlog_size)
+		shm_mem_disable_dbg();
 	destroy_stats_collector();
 	destroy_script_cb();
 	pv_free_extra_list();
@@ -85,6 +93,8 @@ void cleanup(int show_status)
 			LM_GEN1(memdump, "Memory status (shm):\n");
 			shm_status();
 	}
+
+	cleanup_log_cons_shm_table();
 
 	/* zero all shmem alloc vars that we still use */
 	shm_mem_destroy();
@@ -146,6 +156,7 @@ static void rpc_process_terminate(int sender_id, void *code)
 	LM_DBG("Process %d exiting with code %d...\n",
 		process_no, (int)(long)code);
 
+	_ProfilerStop();
 	exit( (int)(long)code );
 }
 
@@ -160,6 +171,8 @@ void shutdown_opensips( int status )
 	int chld_status;
 
 	sr_set_core_status_terminating();
+
+	distroy_log_event_cons();
 
 	/* terminate all processes */
 
@@ -213,6 +226,8 @@ void shutdown_opensips( int status )
 		kill_all_children(SIGKILL);
 	}
 
+	_ProfilerStop();
+
 	/* Only one process is running now. Clean up and return overall status */
 
 	/* hack: force-unlock the shared memory lock(s) in case
@@ -226,6 +241,6 @@ void shutdown_opensips( int status )
 	alarm(0);
 	signal(SIGALRM, SIG_IGN);
 
-	dprint("Thank you for running " NAME "\n");
+	stderr_dprint_tmp("Thank you for running " NAME "\n");
 	exit( status );
 }

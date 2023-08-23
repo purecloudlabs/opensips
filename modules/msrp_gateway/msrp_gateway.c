@@ -85,7 +85,7 @@ static str evi_ruri_pname = str_init("ruri");
 static str evi_code_pname = str_init("code");
 static str evi_reason_pname = str_init("reason");
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "msrp_ua", DEP_ABORT },
 		{ MOD_TYPE_DEFAULT, "tm", DEP_ABORT },
@@ -96,14 +96,14 @@ static dep_export_t deps = {
 	},
 };
 
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{"hash_size", INT_PARAM, &msrpgw_sessions_hsize},
 	{"cleanup_interval", INT_PARAM, &cleanup_interval},
 	{"session_timeout", INT_PARAM, &session_timeout},
 	{"message_timeout", INT_PARAM, &message_timeout},
 };
 
-static cmd_export_t cmds[]=
+static const cmd_export_t cmds[]=
 {
 	{"msrp_gw_answer", (cmd_function)msrpgw_answer, {
 		{CMD_PARAM_STR, 0, 0},
@@ -121,7 +121,7 @@ static cmd_export_t cmds[]=
 	{0,0,{{0,0,0}},0}
 };
 
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ "msrp_gw_end_session", 0, 0, 0, {
 		{msrpgw_mi_end, {"key", 0}},
 		{EMPTY_MI_RECIPE}}
@@ -339,7 +339,7 @@ int msrpua_notify_cb(struct msrp_ua_notify_params *params, void *hdl_param)
 			list_del(&msg->list);
 
 			if (msrpua_api.send_message(&sess->msrpua_sess_id,
-				&msg->content_type, &msg->body) < 0)
+				&msg->content_type, &msg->body, MSRP_FAILURE_REPORT_NO, 0) < 0)
 				LM_ERR("Failed to send queued message to MSRP side\n");
 
 			shm_free(msg);
@@ -669,7 +669,7 @@ static int msg_to_msrp(struct sip_msg *msg, str *key, str *content_types)
 
 		if (sess->msrpua_sess_id.s) {
 			if (msrpua_api.send_message(&sess->msrpua_sess_id,
-				&msg->content_type->body, &body) < 0) {
+				&msg->content_type->body, &body, MSRP_FAILURE_REPORT_NO, 0) < 0) {
 				LM_ERR("Failed to send message to MSRP side\n");
 				goto error;
 			}

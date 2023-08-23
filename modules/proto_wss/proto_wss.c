@@ -101,7 +101,7 @@ extern int is_tcp_main;
 /* module  tracing parameters */
 static int trace_is_on_tmp=0, *trace_is_on;
 static char* trace_filter_route;
-static int trace_filter_route_id = -1;
+static struct script_route_ref *trace_filter_route_ref = NULL;
 /**/
 
 static int mod_init(void);
@@ -125,12 +125,12 @@ static mi_response_t *wss_trace_mi_1(const mi_params_t *params,
 
 static int wss_port = WSS_DEFAULT_PORT;
 
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"proto_init", (cmd_function)proto_wss_init, {{0,0,0}},0},
 	{0,0,{{0,0,0}},0}
 };
 
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	/* XXX: should we drop the ws prefix? */
 	{ "wss_port",           INT_PARAM, &wss_port           },
 	{ "wss_max_msg_chunks", INT_PARAM, &wss_max_msg_chunks },
@@ -146,7 +146,7 @@ static param_export_t params[] = {
 	{0, 0, 0}
 };
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "proto_hep", DEP_SILENT },
 		{ MOD_TYPE_NULL, NULL, 0 },
@@ -156,7 +156,7 @@ static dep_export_t deps = {
 	},
 };
 
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ "wss_trace", 0, 0, 0, {
 		{wss_trace_mi, {0}},
 		{wss_trace_mi_1, {"trace_mode", 0}},
@@ -254,9 +254,9 @@ static int mod_init(void)
 
 	*trace_is_on = trace_is_on_tmp;
 	if ( trace_filter_route ) {
-		trace_filter_route_id =
-			get_script_route_ID_by_name( trace_filter_route,
-				sroutes->request, RT_NO);
+		trace_filter_route_ref =
+			ref_script_route_by_name( trace_filter_route,
+				sroutes->request, RT_NO, REQUEST_ROUTE, 0);
 	}
 
 	return 0;
@@ -282,7 +282,7 @@ static int wss_conn_init(struct tcp_connection* c)
 		d->dest = t_dst;
 		d->net_trace_proto_id = net_trace_proto_id;
 		d->trace_is_on = trace_is_on;
-		d->trace_route_id = trace_filter_route_id;
+		d->trace_route_ref = trace_filter_route_ref;
 	}
 
 

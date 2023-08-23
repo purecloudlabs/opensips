@@ -143,7 +143,7 @@ void b2bl_print_tuple(b2bl_tuple_t* tuple, int level)
 
 /* Function that inserts a new b2b_logic record - the lock remains taken */
 b2bl_tuple_t* b2bl_insert_new(struct sip_msg* msg, unsigned int hash_index,
-	struct b2b_params *init_params, str* body, str* custom_hdrs, int local_index,
+	struct b2b_params *init_params, str* custom_hdrs, int local_index,
 	str** b2bl_key_s, int db_flag, int repl_flag)
 {
 	b2bl_tuple_t *it, *prev_it;
@@ -244,60 +244,11 @@ b2bl_tuple_t* b2bl_insert_new(struct sip_msg* msg, unsigned int hash_index,
 		tuple->extra_headers->len = custom_hdrs->len;
 	}
 
-	if(use_init_sdp || init_params->flags & B2BL_FLAG_USE_INIT_SDP)
-	{
-		if (init_params->init_body) {
-			tuple->init_sdp.s = shm_malloc(init_params->init_body->len);
-			if (!tuple->init_sdp.s) {
-				LM_ERR("no more shm memory!\n");
-				goto error;
-			}
-			memcpy(tuple->init_sdp.s, init_params->init_body->s,
-				init_params->init_body->len);
-			tuple->init_sdp.len = init_params->init_body->len;
-		}
+	tuple->state = B2B_INIT_BRIDGING_STATE;
 
-		if (!body && init_params->init_body)
-		{
-			body = init_params->init_body;
-			/* we also have to add the content type here */
-			tuple->extra_headers = (str *)shm_realloc(tuple->extra_headers,
-					sizeof(str) + extra_headers.len +
-					14/* "Content-Type: " */ + 2/* "\r\n\" */ +
-					init_params->init_body_type->len);
-			if (!tuple->extra_headers)
-			{
-				LM_ERR("cannot add extra headers\n");
-				goto error;
-			}
-			/* restore initial data */
-			tuple->extra_headers->s = (char*)tuple->extra_headers + sizeof(str);
-			tuple->extra_headers->len = extra_headers.len;
-			memcpy(tuple->extra_headers->s + tuple->extra_headers->len,
-					"Content-Type: ", 14);
-			tuple->extra_headers->len += 14;
-			memcpy(tuple->extra_headers->s + tuple->extra_headers->len,
-					init_params->init_body_type->s, init_params->init_body_type->len);
-			tuple->extra_headers->len += init_params->init_body_type->len;
-			memcpy(tuple->extra_headers->s + tuple->extra_headers->len, "\r\n", 2);
-			tuple->extra_headers->len += 2;
-		}
-		if (body) {
-			/* alloc separate memory for sdp */
-			tuple->sdp.s = shm_malloc(body->len);
-			if (!tuple->sdp.s) {
-				LM_ERR("no more shm memory for sdp body\n");
-				goto error;
-			}
-			memcpy(tuple->sdp.s, body->s, body->len);
-			tuple->sdp.len = body->len;
-		}
+	if (repl_flag != TUPLE_REPL_RECV) {
+		B2BL_LOCK_GET(hash_index);
 	}
-
-	tuple->state = B2B_NOTDEF_STATE;
-
-	if (repl_flag != TUPLE_REPL_RECV)
-		lock_get(&b2bl_htable[hash_index].lock);
 
 	if(local_index>= 0) /* a local index specified */
 	{
@@ -375,10 +326,24 @@ b2bl_tuple_t* b2bl_insert_new(struct sip_msg* msg, unsigned int hash_index,
 
 	tuple->hash_index = hash_index;
 
-	tuple->req_routeid = init_params->req_routeid;
-	tuple->reply_routeid = init_params->reply_routeid;
+	if (init_params->req_route) {
+		tuple->req_route =
+			dup_ref_script_route_in_shm( init_params->req_route, 0);
+		if (!tuple->req_route) {
+			LM_ERR("failed to duplicate script route reference\n");
+			goto error;
+		}
+	}
+	if (init_params->reply_route) {
+		tuple->reply_route =
+			dup_ref_script_route_in_shm( init_params->reply_route, 0);
+		if (!tuple->reply_route) {
+			LM_ERR("failed to duplicate script route reference\n");
+			goto error;
+		}
+	}
 
-	if (set_tracer_func && msg->msg_flags&tracer_msg_flag_filter)
+	if (set_tracer_func && msg && msg->msg_flags&tracer_msg_flag_filter)
 		tuple->tracer = *set_tracer_func();
 
 	b2bl_run_new_tuple_cb(tuple->key);
@@ -388,14 +353,16 @@ b2bl_tuple_t* b2bl_insert_new(struct sip_msg* msg, unsigned int hash_index,
 	return tuple;
 error:
 	if (tuple) {
-		if (tuple->init_sdp.s)
-			shm_free(tuple->init_sdp.s);
-		if (tuple->sdp.s)
-			shm_free(tuple->sdp.s);
+		if(tuple->req_route)
+			shm_free(tuple->req_route);
+		if(tuple->reply_route)
+			shm_free(tuple->reply_route);
 		shm_free(tuple);
 	}
-	if (repl_flag != TUPLE_REPL_RECV)
-		lock_release(&b2bl_htable[hash_index].lock);
+
+	if (repl_flag != TUPLE_REPL_RECV) {
+		B2BL_LOCK_RELEASE(hash_index);
+	}
 	return 0;
 }
 
@@ -521,17 +488,26 @@ int b2bl_drop_entity(b2bl_entity_id_t* entity, b2bl_tuple_t* tuple)
 	return found;
 }
 
+void b2bl_free_entity(b2bl_entity_id_t *entity)
+{
+	if(entity->dlginfo)
+		shm_free(entity->dlginfo);
+
+	if (entity->in_sdp.s)
+		shm_free(entity->in_sdp.s);
+	if (entity->out_sdp.s)
+		shm_free(entity->out_sdp.s);
+
+	shm_free(entity);
+}
+
 void b2bl_remove_single_entity(b2bl_entity_id_t *entity, b2bl_entity_id_t **head,
 	unsigned int hash_index)
 {
 	unchain_ent(entity, head);
-	b2bl_htable[hash_index].locked_by = process_no;
 	b2b_api.entity_delete(entity->type, &entity->key, entity->dlginfo, 0, 1);
-	b2bl_htable[hash_index].locked_by = -1;
 	LM_DBG("destroying dlginfo=[%p]\n", entity->dlginfo);
-	if(entity->dlginfo)
-		shm_free(entity->dlginfo);
-	shm_free(entity);
+	b2bl_free_entity(entity);
 
 	return;
 }
@@ -556,9 +532,7 @@ void b2bl_delete_entity(b2bl_entity_id_t* entity, b2bl_tuple_t* tuple,
 		LM_DBG("delete entity [%p]->[%.*s] from tuple [%.*s]\n",
 			entity, entity->key.len, entity->key.s, tuple->key->len, tuple->key->s);
 		if (b2be_del) {
-			b2bl_htable[hash_index].locked_by = process_no;
 			b2b_api.entity_delete(entity->type, &entity->key, entity->dlginfo, 1, 1);
-			b2bl_htable[hash_index].locked_by = -1;
 		}
 	}
 	else if (entity->key.len)
@@ -566,9 +540,6 @@ void b2bl_delete_entity(b2bl_entity_id_t* entity, b2bl_tuple_t* tuple,
 		LM_WARN("entity [%p]->[%.*s] not found for tuple [%.*s]\n",
 			entity, entity->key.len, entity->key.s, tuple->key->len, tuple->key->s);
 	}
-
-	if(entity->dlginfo)
-		shm_free(entity->dlginfo);
 
 	for(i = 0; i< MAX_BRIDGE_ENT; i++)
 		if(tuple->bridge_entities[i] == entity)
@@ -591,7 +562,7 @@ void b2bl_delete_entity(b2bl_entity_id_t* entity, b2bl_tuple_t* tuple,
 
 	LM_INFO("delete tuple [%.*s], entity [%.*s]\n",
 			tuple->key->len, tuple->key->s, entity->key.len, entity->key.s);
-	shm_free(entity);
+	b2bl_free_entity(entity);
 
 	/* for debuging */
 	b2bl_print_tuple(tuple, L_DBG);
@@ -709,25 +680,17 @@ void b2bl_delete(b2bl_tuple_t* tuple, unsigned int hash_index,
 		if (e)
 		{
 			if (e->key.s && e->key.len && del_entities) {
-				b2bl_htable[hash_index].locked_by = process_no;
 				b2b_api.entity_delete(e->type, &e->key, e->dlginfo, 0, 1);
-				b2bl_htable[hash_index].locked_by = -1;
 			}
-			if(e->dlginfo)
-				shm_free(e->dlginfo);
-			shm_free(e);
+			b2bl_free_entity(e);
 		}
 		e = tuple->clients[index];
 		if (e)
 		{
 			if (e->key.s && e->key.len && del_entities) {
-				b2bl_htable[hash_index].locked_by = process_no;
 				b2b_api.entity_delete(e->type, &e->key, e->dlginfo, 0, 1);
-				b2bl_htable[hash_index].locked_by = -1;
 			}
-			if(e->dlginfo)
-				shm_free(e->dlginfo);
-			shm_free(e);
+			b2bl_free_entity(e);
 		}
 	}
 	/* clean up all entities in b2b_entities from db */
@@ -747,12 +710,6 @@ void b2bl_delete(b2bl_tuple_t* tuple, unsigned int hash_index,
 	if(tuple->extra_headers)
 		shm_free(tuple->extra_headers);
 
-	if(tuple->b1_sdp.s)
-		shm_free(tuple->b1_sdp.s);
-
-	if (tuple->sdp.s && tuple->sdp.s != tuple->b1_sdp.s)
-		shm_free(tuple->sdp.s);
-
 	while (tuple->vals) {
 		v = tuple->vals;
 		tuple->vals = tuple->vals->next;
@@ -761,6 +718,11 @@ void b2bl_delete(b2bl_tuple_t* tuple, unsigned int hash_index,
 
 	if (tuple->tracer.param && tuple->tracer.f_freep)
 		tuple->tracer.f_freep( tuple->tracer.param );
+
+	if(tuple->req_route)
+		shm_free(tuple->req_route);
+	if(tuple->reply_route)
+		shm_free(tuple->reply_route);
 
 	shm_free(tuple);
 }
@@ -1019,12 +981,21 @@ int b2b_extra_headers(struct sip_msg* msg, str* b2bl_key, str* custom_hdrs,
 	return 0;
 }
 
+/* The function will return with the lock aquired if successful */
 b2bl_tuple_t *b2bl_get_tuple(str *key)
 {
 	unsigned int hash_index, local_index;
+	b2bl_tuple_t *tuple;
+
 	if (b2bl_parse_key(key, &hash_index, &local_index) < 0)
-		goto error;
-	return b2bl_search_tuple_safe(hash_index, local_index);
-error:
-	return NULL;
+		return NULL;
+
+	B2BL_LOCK_GET_AUX(hash_index);
+
+	tuple = b2bl_search_tuple_safe(hash_index, local_index);
+	if (!tuple) {
+		B2BL_LOCK_RELEASE_AUX(hash_index);
+	}
+
+	return tuple;
 }

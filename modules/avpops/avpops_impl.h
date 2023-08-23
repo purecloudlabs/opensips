@@ -143,12 +143,16 @@ int ops_async_dbquery(struct sip_msg* msg, async_ctx *ctx,
 		str *query, struct db_url *url, pvname_list_t *dest);
 
 int resume_async_dbquery(int fd, struct sip_msg *msg, void *_param);
+int timeout_async_dbquery(int fd, struct sip_msg *msg, void *_param);
 
 int ops_delete_avp(struct sip_msg* msg,
 								struct fis_param *ap);
 
 int ops_copy_avp(struct sip_msg* msg, struct fis_param* name1,
 								struct fis_param* name2);
+
+int ops_shuffle_avp(struct sip_msg* msg,
+								struct fis_param *param);
 
 int ops_pushto_avp(struct sip_msg* msg, struct fis_param* dst,
 								struct fis_param* ap);

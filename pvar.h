@@ -226,6 +226,10 @@ typedef struct _pv_export {
 	int iparam;                    /*!< parameter for the init function */
 } pv_export_t;
 
+#ifdef FUZZ_BUILD
+extern const pv_export_t _pv_names_table[];
+#endif
+
 typedef struct _pv_elem
 {
 	str text;
@@ -269,7 +273,7 @@ typedef struct pv_spec_list {
 
 pvname_list_t* parse_pvname_list(str *in, unsigned int type);
 
-int register_pvars_mod(char *mod_name, pv_export_t *items);
+int register_pvars_mod(const char *mod_name, const pv_export_t *items);
 int pv_free_extra_list(void);
 
 /*! \brief PV helper functions */

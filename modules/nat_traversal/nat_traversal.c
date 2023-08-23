@@ -223,14 +223,14 @@ static NatTest NAT_Tests[] = {
     {NTNone,           NULL}
 };
 
-static cmd_export_t commands[] = {
+static const cmd_export_t commands[] = {
     {"nat_keepalive",   (cmd_function)NAT_Keepalive, {{0, 0, 0}}, REQUEST_ROUTE},
     {"fix_contact",     (cmd_function)FixContact,    {{0, 0, 0}}, REQUEST_ROUTE | ONREPLY_ROUTE | BRANCH_ROUTE | LOCAL_ROUTE},
     {"client_nat_test", (cmd_function)ClientNatTest, {{CMD_PARAM_INT, 0, 0}, {0, 0, 0}}, REQUEST_ROUTE | ONREPLY_ROUTE | FAILURE_ROUTE | BRANCH_ROUTE | LOCAL_ROUTE},
     {0, 0, {{0, 0, 0}}, 0}
 };
 
-static param_export_t parameters[] = {
+static const param_export_t parameters[] = {
     {"keepalive_interval",       INT_PARAM, &keepalive_interval},
     {"keepalive_method",         STR_PARAM, &keepalive_params.method},
     {"keepalive_from",           STR_PARAM, &keepalive_params.from},
@@ -241,7 +241,7 @@ static param_export_t parameters[] = {
     {0, 0, 0}
 };
 
-static pv_export_t pvars[] = {
+static const pv_export_t pvars[] = {
     {str_init("keepalive.socket"), 1000, pv_get_keepalive_socket, NULL, pv_parse_nat_contact_name, NULL, NULL, 0},
     {str_init("source_uri"), 1000, pv_get_source_uri, NULL, NULL, NULL, NULL, 0},
     {str_init("nat_traversal.track_dialog"), 1000, pv_get_track_dialog, pv_set_track_dialog, NULL, NULL, NULL, 0},
@@ -249,7 +249,7 @@ static pv_export_t pvars[] = {
 };
 
 #ifdef STATISTICS
-static stat_export_t statistics[] = {
+static const stat_export_t statistics[] = {
     {"keepalive_endpoints",  STAT_NO_RESET, &keepalive_endpoints},
     {"registered_endpoints", STAT_NO_RESET, &registered_endpoints},
     {"subscribed_endpoints", STAT_NO_RESET, &subscribed_endpoints},
@@ -258,7 +258,7 @@ static stat_export_t statistics[] = {
 };
 #endif
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
     // OpenSIPS module dependencies
     {
         {MOD_TYPE_DEFAULT, "sl",     DEP_ABORT},
@@ -772,7 +772,7 @@ test_private_contact(struct sip_msg *msg)
     if (!get_contact_uri(msg, &uri, &contact))
         return False;
 
-    return ip_addr_is_1918(&(uri.host));
+    return ip_addr_is_1918(&(uri.host), 0);
 }
 
 
@@ -780,7 +780,7 @@ test_private_contact(struct sip_msg *msg)
 static Bool
 test_private_via(struct sip_msg *msg)
 {
-    return ip_addr_is_1918(&(msg->via1->host));
+    return ip_addr_is_1918(&(msg->via1->host), 0);
 }
 
 
@@ -1763,6 +1763,7 @@ restore_keepalive_state(void)
 static int
 mod_init(void)
 {
+#define MIN_KEEPALIVE_INTERVAL 2
     int *param;
 
     if (keepalive_interval <= 0) {
@@ -1836,10 +1837,10 @@ mod_init(void)
     restore_keepalive_state();
 
     // check keepalive interval and add keepalive timer process
-    if (keepalive_interval < 10) {
-        LM_WARN("keepalive_interval should be at least 10 seconds\n");
-        LM_NOTICE("using 10 seconds for keepalive_interval\n");
-        keepalive_interval = 10;
+    if (keepalive_interval < MIN_KEEPALIVE_INTERVAL) {
+        LM_WARN("keepalive_interval should be at least %d seconds\n", MIN_KEEPALIVE_INTERVAL);
+        LM_NOTICE("using %d seconds for keepalive_interval\n", MIN_KEEPALIVE_INTERVAL);
+        keepalive_interval = MIN_KEEPALIVE_INTERVAL;
     }
 
     // allocate a shm variable to keep the counter used by the keepalive

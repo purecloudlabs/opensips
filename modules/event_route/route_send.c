@@ -74,7 +74,7 @@ int route_build_buffer(str *event_name, evi_reply_sock *sock,
 	buf->rt.event.len = event_name->len;
 	memcpy(buf->rt.event.s, event_name->s, event_name->len);
 
-	if (params) {
+	if (params && param_no) {
 		buf_param = &buf->eps[0];
 		buf->rt.params.first = buf_param;
 		s = (char*)(&buf->eps[param_no]);
@@ -125,13 +125,23 @@ static void route_received(int sender, void *param)
 	struct sip_msg* req;
 	route_send_t *route_s = (route_send_t *)param;
 
+	/* suppress the E_CORE_LOG event for new logs while handling
+	 * the event itself */
+	suppress_proc_log_event();
+
+	if (!ref_script_route_check_and_update(route_s->ev_route)){
+		LM_ERR("event route [%.s] no longer available in script\n",
+			route_s->ev_route->name.s);
+		goto cleanup;
+	}
+
 	req = get_dummy_sip_msg();
 	if(req == NULL) {
 		LM_ERR("cannot create new dummy sip request\n");
-		return;
+		goto cleanup;
 	}
 
-	route_run(sroutes->event[route_s->ev_route_id], req,
+	route_run(sroutes->event[route_s->ev_route->idx], req,
 		&route_s->params, &route_s->event);
 
 	release_dummy_sip_msg(req);
@@ -139,7 +149,12 @@ static void route_received(int sender, void *param)
 	/* remove all added AVP - here we use all the time the default AVP list */
 	reset_avps( );
 
+cleanup:
+	if (route_s->ev_route)
+		shm_free(route_s->ev_route);
 	shm_free(route_s);
+
+	reset_proc_log_event();
 }
 
 

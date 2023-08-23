@@ -76,6 +76,7 @@ typedef struct b2b_dlg_leg {
 #define UPDATEDB_FLAG       1
 #define INSERTDB_FLAG       2
 
+struct ua_sess_t_list;
 
 /** Definitions for structures used for storing dialogs */
 typedef struct b2b_dlg
@@ -106,15 +107,19 @@ typedef struct b2b_dlg
 	struct cell*         uac_tran;
 	struct cell*         uas_tran;
 	struct cell*         update_tran;
+	struct cell*         prack_tran;
 	struct cell*         cancel_tm_tran;
 	dlg_leg_t*           legs;
 	struct socket_info*  send_sock;
 	unsigned int         last_reply_code;
 	int                  db_flag;
 	int                  replicated;
+	unsigned int         ua_flags;
+	struct ua_sess_t_list *ua_timer_list;
 	struct b2b_tracer   *tracer;
 	void                *param;
 	b2b_param_free_cb    free_param;
+	str                  prack_headers;
 }b2b_dlg_t;
 
 typedef struct b2b_entry
@@ -141,14 +146,14 @@ extern b2b_table client_htable;
 void print_b2b_dlg(b2b_dlg_t *dlg);
 
 str* b2b_htable_insert(b2b_table table, b2b_dlg_t* dlg, int hash_index,
-		time_t timestamp, int src, int safe, int db_insert);
+	str *init_b2b_key, int src, int safe, int db_insert, unsigned int ua_timeout);
 
 b2b_dlg_t* b2b_htable_search_safe(str callid, str to_tag, str from_tag);
 
 int b2b_parse_key(str* key, unsigned int* hash_index,
-		unsigned int* local_index, uint64_t *timestamp);
+		unsigned int* local_index);
 
-str* b2b_generate_key(unsigned int hash_index, unsigned int local_index, time_t timestamp);
+str* b2b_generate_key(unsigned int hash_index, unsigned int local_index);
 
 b2b_dlg_t* b2b_dlg_copy(b2b_dlg_t* dlg);
 
@@ -159,8 +164,10 @@ b2b_dlg_t* b2b_new_dlg(struct sip_msg* msg, str* local_contact,
 
 int b2b_prescript_f(struct sip_msg *msg, void* param);
 
+int _b2b_send_reply(b2b_dlg_t* dlg, b2b_rpl_data_t*);
 int b2b_send_reply(b2b_rpl_data_t*);
 
+int _b2b_send_request(b2b_dlg_t* dlg, b2b_req_data_t*);
 int b2b_send_request(b2b_req_data_t*);
 
 void b2b_delete_record(b2b_dlg_t* dlg, b2b_table htable, unsigned int hash_index);
@@ -193,7 +200,7 @@ int b2b_apply_lumps(struct sip_msg* msg);
 
 int b2b_register_cb(b2b_cb_t cb, int cb_type, str *mod_name);
 
-void b2b_run_cb(b2b_dlg_t *dlg, unsigned int hash_index, int entity_type,
+int b2b_run_cb(b2b_dlg_t *dlg, unsigned int hash_index, int entity_type,
 	int cbs_type, int event_type, bin_packet_t *storage, int backend);
 
 dlg_leg_t* b2b_dup_leg(dlg_leg_t* leg, int mem_type);

@@ -63,7 +63,7 @@ static int media_send_ok(struct cell *t, struct dlg_cell *dlg,
 static int media_send_fail(struct cell *t, struct dlg_cell *dlg, int leg);
 
 /* modules dependencies */
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "tm", DEP_ABORT },
 		{ MOD_TYPE_DEFAULT, "dialog", DEP_ABORT },
@@ -77,7 +77,7 @@ static dep_export_t deps = {
 };
 
 /* exported commands */
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"media_exchange_from_uri",(cmd_function)media_exchange_from_uri, {
 		{CMD_PARAM_STR,0,0}, /* uri */
 		{CMD_PARAM_STR|CMD_PARAM_OPT,fixup_media_leg,0}, /* leg */
@@ -122,11 +122,11 @@ static cmd_export_t cmds[] = {
 };
 
 /* exported parameters */
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{0, 0, 0}
 };
 
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ "media_fork_from_call_to_uri", 0, 0, 0, {
 		{mi_media_fork_from_call_to_uri, {"callid", "uri", 0}},
 		{mi_media_fork_from_call_to_uri, {"callid", "uri", "leg", 0}},
@@ -1219,9 +1219,11 @@ static void handle_media_session_negative(struct media_session_leg *msl)
 	int dlg_leg;
 	str sbody, *body;
 
-	/* if it is a fork, there's nothing to do */
-	if (msl->type != MEDIA_SESSION_TYPE_EXCHANGE)
+	/* if it is a fork, there's nothing to do, just unref to release */
+	if (msl->type != MEDIA_SESSION_TYPE_EXCHANGE) {
+		MSL_UNREF(msl);
 		return;
+	}
 
 	/* if no transaction is hanging, we don't have anything to do */
 	if (!p)
@@ -1409,6 +1411,7 @@ static int b2b_media_notify(struct sip_msg *msg, str *key, int type,
 {
 	struct media_session_leg *msl = (struct media_session_leg *)param;
 	int initial_state;
+	struct cell *trans;
 
 	if (type == B2B_REPLY) {
 		if (msg->REPLY_STATUS < 200) /* don't care about provisional replies */
@@ -1419,18 +1422,27 @@ static int b2b_media_notify(struct sip_msg *msg, str *key, int type,
 			return -1;
 		}
 		switch (get_cseq(msg)->method_id) {
+			case METHOD_UNDEF:
+				trans = media_tm.t_gett();
+				if (!is_invite(trans)) {
+					LM_INFO("timeout for non-INVITE (callid=%.*s)\n",
+							msl->ms->dlg->callid.len, msl->ms->dlg->callid.s);
+				}
+				/* fall through */
+
 			case METHOD_INVITE:
 				MEDIA_LEG_LOCK(msl);
 				initial_state = msl->state;
 				MEDIA_LEG_UNLOCK(msl);
 				if (msg->REPLY_STATUS >= 300) {
-					LM_ERR("could not stream media due to negative reply %d\n",
-							msg->REPLY_STATUS);
+					LM_ERR("could not stream media due to negative reply %d (callid=%.*s)\n",
+							msg->REPLY_STATUS, msl->ms->dlg->callid.len, msl->ms->dlg->callid.s);
 					goto terminate;
 				}
 				media_session_req(msl, ACK, NULL);
 				if (handle_media_session_reply(msl, msg) < 0) {
-					LM_ERR("could not establish media exchange!\n");
+					LM_ERR("could not establish media exchange (callid=%.*s)!\n",
+							msl->ms->dlg->callid.len, msl->ms->dlg->callid.s);
 					goto terminate;
 				}
 				/* successfully processed reply */
@@ -1439,8 +1451,9 @@ static int b2b_media_notify(struct sip_msg *msg, str *key, int type,
 				/* nothing to do now, just absorb! */
 				return 0;
 			default:
-				LM_DBG("unexpected reply with status %d for %.*s\n",
-						msg->REPLY_STATUS, key->len, key->s);
+				LM_DBG("unexpected reply with status %d for %.*s (callid=%.*s)\n",
+						msg->REPLY_STATUS, key->len, key->s,
+						msl->ms->dlg->callid.len, msl->ms->dlg->callid.s);
 				return -1;
 		}
 		return 0;
@@ -1453,7 +1466,6 @@ terminate:
 		/* this is the initial leg, not a re-invite */
 		MEDIA_LEG_UNLOCK(msl);
 		handle_media_session_negative(msl);
-		MSL_UNREF(msl);
 	} else {
 		MEDIA_LEG_UNLOCK(msl);
 	}

@@ -22,6 +22,7 @@
 
 #include "../../dset.h"
 #include "../../strcommon.h"
+#include "../../mod_fix.h"
 
 #include "common.h"
 
@@ -46,34 +47,35 @@ int reg_init_lookup(void)
 }
 
 
-lookup_rc lookup(struct sip_msg *req, udomain_t *d, const str *sflags, str *aor_uri,
-                 int use_domain, int (*aor_update) (str *aor))
+lookup_rc lookup(struct sip_msg *req, udomain_t *d,
+	struct lookup_flags *lookup_flags,
+	str *aor_uri, int use_domain, int (*aor_update) (str *aor))
 {
 	static char urimem[MAX_BRANCHES-1][MAX_URI_SIZE];
 	static str branch_uris[MAX_BRANCHES-1];
 	int idx = 0, nbranches = 0, tlen;
 	char *turi;
 	qvalue_t tq;
-
 	urecord_t* r;
 	str aor;
 	ucontact_t *ct, **ptr, **pn_cts, **cts;
-	int max_latency = 0, ruri_is_pushed = 0, regexp_flags = 0;
-	unsigned int flags;
+	int max_latency = 0, ruri_is_pushed = 0;
+	unsigned int flags = 0;
 	int rc, ret = LOOKUP_NO_RESULTS, have_pn_cts = 0, single_branch = 0;
 	str sip_instance = STR_NULL, call_id = STR_NULL;
-	regex_t ua_re;
+	regex_t *ua_re = NULL;
 
 	if (!req->callid) {
 		LM_ERR("bad %.*s request (missing Call-ID header)\n",
 		       req->REQ_METHOD_S.len, req->REQ_METHOD_S.s);
-		return -1;
+		return LOOKUP_ERROR;
 	}
 
-	if (parse_lookup_flags(sflags, &flags, &ua_re, &regexp_flags,
-	                       &max_latency) != 0) {
-		LM_ERR("failed to parse flags: %.*s\n", sflags->len, sflags->s);
-		return LOOKUP_ERROR;
+	if (lookup_flags) {
+		flags = lookup_flags->flags;
+		if (lookup_flags->ua_re_is_set)
+			ua_re = &lookup_flags->ua_re;
+		max_latency = lookup_flags->max_latency;
 	}
 
 	single_branch = flags & REG_LOOKUP_NOBRANCH_FLAG;
@@ -125,13 +127,17 @@ fetch_urecord:
 	if (rc > 0) {
 		LM_DBG("'%.*s' Not found in usrloc\n", aor.len, ZSW(aor.s));
 		ul.unlock_udomain(d, &aor);
-		return LOOKUP_NO_RESULTS;
+
+		if ((flags & REG_BRANCH_AOR_LOOKUP_FLAG) && idx < nbranches)
+			goto next_aor;
+
+		goto done;
 	}
 
 	print_urecord(r);
 
 	cts = select_contacts(req, r->contacts, flags, &sip_instance, &call_id,
-	                      &ua_re, max_latency, &ret);
+	                      ua_re, max_latency, &ret);
 
 	/* do not attempt to push anything to RURI if the flags say so */
 	if (flags & REG_LOOKUP_NO_RURI_FLAG)
@@ -176,9 +182,10 @@ fetch_urecord:
 		ul.release_urecord(r, 0);
 		ul.unlock_udomain(d, &aor);
 
+	next_aor:
 		aor_uri = &branch_uris[idx];
 		LM_DBG("getting contacts from aor [%.*s] "
-		       "in branch %d\n", aor.len, aor.s, idx);
+		       "in branch %d\n", aor_uri->len, aor_uri->s, idx);
 
 		if (extract_aor(aor_uri, &aor, NULL, &call_id, reg_use_domain) < 0) {
 			LM_ERR("failed to extract address of record for branch uri\n");
@@ -196,11 +203,13 @@ done:
 	else if (have_pn_cts)
 		ret = LOOKUP_PN_SENT;
 
-	ul.release_urecord(r, 0);
-	ul.unlock_udomain(d, &aor);
+	if (r) {
+		ul.release_urecord(r, 0);
+		ul.unlock_udomain(d, &aor);
+	}
 out_cleanup:
 	if (flags & REG_LOOKUP_UAFILTER_FLAG)
-		regfree(&ua_re);
+		regfree(ua_re);
 	return ret;
 }
 
@@ -411,6 +420,119 @@ int parse_lookup_flags(const str *input, unsigned int *flags, regex_t *ua_re,
 	return 0;
 }
 
+#define REG_LOOKUP_TMP_REG_ICASE    (1<<6)
+#define REG_LOOKUP_TMP_REG_EXTENDED (1<<7)
+
+static str lookup_flag_names[] = {
+	str_init("method-filtering"), /* REG_LOOKUP_METHODFILTER_FLAG */
+	str_init("no-branches"),      /* REG_LOOKUP_NOBRANCH_FLAG */
+	str_init("global"),           /* REG_LOOKUP_GLOBAL_FLAG */
+	str_init("sort-by-latency"),  /* REG_LOOKUP_LATENCY_SORT_FLAG */
+	str_init("branch"),           /* REG_BRANCH_AOR_LOOKUP_FLAG */
+	str_init("to-branches-only"), /* REG_LOOKUP_NO_RURI_FLAG */
+
+	/* used just for parsing, the returned bitmasks will be ingored after fixup */
+	str_init("case-insensitive"), /* REG_LOOKUP_TMP_REG_ICASE */
+	str_init("extended-regexp"),  /* REG_LOOKUP_TMP_REG_EXTENDED */
+	STR_NULL
+};
+
+#define LOOKUP_KV_FLAGS_NO 2
+
+static str lookup_kv_flag_names[] = {
+	str_init("ua-filtering"),
+	str_init("max-ping-latency"),
+	STR_NULL
+};
+
+int reg_fixup_lookup_flags(void** param)
+{
+	struct lookup_flags *lookup_flags;
+	str flag_vals[LOOKUP_KV_FLAGS_NO];
+	int regexp_flags = 0;
+	char *p, *re_end = NULL;
+	int re_len = 0;
+
+	lookup_flags = pkg_malloc(sizeof *lookup_flags);
+	if (!lookup_flags) {
+		LM_ERR("out of pkg memory\n");
+		return -1;
+	}
+	memset(lookup_flags, 0, sizeof *lookup_flags);
+
+	if (fixup_named_flags(param, lookup_flag_names, lookup_kv_flag_names,
+		flag_vals) < 0) {
+		LM_ERR("Failed to parse flags\n");
+		return -1;
+	}
+
+	lookup_flags->flags = (unsigned int)(unsigned long)(void*)*param;
+	*param = (void*)lookup_flags;
+
+	/* "temporary" flags */
+	if (lookup_flags->flags&REG_LOOKUP_TMP_REG_ICASE) {
+		lookup_flags->flags &= ~REG_LOOKUP_TMP_REG_ICASE;
+		regexp_flags |= REG_ICASE;
+	}
+	if (lookup_flags->flags&REG_LOOKUP_TMP_REG_EXTENDED) {
+		lookup_flags->flags &= ~REG_LOOKUP_TMP_REG_EXTENDED;
+		regexp_flags |= REG_EXTENDED;
+	}
+
+	/* ua-filtering */
+	if (flag_vals[0].s) {
+		p = flag_vals[0].s;
+		if (*p != '/') {
+			LM_ERR("no regexp start in 'ua-filtering' flag\n");
+			return -1;
+		}
+		p++;
+		re_end = q_memchr(p, '/', flag_vals[0].len -1);
+		if (!re_end) {
+			LM_ERR("no regexp end after 'ua-filtering' flag\n");
+			return -1;
+		}
+		re_len = re_end - p;
+		if (re_len == 0) {
+			LM_ERR("empty regexp\n");
+			return -1;
+		}
+
+		lookup_flags->flags |= REG_LOOKUP_UAFILTER_FLAG;
+		LM_DBG("found regexp /%.*s/", re_len, p);
+
+		*(p + re_len) = '\0';
+		if (regcomp(&lookup_flags->ua_re, p, regexp_flags) != 0) {
+			LM_ERR("bad regexp '%s'\n", p);
+			*(p + re_len) = '/';
+			return -1;
+		}
+		*(p + re_len) = '/';
+
+		lookup_flags->ua_re_is_set = 1;
+	}
+
+	/* max-ping-latency */
+	if (flag_vals[1].s) {
+		if (str2int(&flag_vals[1],
+			(unsigned int*)&lookup_flags->max_latency) < 0) {
+			LM_ERR("max-ping-latency [%.*s] value is not an integer\n",
+				flag_vals[1].len, flag_vals[1].s);
+			return -1;
+		}
+
+		lookup_flags->flags |= REG_LOOKUP_MAX_LATENCY_FLAG;
+	}
+
+	return 0;
+}
+
+int reg_fixup_free_lookup_flags(void** param)
+{
+	if (*param)
+		pkg_free(*param);
+	return 0;
+}
 
 int push_branch(struct sip_msg *msg, ucontact_t *ct, int *ruri_is_pushed)
 {

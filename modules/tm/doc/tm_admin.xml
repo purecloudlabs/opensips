@@ -885,17 +885,13 @@ modparam("tm", "cluster_auto_cancel", no)
 		The function may take two optional parameters.
 		</para>
 		<para>
-		The first parameter is a number representing a set of flags for 
-		controlling the internal behaviour. The flags may be given in decimal 
-		or hexa format; supported flags are:
+		The first parameter is a comma separated list of string flags for
+		controlling the internal behaviour. The supported flags are:
 		</para>
 		<itemizedlist>
 			<listitem>
-				<para><emphasis>0x01</emphasis> - deprecated, not used any more
-				</para>
-			</listitem>
-			<listitem>
-				<para><emphasis>0x02</emphasis> - do not internally generate
+				<para><emphasis>no-auto-477</emphasis> - (old
+				<emphasis>0x02</emphasis> flag) do not internally generate
 				and send a "477 Send failed (477/TM)" SIP reply in case of a
 				global forwarding failure (i.e. forwarding for each branch has
 				failed due to internal errors, bad R-URI, bad message, lack of
@@ -914,19 +910,22 @@ modparam("tm", "cluster_auto_cancel", no)
 				</para>
 			</listitem>
 			<listitem>
-				<para><emphasis>0x04</emphasis> - disable the DNS failover
+				<para><emphasis>no-dns-failover</emphasis> - (old
+				<emphasis>0x04</emphasis> flag) disable the DNS failover
 				for the transaction. Only first IP will be used. It disables
 				the failover both at transport and transaction level.
 				</para>
 			</listitem>
 			<listitem>
-				<para><emphasis>0x08</emphasis> - If the request is a CANCEL,
+				<para><emphasis>pass-reason-hdr</emphasis> - (old
+				<emphasis>0x08</emphasis> flag) If the request is a CANCEL,
 				trust and pass further the Reason header from the received
 				CANCEL - shortly, will propagate the Reason header.
 				</para>
 			</listitem>
 			<listitem>
-				<para><emphasis>0x10</emphasis> - Allows OpenSIPS to inspect
+				<para><emphasis>allow-no-cancel</emphasis> - (old
+				<emphasis>0x10</emphasis> flag) Allows OpenSIPS to inspect
 				and follow the Content-Disposition "no-cancel" indication (if
 				present). As per RFC3841, section 9.1, the TM module may be 
 				instructed not to cancel all ongoing branches when a 2xx reply
@@ -1775,9 +1774,10 @@ t_relay();
 				<emphasis>uri (string)</emphasis>
 			</para></listitem>
 			<listitem><para>
-				<emphasis>flags (int, optional)</emphasis> - a set of flags for 
+				<emphasis>flags (string, optional)</emphasis> - a set of flags for
 				controlling the internal behaviour - for description see the above 
-				<quote>t_relay([flags])</quote> function. Note that only 0x4 is 
+				<quote>t_relay([flags])</quote> function. Note that only
+				<emphasis>no-dns-failover</emphasis> is
 				applicable here.
 			</para></listitem>
 		</itemizedlist>
@@ -1881,6 +1881,66 @@ if (is_method("ACK|CANCEL") &amp;&amp; !t_check_trans()) {
 		</example>
 	</section>
 
+	<section id="func_t_reply_by_callid" xreflabel="t_reply_by_callid()">
+		<title>
+		<function moreinfo="none">t_reply_by_callid(code, reason_phrase, [callid], [cseq])</function>
+		</title>
+		<para>
+		This function is used to send a reply to an existing INVITE
+		transaction. The usual use case is when OpenSIPS is used as an UAS
+		and when an INVITE is receveid, it is "parked" locally on
+		OpenSIPS by replying to it with
+		<quote>t_reply(180, "Ringing")</quote> or 
+		<quote>t_reply(183, "Session Progress")</quote>
+		and later we need to handle CANCEL or BYE for it and send
+		'487 Request Terminated' to the original INVITE transaction.
+		</para>
+		<para>
+		The callid and cseq used to identify the transaction
+		will be obtained from the current messsage being processed.
+		But they can be passed explicitly so that for example we can
+		handle a BYE where the cseq must be the cseq
+		of the INVITE minus one.
+		</para>
+		<para>
+		This function can be used from REQUEST_ROUTE.
+		</para>
+		<example>
+		<title><function>t_reply_by_callid</function> usage</title>
+		<programlisting format="linespecific">
+...
+route{
+	if($rU == "LOCAL_PARK") {
+		if(is_method("INVITE")) {
+			$T_fr_timeout = 10;
+			$T_fr_inv_timeout = 10;
+			append_to_reply("Contact: sip:LOCAL_PARK@$socket_in(ip):$socket_in(port)\r\n");
+			t_reply(180, "Ringing");
+			t_wait_for_new_branches();
+		} else if(is_method("CANCEL")) {
+			if(!t_reply_by_callid(487, "Request Terminated")) {
+				sl_send_reply(481, "Call Leg/Transaction Does Not Exist");
+			} else {
+				sl_send_reply(200, "OK");
+			}
+		} else if(is_method("BYE")) {
+			$var(prev_cseq) = ($(cs{s.int}) - 1);
+			if(!t_reply_by_callid(487, "Request Terminated", , $var(prev_cseq))) {
+				sl_send_reply(481, "Call Leg/Transaction Does Not Exist");
+			} else {
+				sl_send_reply(200, "OK");
+			}
+		} else if(is_method("ACK")) {
+			t_relay();
+		}
+		exit;
+	}
+}
+...
+</programlisting>
+		</example>
+	</section>
+
 	</section>
 
 	<section id="exported_pseudo_variables" xreflabel="Exported Pseudo-Variables">
@@ -1967,6 +2027,14 @@ if (is_method("ACK|CANCEL") &amp;&amp; !t_check_trans()) {
 			transaction. The ID is an opaque hexa string, unique for each
 			transaction. If there is no current transaction,  NULL value is
 			returned.
+			</para>
+		</section>
+		<section id="pv_T_branch_last_reply_code" xreflabel="$T_branch_last_reply_code">
+		<title>$T_branch_last_reply_code</title>
+			<para>
+				<emphasis>$T_branch_last_reply_code</emphasis> - returns the last reply
+				code received for a branch specified as parameter. If no parameter is
+				specified, the last reply for the current branch is retrieved.
 			</para>
 		</section>
 
@@ -2178,6 +2246,59 @@ if (is_method("ACK|CANCEL") &amp;&amp; !t_check_trans()) {
 		<title>inuse_transactions</title>
 			<para>
 			Number of transactions existing in memory at current time.
+			</para>
+		</section>
+		<section id="stat_retransmission_req_T1_1" xreflabel="retransmission_req_T1_1">
+		<title>retransmission_req_T1_1</title>
+			<para>
+			Number of request retransmissions due to T1 1 timer,
+			the first retransmission interval (typical 500ms).
+			</para>
+		</section>
+		<section id="stat_retransmission_req_T1_2" xreflabel="retransmission_req_T1_2">
+		<title>retransmission_req_T1_2</title>
+			<para>
+			Number of request retransmissions due to T1 2 timer,
+			the second retransmission interval (typical 1s).
+			</para>
+		</section>
+		<section id="stat_retransmission_req_T1_3" xreflabel="retransmission_req_T1_3">
+		<title>retransmission_req_T1_3</title>
+			<para>
+			Number of request retransmissions due to T1 3 timer,
+			the third retransmission interval (typical 2s).
+			</para>
+		</section>
+		<section id="stat_retransmission_req_T2" xreflabel="retransmission_req_T2">
+		<title>retransmission_req_T2</title>
+			<para>
+			Number of request retransmissions due to T2 ,
+			the final retransmission interval (typical 4s).
+			</para>
+		</section>
+		<section id="stat_retransmission_rpl_T2" xreflabel="retransmission_rpl_T2">
+		<title>retransmission_rpl_T2</title>
+			<para>
+			Number of reply retransmissions, all done with the same 
+			retransmission interval T2, typical 4s.
+			</para>
+		</section>
+		<section id="stat_timeout_finalresponse" xreflabel="timeout_finalresponse">
+		<title>timeout_finalresponse</title>
+			<para>
+			Number of transactional timeouts without receiving any kind of reply (not
+			even provisional) from the B side. Such timeouts indicate a 
+			communication / reachability issue. Note: a single transaction may count
+			multiple such timeouts due forking.
+			</para>
+		</section>
+		<section id="stat_timeout_finalresponse_inc" xreflabel="timeout_finalresponse">
+		<title>timeout_finalresponse</title>
+			<para>
+			Number of transactional INVITE timeouts without receiving a FINAL reply
+			(provisional may be received) from the B side. Such timeouts indicate a 
+			"not answer" event and it is not a signalling issue.
+			Note: a single transaction may count multiple such timeouts due forking.
 			</para>
 		</section>
 	</section>

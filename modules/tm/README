@@ -72,6 +72,8 @@ tm Module
 
               1.4.21. t_flush_flags()
               1.4.22. t_anycast_replicate()
+              1.4.23. t_reply_by_callid(code, reason_phrase,
+                      [callid], [cseq])
 
         1.5. Exported Pseudo-Variables
 
@@ -82,6 +84,7 @@ tm Module
               1.5.5. $T_ruri
               1.5.6. $bavp(name)
               1.5.7. $T_id
+              1.5.8. $T_branch_last_reply_code
 
         1.6. Exported MI Functions
 
@@ -103,6 +106,13 @@ tm Module
               1.7.9. 5xx_transactions
               1.7.10. 6xx_transactions
               1.7.11. inuse_transactions
+              1.7.12. retransmission_req_T1_1
+              1.7.13. retransmission_req_T1_2
+              1.7.14. retransmission_req_T1_3
+              1.7.15. retransmission_req_T2
+              1.7.16. retransmission_rpl_T2
+              1.7.17. timeout_finalresponse
+              1.7.18. timeout_finalresponse
 
    2. Developer Guide
 
@@ -173,6 +183,7 @@ tm Module
    1.42. t_write_req/unix usage
    1.43. t_flush_flags usage
    1.44. t_anycast_replicate usage
+   1.45. t_reply_by_callid usage
 
 Chapter 1. Admin Guide
 
@@ -750,15 +761,14 @@ modparam("tm", "cluster_auto_cancel", no)
 
    The function may take two optional parameters.
 
-   The first parameter is a number representing a set of flags for
-   controlling the internal behaviour. The flags may be given in
-   decimal or hexa format; supported flags are:
-     * 0x01 - deprecated, not used any more
-     * 0x02 - do not internally generate and send a "477 Send
-       failed (477/TM)" SIP reply in case of a global forwarding
-       failure (i.e. forwarding for each branch has failed due to
-       internal errors, bad R-URI, bad message, lack of network
-       reachability, etc.).
+   The first parameter is a comma separated list of string flags
+   for controlling the internal behaviour. The supported flags
+   are:
+     * no-auto-477 - (old 0x02 flag) do not internally generate
+       and send a "477 Send failed (477/TM)" SIP reply in case of
+       a global forwarding failure (i.e. forwarding for each
+       branch has failed due to internal errors, bad R-URI, bad
+       message, lack of network reachability, etc.).
        This flag only applies if the transaction was not
        previously created by t_newtran(). When a global forwarding
        failure occurs, no SIP request is relayed and therefore no
@@ -766,19 +776,22 @@ modparam("tm", "cluster_auto_cancel", no)
        failure_route, if one is set.
        Useful if you want to implement a failover logic for when
        none of the currently created branches can be forwarded to.
-     * 0x04 - disable the DNS failover for the transaction. Only
-       first IP will be used. It disables the failover both at
-       transport and transaction level.
-     * 0x08 - If the request is a CANCEL, trust and pass further
-       the Reason header from the received CANCEL - shortly, will
-       propagate the Reason header.
-     * 0x10 - Allows OpenSIPS to inspect and follow the
-       Content-Disposition "no-cancel" indication (if present). As
-       per RFC3841, section 9.1, the TM module may be instructed
-       not to cancel all ongoing branches when a 2xx reply is
-       received. It will keep the pending branches ongoing until
-       (1) all branches will receive a final reply or (2) the
-       transactionhits the timeout.
+     * no-dns-failover - (old 0x04 flag) disable the DNS failover
+       for the transaction. Only first IP will be used. It
+       disables the failover both at transport and transaction
+       level.
+     * pass-reason-hdr - (old 0x08 flag) If the request is a
+       CANCEL, trust and pass further the Reason header from the
+       received CANCEL - shortly, will propagate the Reason
+       header.
+     * allow-no-cancel - (old 0x10 flag) Allows OpenSIPS to
+       inspect and follow the Content-Disposition "no-cancel"
+       indication (if present). As per RFC3841, section 9.1, the
+       TM module may be instructed not to cancel all ongoing
+       branches when a 2xx reply is received. It will keep the
+       pending branches ongoing until (1) all branches will
+       receive a final reply or (2) the transactionhits the
+       timeout.
 
    The second parameter is a string representing an outbound proxy
    (a fixed destination) where the message should be sent. The
@@ -1305,10 +1318,10 @@ t_relay();
 
    Parameters:
      * uri (string)
-     * flags (int, optional) - a set of flags for controlling the
-       internal behaviour - for description see the above
-       “t_relay([flags])” function. Note that only 0x4 is
-       applicable here.
+     * flags (string, optional) - a set of flags for controlling
+       the internal behaviour - for description see the above
+       “t_relay([flags])” function. Note that only no-dns-failover
+       is applicable here.
 
    This functions can be used from REQUEST_ROUTE.
 
@@ -1372,6 +1385,59 @@ if (is_method("ACK|CANCEL") && !t_check_trans()) {
 }
 ...
 
+1.4.23.  t_reply_by_callid(code, reason_phrase, [callid], [cseq])
+
+   This function is used to send a reply to an existing INVITE
+   transaction. The usual use case is when OpenSIPS is used as an
+   UAS and when an INVITE is receveid, it is "parked" locally on
+   OpenSIPS by replying to it with “t_reply(180, "Ringing")” or
+   “t_reply(183, "Session Progress")” and later we need to handle
+   CANCEL or BYE for it and send '487 Request Terminated' to the
+   original INVITE transaction.
+
+   The callid and cseq used to identify the transaction will be
+   obtained from the current messsage being processed. But they
+   can be passed explicitly so that for example we can handle a
+   BYE where the cseq must be the cseq of the INVITE minus one.
+
+   This function can be used from REQUEST_ROUTE.
+
+   Example 1.45. t_reply_by_callid usage
+...
+route{
+        if($rU == "LOCAL_PARK") {
+                if(is_method("INVITE")) {
+                        $T_fr_timeout = 10;
+                        $T_fr_inv_timeout = 10;
+                        append_to_reply("Contact: sip:LOCAL_PARK@$socket
+_in(ip):$socket_in(port)\r\n");
+                        t_reply(180, "Ringing");
+                        t_wait_for_new_branches();
+                } else if(is_method("CANCEL")) {
+                        if(!t_reply_by_callid(487, "Request Terminated")
+) {
+                                sl_send_reply(481, "Call Leg/Transaction
+ Does Not Exist");
+                        } else {
+                                sl_send_reply(200, "OK");
+                        }
+                } else if(is_method("BYE")) {
+                        $var(prev_cseq) = ($(cs{s.int}) - 1);
+                        if(!t_reply_by_callid(487, "Request Terminated",
+ , $var(prev_cseq))) {
+                                sl_send_reply(481, "Call Leg/Transaction
+ Does Not Exist");
+                        } else {
+                                sl_send_reply(200, "OK");
+                        }
+                } else if(is_method("ACK")) {
+                        t_relay();
+                }
+                exit;
+        }
+}
+...
+
 1.5. Exported Pseudo-Variables
 
    Exported variables are listed in the next sections.
@@ -1430,6 +1496,13 @@ if (is_method("ACK|CANCEL") && !t_check_trans()) {
    $T_id - returns the ID of the current transaction. The ID is an
    opaque hexa string, unique for each transaction. If there is no
    current transaction, NULL value is returned.
+
+1.5.8. $T_branch_last_reply_code
+
+   $T_branch_last_reply_code - returns the last reply code
+   received for a branch specified as parameter. If no parameter
+   is specified, the last reply for the current branch is
+   retrieved.
 
 1.6. Exported MI Functions
 
@@ -1546,6 +1619,46 @@ NVITE"
 
    Number of transactions existing in memory at current time.
 
+1.7.12. retransmission_req_T1_1
+
+   Number of request retransmissions due to T1 1 timer, the first
+   retransmission interval (typical 500ms).
+
+1.7.13. retransmission_req_T1_2
+
+   Number of request retransmissions due to T1 2 timer, the second
+   retransmission interval (typical 1s).
+
+1.7.14. retransmission_req_T1_3
+
+   Number of request retransmissions due to T1 3 timer, the third
+   retransmission interval (typical 2s).
+
+1.7.15. retransmission_req_T2
+
+   Number of request retransmissions due to T2 , the final
+   retransmission interval (typical 4s).
+
+1.7.16. retransmission_rpl_T2
+
+   Number of reply retransmissions, all done with the same
+   retransmission interval T2, typical 4s.
+
+1.7.17. timeout_finalresponse
+
+   Number of transactional timeouts without receiving any kind of
+   reply (not even provisional) from the B side. Such timeouts
+   indicate a communication / reachability issue. Note: a single
+   transaction may count multiple such timeouts due forking.
+
+1.7.18. timeout_finalresponse
+
+   Number of transactional INVITE timeouts without receiving a
+   FINAL reply (provisional may be received) from the B side. Such
+   timeouts indicate a "not answer" event and it is not a
+   signalling issue. Note: a single transaction may count multiple
+   such timeouts due forking.
+
 Chapter 2. Developer Guide
 
 2.1. Functions
@@ -1582,20 +1695,20 @@ Chapter 4. Contributors
    Table 4.1. Top contributors by DevScore^(1), authored
    commits^(2) and lines added/removed^(3)
      Name DevScore Commits Lines ++ Lines --
-   1. Bogdan-Andrei Iancu (@bogdan-iancu) 1068 619 21633 16643
+   1. Bogdan-Andrei Iancu (@bogdan-iancu) 1080 627 21951 16758
    2. Jiri Kuthan (@jiriatipteldotorg) 534 198 18723 11167
    3. Jan Janak (@janakj) 160 76 6462 1840
    4. Andrei Pelinescu-Onciul 145 105 2447 1210
-   5. Razvan Crainea (@razvancrainea) 127 97 1928 842
-   6. Liviu Chircu (@liviuchircu) 106 80 1241 883
+   5. Razvan Crainea (@razvancrainea) 134 103 2024 847
+   6. Liviu Chircu (@liviuchircu) 108 82 1263 886
    7. Daniel-Constantin Mierla (@miconda) 43 37 322 166
-   8. Vlad Patrascu (@rvlad-patrascu) 38 16 881 801
+   8. Vlad Patrascu (@rvlad-patrascu) 40 18 916 826
    9. Anca Vamanu 37 19 778 651
-   10. Vlad Paiu (@vladpaiu) 26 23 170 57
+   10. Vlad Paiu (@vladpaiu) 27 24 172 57
 
    All remaining contributors: Dan Pascu (@danpascu), Henning
-   Westerholt (@henningw), Ovidiu Sas (@ovidiusas), Maksym
-   Sobolyev (@sobomax), Juha Heinanen (@juha-h), Ionut Ionita
+   Westerholt (@henningw), Maksym Sobolyev (@sobomax), Ovidiu Sas
+   (@ovidiusas), Juha Heinanen (@juha-h), Ionut Ionita
    (@ionutrazvanionita), Raphael Coeffic, Nils Ohlmeier, Klaus
    Darilion, Peter Lemenkov (@lemenkov), Andreas Granig, Elias
    Baixas, Marcus Hunger, Christophe Sollet (@csollet), Jeffrey
@@ -1605,8 +1718,8 @@ Chapter 4. Contributors
    Aron Podrigal (@ar45), Anonymous, Dusan Klinec (@ph4r05), Mark
    Dalby, Walter Doekes (@wdoekes), Alexey Vasilyev
    (@vasilevalex), Fabian Gast (@fgast), Nick Altmann (@nikbyte),
-   Zero King (@l2dy), Edson Gellert Schubert, Ingo Wolfsberger,
-   Daniel Hsueh.
+   Zero King (@l2dy), Edson Gellert Schubert, MayamaTakeshi, Ingo
+   Wolfsberger, Daniel Hsueh.
 
    (1) DevScore = author_commits + author_lines_added /
    (project_lines_added / project_commits) + author_lines_deleted
@@ -1628,29 +1741,29 @@ Chapter 4. Contributors
 
    Table 4.2. Most recently active contributors^(1) to this module
                       Name                   Commit Activity
-   1.  Liviu Chircu (@liviuchircu)         Jan 2013 - Oct 2022
-   2.  Bogdan-Andrei Iancu (@bogdan-iancu) Nov 2001 - Sep 2022
-   3.  Razvan Crainea (@razvancrainea)     Jul 2010 - Aug 2022
-   4.  Vlad Patrascu (@rvlad-patrascu)     May 2017 - Jun 2022
-   5.  Maksym Sobolyev (@sobomax)          Mar 2004 - Mar 2021
-   6.  Peter Lemenkov (@lemenkov)          Jun 2018 - Feb 2021
-   7.  Zero King (@l2dy)                   Mar 2020 - Mar 2020
-   8.  Dan Pascu (@danpascu)               Feb 2006 - Feb 2020
-   9.  Vlad Paiu (@vladpaiu)               Jun 2011 - May 2019
-   10. Fabian Gast (@fgast)                Apr 2019 - Apr 2019
+   1.  Razvan Crainea (@razvancrainea)     Jul 2010 - Jul 2023
+   2.  Bogdan-Andrei Iancu (@bogdan-iancu) Nov 2001 - Jul 2023
+   3.  Vlad Paiu (@vladpaiu)               Jun 2011 - Jul 2023
+   4.  Liviu Chircu (@liviuchircu)         Jan 2013 - May 2023
+   5.  Vlad Patrascu (@rvlad-patrascu)     May 2017 - Apr 2023
+   6.  Maksym Sobolyev (@sobomax)          Mar 2004 - Feb 2023
+   7.  MayamaTakeshi                       Oct 2022 - Oct 2022
+   8.  Peter Lemenkov (@lemenkov)          Jun 2018 - Feb 2021
+   9.  Zero King (@l2dy)                   Mar 2020 - Mar 2020
+   10. Dan Pascu (@danpascu)               Feb 2006 - Feb 2020
 
-   All remaining contributors: Aron Podrigal (@ar45), Alexey
-   Vasilyev (@vasilevalex), Ionut Ionita (@ionutrazvanionita),
-   Julián Moreno Patiño, Nick Altmann (@nikbyte), Ovidiu Sas
-   (@ovidiusas), Dusan Klinec (@ph4r05), Ezequiel Lovelle
-   (@lovelle), Walter Doekes (@wdoekes), Christophe Sollet
-   (@csollet), Saúl Ibarra Corretgé (@saghul), Anonymous, Mark
-   Dalby, Anca Vamanu, Andrei Dragus, John Riordan, Henning
-   Westerholt (@henningw), Klaus Darilion, Daniel-Constantin
-   Mierla (@miconda), Konstantin Bokarius, Edson Gellert Schubert,
-   Jesus Rodrigues, Marcus Hunger, Juha Heinanen (@juha-h),
-   Jeffrey Magder, Elias Baixas, Daniel Hsueh, Andreas Granig,
-   Elena-Ramona Modroiu, Ingo Wolfsberger, Andrei
+   All remaining contributors: Fabian Gast (@fgast), Aron Podrigal
+   (@ar45), Alexey Vasilyev (@vasilevalex), Ionut Ionita
+   (@ionutrazvanionita), Julián Moreno Patiño, Nick Altmann
+   (@nikbyte), Ovidiu Sas (@ovidiusas), Dusan Klinec (@ph4r05),
+   Ezequiel Lovelle (@lovelle), Walter Doekes (@wdoekes),
+   Christophe Sollet (@csollet), Saúl Ibarra Corretgé (@saghul),
+   Anonymous, Mark Dalby, Anca Vamanu, Andrei Dragus, John
+   Riordan, Henning Westerholt (@henningw), Klaus Darilion,
+   Daniel-Constantin Mierla (@miconda), Konstantin Bokarius, Edson
+   Gellert Schubert, Jesus Rodrigues, Marcus Hunger, Juha Heinanen
+   (@juha-h), Jeffrey Magder, Elias Baixas, Daniel Hsueh, Andreas
+   Granig, Elena-Ramona Modroiu, Ingo Wolfsberger, Andrei
    Pelinescu-Onciul, Jan Janak (@janakj), Jiri Kuthan
    (@jiriatipteldotorg), Raphael Coeffic, Nils Ohlmeier.
 
@@ -1661,16 +1774,16 @@ Chapter 5. Documentation
 
 5.1. Contributors
 
-   Last edited by: Bogdan-Andrei Iancu (@bogdan-iancu), Razvan
-   Crainea (@razvancrainea), Liviu Chircu (@liviuchircu), Vlad
-   Patrascu (@rvlad-patrascu), Fabian Gast (@fgast), Alexey
-   Vasilyev (@vasilevalex), Peter Lemenkov (@lemenkov), Nick
-   Altmann (@nikbyte), Ovidiu Sas (@ovidiusas), Vlad Paiu
-   (@vladpaiu), Anca Vamanu, Henning Westerholt (@henningw), Klaus
-   Darilion, Daniel-Constantin Mierla (@miconda), Konstantin
-   Bokarius, Edson Gellert Schubert, Dan Pascu (@danpascu), Juha
-   Heinanen (@juha-h), Elena-Ramona Modroiu, Jan Janak (@janakj),
-   Jiri Kuthan (@jiriatipteldotorg).
+   Last edited by: Razvan Crainea (@razvancrainea), Bogdan-Andrei
+   Iancu (@bogdan-iancu), Vlad Patrascu (@rvlad-patrascu), Liviu
+   Chircu (@liviuchircu), Fabian Gast (@fgast), Alexey Vasilyev
+   (@vasilevalex), Peter Lemenkov (@lemenkov), Nick Altmann
+   (@nikbyte), Ovidiu Sas (@ovidiusas), Vlad Paiu (@vladpaiu),
+   Anca Vamanu, Henning Westerholt (@henningw), Klaus Darilion,
+   Daniel-Constantin Mierla (@miconda), Konstantin Bokarius, Edson
+   Gellert Schubert, Dan Pascu (@danpascu), Juha Heinanen
+   (@juha-h), Elena-Ramona Modroiu, Jan Janak (@janakj), Jiri
+   Kuthan (@jiriatipteldotorg).
 
    Documentation Copyrights:
 

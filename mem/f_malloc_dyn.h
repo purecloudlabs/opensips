@@ -58,6 +58,8 @@ void fm_split_frag(struct fm_block *fm, struct fm_frag *frag,
 		/*split the fragment*/
 		n=FRAG_NEXT(frag);
 		n->size=rest-FRAG_OVERHEAD;
+		n->pf=frag;
+		FRAG_NEXT(n)->pf=n;
 
 		/*
 		 * The real used memory does not increase, as the frag memory is not
@@ -109,11 +111,12 @@ void *fm_malloc(struct fm_block *fm, unsigned long size,
 
 	/*search for a suitable free frag*/
 
-	for(hash=GET_HASH(size);hash<F_HASH_SIZE;hash++){
-		frag=fm->free_hash[hash].first;
-		for( ; frag; frag = frag->u.nxt_free )
-			if ( frag->size >= size ) goto found;
-		/* try in a bigger bucket */
+	for (hash = _GET_HASH(size, +1); hash < F_HASH_SIZE; ++hash) {
+		if (!fm->free_hash[hash].first)
+			continue; /* try in a bigger bucket */
+
+		frag = fm->free_hash[hash].first;
+		goto found;
 	}
 	/* not found, bad! */
 
@@ -217,7 +220,7 @@ void fm_free(struct fm_block *fm, void *p, const char *file,
              const char *func, unsigned int line)
 #endif
 {
-	struct fm_frag *f, *n;
+	struct fm_frag *f, *neigh;
 
 	#ifdef DBG_MALLOC
 	LM_GEN1(memlog, "%s_free(%p), called from %s: %s(%d)\n", fm->name, p, file,
@@ -242,16 +245,32 @@ void fm_free(struct fm_block *fm, void *p, const char *file,
 #endif
 
 	/* attempt to join with a next fragment that also happens to be free */
-	n = FRAG_NEXT(f);
-	if (((char*)n < (char*)fm->last_frag) &&  frag_is_free(n)) {
-		fm_remove_free(fm, n);
+	neigh = FRAG_NEXT(f);
+	if (((char*)neigh < (char*)fm->last_frag) &&  frag_is_free(neigh)) {
+		fm_remove_free(fm, neigh);
 		/* join */
-		f->size += n->size + FRAG_OVERHEAD;
+		f->size += neigh->size + FRAG_OVERHEAD;
+		FRAG_NEXT(neigh)->pf = f;
 
 		#if defined(DBG_MALLOC) || defined(STATISTICS)
 		//fm->real_used -= FRAG_OVERHEAD;
 		fm->used += FRAG_OVERHEAD;
 		#endif
+	}
+
+	/* attempt to join with a prev fragment that also happens to be free */
+	neigh = FRAG_PREV(f);
+	if (neigh && frag_is_free(neigh)) {
+		fm_remove_free(fm, neigh);
+		neigh->size += f->size + FRAG_OVERHEAD;
+		FRAG_NEXT(f)->pf = neigh;
+
+		#if defined(DBG_MALLOC) || defined(STATISTICS)
+		//fm->real_used -= FRAG_OVERHEAD;
+		fm->used += FRAG_OVERHEAD;
+		#endif
+
+		f = neigh;
 	}
 
 #ifdef DBG_MALLOC
@@ -354,6 +373,7 @@ void *fm_realloc(struct fm_block *fm, void *p, unsigned long size,
 			fm_remove_free(fm,n);
 			/* join */
 			f->size += n->size + FRAG_OVERHEAD;
+			FRAG_NEXT(f)->pf = f;
 
 			#if defined(DBG_MALLOC) || defined(STATISTICS)
 			//fm->real_used -= FRAG_OVERHEAD;

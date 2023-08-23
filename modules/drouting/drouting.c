@@ -368,7 +368,7 @@ static event_id_t dr_evi_id;
 /*
  * Exported functions
  */
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"do_routing", (cmd_function)w_do_routing,
 		{ {CMD_PARAM_INT|CMD_PARAM_OPT, NULL, NULL},
 		  {CMD_PARAM_STR|CMD_PARAM_OPT, fix_flags, NULL},
@@ -467,7 +467,7 @@ static cmd_export_t cmds[] = {
 /*
  * Exported parameters
  */
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{"use_partitions",    INT_PARAM, &use_partitions    },
 	{"db_partitions_url",    STR_PARAM, &db_partitions_url.s },
 	{"db_partitions_table", STR_PARAM, &db_partitions_table.s },
@@ -532,10 +532,12 @@ static param_export_t params[] = {
 	"value greater than 0. Disables probing of gateways if parameter"\
 "value is 0. With no parameter, returns current probing status"
 
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ "dr_reload", HLP1, 0, 0, {
 		{dr_reload_cmd, {0}},
+		{dr_reload_cmd, {"inherit_state", 0}},
 		{dr_reload_cmd_1, {"partition_name", 0}},
+		{dr_reload_cmd_1, {"partition_name", "inherit_state", 0}},
 		{EMPTY_MI_RECIPE}}
 	},
 	{ "dr_gw_status", HLP2, MI_NAMED_PARAMS_ONLY, 0, {
@@ -576,7 +578,7 @@ static mi_export_t mi_cmds[] = {
 	{EMPTY_MI_EXPORT}
 };
 
-static module_dependency_t *get_deps_probing_interval(param_export_t *param)
+static module_dependency_t *get_deps_probing_interval(const param_export_t *param)
 {
 	if (*(int *)param->param_pointer <= 0)
 		return NULL;
@@ -584,7 +586,7 @@ static module_dependency_t *get_deps_probing_interval(param_export_t *param)
 	return alloc_module_dep(MOD_TYPE_DEFAULT, "tm", DEP_ABORT);
 }
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_SQLDB, NULL, DEP_ABORT },
 		{ MOD_TYPE_NULL, NULL, 0 },
@@ -941,6 +943,10 @@ static void dr_prob_handler(unsigned int ticks, void* param)
 			}
 		}
 
+		if(pack_last) {
+			pack_last->next = NULL;
+		}
+
 		lock_stop_read( it->ref_lock );
 
 
@@ -1128,7 +1134,8 @@ static inline int uses_rule_table_query(const struct head_db *dbh, str *query)
  */
 
 static inline int dr_reload_data_head(struct head_db *hd,
-                           str *part_name, int initial)
+                           str *part_name, int initial,
+						   const int is_inherit_state)
 {
 	db_con_t* db_hdl = *hd->db_con;
 	db_func_t *dr_dbf = &hd->db_funcs;
@@ -1262,36 +1269,38 @@ static inline int dr_reload_data_head(struct head_db *hd,
 
 	/* destroy old data */
 	if (old_data) {
-		/* copy the state of gw/cr from old data */
-		/* interate new gws and search them into old data */
-		for (map_first(new_data->pgw_tree, &it);
-				iterator_is_valid(&it); iterator_next(&it)) {
-			dest = iterator_val(&it);
-			if(dest==NULL)
-				break;
+		if (is_inherit_state) {
+			/* copy the state of gw/cr from old data */
+			/* interate new gws and search them into old data */
+			for (map_first(new_data->pgw_tree, &it);
+					iterator_is_valid(&it); iterator_next(&it)) {
+				dest = iterator_val(&it);
+				if(dest==NULL)
+					break;
 
-			gw=(pgw_t *)*dest;
+				gw=(pgw_t *)*dest;
 
-			old_gw = get_gw_by_id( old_data->pgw_tree, &gw->id);
-			if (old_gw) {
-				gw->flags &= ~DR_DST_STAT_MASK;
-				gw->flags |= old_gw->flags&DR_DST_STAT_MASK;
+				old_gw = get_gw_by_id( old_data->pgw_tree, &gw->id);
+				if (old_gw) {
+					gw->flags &= ~DR_DST_STAT_MASK;
+					gw->flags |= old_gw->flags&DR_DST_STAT_MASK;
+				}
 			}
-		}
-		/* interate new crs and search them into old data */
-		for (map_first(new_data->carriers_tree, &it);
-				iterator_is_valid(&it); iterator_next(&it)) {
-			dest = iterator_val(&it);
-			if(dest==NULL)
-				break;
+			/* interate new crs and search them into old data */
+			for (map_first(new_data->carriers_tree, &it);
+					iterator_is_valid(&it); iterator_next(&it)) {
+				dest = iterator_val(&it);
+				if(dest==NULL)
+					break;
 
-			cr=(pcr_t *)*dest;
+				cr=(pcr_t *)*dest;
 
 
-			old_cr = get_carrier_by_id( old_data->carriers_tree, &cr->id);
-			if (old_cr) {
-				cr->flags &= ~DR_CR_FLAG_IS_OFF;
-				cr->flags |= old_cr->flags&DR_CR_FLAG_IS_OFF;
+				old_cr = get_carrier_by_id( old_data->carriers_tree, &cr->id);
+				if (old_cr) {
+					cr->flags &= ~DR_CR_FLAG_IS_OFF;
+					cr->flags |= old_cr->flags&DR_CR_FLAG_IS_OFF;
+				}
 			}
 		}
 
@@ -1327,13 +1336,13 @@ error:
 	return ret;
 }
 
-static inline int dr_reload_data(int initial)
+static inline int dr_reload_data(int initial, const int is_inherit_state)
 {
 	struct head_db *part;
 	int ret_val = 0;
 
 	for (part = head_db_start; part; part = part->next)
-		if (dr_reload_data_head(part, &part->partition, initial) < 0)
+		if (dr_reload_data_head(part, &part->partition, initial, is_inherit_state) < 0)
 			ret_val = -1;
 
 	/* make the new list the main list used by qrouting */
@@ -2208,7 +2217,7 @@ static int db_connect_head(struct head_db *x) {
  * so triggerable via IPC */
 static void rpc_dr_reload_data(int sender_id, void *unused)
 {
-	dr_reload_data(1);
+	dr_reload_data(1, 1);
 
 	dr_cluster_sync();
 }
@@ -2323,9 +2332,11 @@ static mi_response_t *mi_dr_get_partition(const mi_params_t *params,
 mi_response_t *dr_reload_cmd(const mi_params_t *params,
 								struct mi_handler *async_hdl)
 {
+	int is_inherit_state = get_mi_bool_like_param(params, "inherit_state", 1);
+
 	LM_INFO("dr_reload MI command received!\n");
 
-	if (dr_reload_data(0) != 0) {
+	if (dr_reload_data(0, is_inherit_state) != 0) {
 		LM_CRIT("failed to load routing data\n");
 		return init_mi_error(500, MI_SSTR("Failed to reload"));
 	}
@@ -2341,6 +2352,7 @@ mi_response_t *dr_reload_cmd_1(const mi_params_t *params,
 {
 	struct head_db *part;
 	mi_response_t *resp;
+	int is_inherit_state = get_mi_bool_like_param(params, "inherit_state", 1);
 
 	LM_INFO("dr_reload MI command received!\n");
 
@@ -2348,7 +2360,7 @@ mi_response_t *dr_reload_cmd_1(const mi_params_t *params,
 	if (resp)
 		return resp;
 
-	switch (dr_reload_data_head(part, &part->partition, 0)) {
+	switch (dr_reload_data_head(part, &part->partition, 0, is_inherit_state)) {
 		case 0:
 			/* all good, fallback to reloading */
 			break;
@@ -2771,7 +2783,7 @@ fallback_failed:
 				_new_size *sizeof(unsigned short) ); \
 			if (_buf==NULL) { \
 				LM_ERR("no more pkg mem (needed  %ld)\n", \
-					_new_size*sizeof(unsigned short));\
+					(long)_new_size*sizeof(unsigned short));\
 				_old_size = 0; \
 				goto _error;\
 			}\
@@ -2913,11 +2925,11 @@ static int weight_based_sort(pgw_list_t *pgwl, int size, unsigned short *idx)
 		}
 		if (weight_sum) {
 			/* randomly select number */
-			rand_no = (unsigned int)(weight_sum*((float)rand()/(float)RAND_MAX));
+			rand_no = (unsigned int)(weight_sum*((double)rand()/((double)RAND_MAX)));
 			LM_DBG("random number is %d\n",rand_no);
 			/* select the element */
 			for( i=first ; i<size ; i++ )
-				if (running_sum[i]>rand_no) break;
+				if (running_sum[i]>=rand_no) break;
 			if (i==size) {
 				LM_CRIT("bug in weight sort, first=%u, size=%u, rand_no=%u, total weight=%u\n",
 					first, size, rand_no, weight_sum);
@@ -2930,7 +2942,7 @@ static int weight_based_sort(pgw_list_t *pgwl, int size, unsigned short *idx)
 			}
 		} else {
 			/* randomly select index */
-			//	i = (unsigned int)((size-first)*((float)rand()/RAND_MAX));
+			//	i = (unsigned int)((size-first)*((double)rand()/((double)RAND_MAX)));
 			i = first;
 		}
 		LM_DBG("selecting element %d with weight %d\n",
@@ -3166,7 +3178,7 @@ static int do_routing(struct sip_msg* msg, struct head_db *part, int grp,
 	struct head_db *current_partition=NULL;
 	unsigned short wl_len;
 	str username;
-	int i, j, n, rt_idx;
+	int i, j, n;
 	int_str val;
 	str ruri;
 	str next_carrier_attrs = {NULL, 0};
@@ -3355,13 +3367,12 @@ search_again:
 		rule_idx = 0;
 	}
 
-	if (rt_info->route_idx && (rt_idx=get_script_route_ID_by_name
-	(rt_info->route_idx, sroutes->request, RT_NO))!=-1) {
-		fret = run_top_route( sroutes->request[rt_idx], msg );
+	if ( ref_script_route_check_and_update(rt_info->route_ref) ) {
+		fret = run_top_route( sroutes->request[rt_info->route_ref->idx], msg);
 		if (fret&ACT_FL_DROP) {
 			/* drop the action */
-			LM_DBG("script route %s drops routing "
-				"by %d\n", sroutes->request[rt_idx].name, fret);
+			LM_DBG("script route [%s] drops routing "
+				"by %d\n", ref_script_route_name(rt_info->route_ref), fret);
 			goto error2;
 		}
 	}

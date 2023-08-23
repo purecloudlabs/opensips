@@ -26,7 +26,6 @@
 
 #include <sys/time.h>
 
-#include "../statistics.h"
 #include "../config.h"
 #include "../globals.h"
 #include "common.h"
@@ -39,15 +38,6 @@
 struct hp_frag;
 struct hp_frag_lnk;
 struct hp_block;
-
-#ifndef HP_MALLOC_FAST_STATS
-extern stat_var *shm_used;
-extern stat_var *shm_rused;
-extern stat_var *shm_frags;
-#endif
-extern stat_var *rpm_used;
-extern stat_var *rpm_rused;
-extern stat_var *rpm_frags;
 
 #include "hp_malloc_stats.h"
 #include "meminfo.h"
@@ -70,6 +60,17 @@ extern stat_var *rpm_frags;
 #define HP_EXTRA_HASH_SIZE (HP_LINEAR_HASH_SIZE * SHM_MAX_SECONDARY_HASH_SIZE)
 
 #define HP_TOTAL_HASH_SIZE (HP_HASH_SIZE + HP_EXTRA_HASH_SIZE)
+
+#include "../statistics.h"
+
+#ifndef HP_MALLOC_FAST_STATS
+extern stat_var *shm_used;
+extern stat_var *shm_rused;
+extern stat_var *shm_frags;
+#endif
+extern stat_var *rpm_used;
+extern stat_var *rpm_rused;
+extern stat_var *rpm_frags;
 
 /* get the fragment which corresponds to a pointer */
 #define HP_FRAG(p) \
@@ -243,7 +244,6 @@ void *hp_rpm_realloc(struct hp_block *, void *p, unsigned long size);
 void *hp_rpm_realloc_unsafe(struct hp_block *, void *p, unsigned long size);
 #endif
 
-#ifdef SHM_EXTRA_STATS
 static inline unsigned long hp_frag_size(void *p)
 {
 	if (!p)
@@ -252,6 +252,7 @@ static inline unsigned long hp_frag_size(void *p)
 	return HP_FRAG(p)->size;
 }
 
+#ifdef SHM_EXTRA_STATS
 void hp_stats_core_init(struct hp_block *hp, int core_index);
 unsigned long hp_stats_get_index(void *ptr);
 void hp_stats_set_index(void *ptr, unsigned long idx);
@@ -266,6 +267,8 @@ static inline const char *hp_frag_func(void *p) { return NULL; }
 static inline unsigned long hp_frag_line(void *p) { return 0; }
 #endif
 #endif
+
+unsigned long hp_get_dbg_pool_size(unsigned int hist_size);
 
 void hp_status(struct hp_block *hpb);
 #if !defined INLINE_ALLOC && defined DBG_MALLOC

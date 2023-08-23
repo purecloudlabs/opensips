@@ -14,7 +14,6 @@ limitations under the License.
 #include "../mem/test/test_malloc.h"
 #include "../str.h"
 
-#include "../context.h"
 #include "../dprint.h"
 #include "../globals.h"
 #include "../lib/list.h"
@@ -23,8 +22,9 @@ limitations under the License.
 
 #include "parse_uri.h"
 
+#include "../test/fuzz/fuzz_standalone.h"
+
 int LLVMFuzzerTestOneInput(const char *data, size_t size) {
-  ensure_global_context();
   struct sip_uri u;
 
   char *new_str = (char *)malloc(size + 1);
@@ -37,4 +37,5 @@ int LLVMFuzzerTestOneInput(const char *data, size_t size) {
   parse_uri(STR_L(new_str), &u);
 
   free(new_str);
+  return (0);
 }

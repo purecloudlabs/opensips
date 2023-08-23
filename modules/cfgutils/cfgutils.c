@@ -106,8 +106,8 @@ mi_response_t *mi_check_hash(const mi_params_t *params,
 static int pv_get_random_val(struct sip_msg *msg, pv_param_t *param,
 		pv_value_t *res);
 
-static int ts_usec_delta(struct sip_msg *msg, int *t1s,
-		int *t1u, int *t2s, int *t2u, pv_spec_t *_res);
+static int ts_usec_delta(struct sip_msg *msg, int *t1s, int *t1u,
+		int *t2s, int *t2u, pv_spec_t *pv_delta_str, pv_spec_t *pv_delta_int);
 int check_time_rec(struct sip_msg *_, char *time_rec, unsigned int *ptime);
 
 #ifdef HAVE_TIMER_FD
@@ -130,7 +130,7 @@ static char* hash_file = NULL;
 int lock_pool_size = 32;
 
 
-static cmd_export_t cmds[]={
+static const cmd_export_t cmds[]={
 	{"rand_set_prob", (cmd_function)set_prob, {
 		{CMD_PARAM_INT, 0, 0}, {0,0,0}},
 		REQUEST_ROUTE|FAILURE_ROUTE|ONREPLY_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE|
@@ -182,7 +182,8 @@ static cmd_export_t cmds[]={
 		{CMD_PARAM_INT, 0, 0},
 		{CMD_PARAM_INT, 0, 0},
 		{CMD_PARAM_INT, 0, 0},
-		{CMD_PARAM_VAR, fixup_check_pv_setf, 0}, {0,0,0}},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT, fixup_check_pv_setf, 0},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT, fixup_check_pv_setf, 0}, {0,0,0}},
 		REQUEST_ROUTE|FAILURE_ROUTE|ONREPLY_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE|
 		STARTUP_ROUTE|TIMER_ROUTE|EVENT_ROUTE},
 	{"get_static_lock",(cmd_function)get_static_lock, {
@@ -212,7 +213,7 @@ static cmd_export_t cmds[]={
 	{0,0,{{0,0,0}},0}
 };
 
-static acmd_export_t acmds[] = {
+static const acmd_export_t acmds[] = {
 #ifdef HAVE_TIMER_FD
 	{"sleep", (acmd_function)async_sleep, {
 		{CMD_PARAM_INT, 0, 0}, {0,0,0}}},
@@ -223,7 +224,7 @@ static acmd_export_t acmds[] = {
 };
 
 
-static param_export_t params[]={
+static const param_export_t params[]={
 	{"initial_probability", INT_PARAM, &initial},
 	{"hash_file",           STR_PARAM, &hash_file},
 	{"shv_hash_size",       INT_PARAM, &shv_hash_size},
@@ -233,7 +234,7 @@ static param_export_t params[]={
 	{0,0,0}
 };
 
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ FIFO_SET_PROB, 0, 0, 0, {
 		{mi_set_prob, {"prob_proc", 0}},
 		{EMPTY_MI_RECIPE}}
@@ -266,7 +267,7 @@ static mi_export_t mi_cmds[] = {
 	{EMPTY_MI_EXPORT}
 };
 
-static pv_export_t mod_items[] = {
+static const pv_export_t mod_items[] = {
 	{ {"RANDOM", sizeof("RANDOM")-1}, 1000, pv_get_random_val, 0,
 		0, 0, 0, 0 },
 	{ {"shv", (sizeof("shv")-1)}, 1001, pv_get_shvar,
@@ -307,8 +308,8 @@ struct module_exports exports = {
 
 static int fixup_check_pv_setf(void **param)
 {
-	if (((pv_spec_t*)*param)->setf == 0) {
-		LM_ERR("invalid pvar\n");
+	if (!pv_is_w(((pv_spec_t*)*param))) {
+		LM_ERR("invalid pvar: must be writable\n");
 		return E_SCRIPT;
 	}
 
@@ -824,18 +825,44 @@ error:
 	return -1;
 }
 
-static int ts_usec_delta(struct sip_msg *msg, int *t1s,
-		int *t1u, int *t2s, int *t2u, pv_spec_t *_res)
+static int ts_usec_delta(struct sip_msg *msg, int *t1s, int *t1u,
+		int *t2s, int *t2u, pv_spec_t *pv_delta_str, pv_spec_t *pv_delta_int)
 {
-	pv_value_t res;
+	pv_value_t val;
+	long long diff;
 
-	res.ri = abs(1000000 * (*t1s - *t2s) + *t1u - *t2u);
-	res.flags = PV_TYPE_INT;
+	diff = llabs(1000000LL * (*t1s - *t2s) + *t1u - *t2u);
 
-	if (pv_set_value(msg, _res, 0, &res)) {
-		LM_ERR("cannot store result value\n");
-		return -1;
+	if (pv_delta_str) {
+		char diff_buf[20 + 1];
+
+		val.rs.s = diff_buf;
+		val.rs.len = sprintf(diff_buf, "%lld", diff);
+		val.flags = PV_VAL_STR;
+
+		if (pv_set_value(msg, pv_delta_str, 0, &val) != 0) {
+			LM_ERR("failed to set the 'delta_str' output variable\n");
+			return -1;
+		}
 	}
+
+	if (pv_delta_int) {
+		if (diff > INT_MAX) {
+			LM_ERR("diff is too large to store in 'delta_int' (%lld us), "
+			       "use the 'delta_str' output variable instead!\n", diff);
+			return -1;
+		}
+
+		val.rs = STR_NULL;
+		val.ri = (int)diff;
+		val.flags = PV_VAL_INT|PV_TYPE_INT;
+
+		if (pv_set_value(msg, pv_delta_int, 0, &val)) {
+			LM_ERR("failed to set the 'delta_int' output variable\n");
+			return -1;
+		}
+	}
+
 	return 1;
 }
 

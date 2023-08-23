@@ -40,6 +40,7 @@
 #include "../../socket_info.h"
 #include "../../tsend.h"
 #include "../../trace_api.h"
+#include "../../net/net_tcp_dbg.h"
 
 #include "tcp_common_defs.h"
 #include "proto_tcp_handler.h"
@@ -84,7 +85,7 @@ trace_proto_t tprot;
 /* module  tracing parameters */
 static int trace_is_on_tmp=0, *trace_is_on;
 static char* trace_filter_route;
-static int trace_filter_route_id = -1;
+static struct script_route_ref* trace_filter_route_ref = NULL;
 /**/
 
 extern int unix_tcp_sock;
@@ -124,13 +125,13 @@ static int tcp_crlf_drop = 0;
 static int tcp_parallel_handling = 0;
 
 
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"proto_init", (cmd_function)proto_tcp_init, {{0, 0, 0}}, 0},
 	{0,0,{{0,0,0}},0}
 };
 
 
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{ "tcp_port",                        INT_PARAM, &tcp_port               },
 	{ "tcp_send_timeout",                INT_PARAM, &tcp_send_timeout       },
 	{ "tcp_max_msg_chunks",              INT_PARAM, &tcp_max_msg_chunks     },
@@ -151,7 +152,7 @@ static param_export_t params[] = {
 	{0, 0, 0}
 };
 
-static mi_export_t mi_cmds[] = {
+static const mi_export_t mi_cmds[] = {
 	{ "tcp_trace", 0, 0, 0, {
 		{w_tcp_trace_mi, {0}},
 		{w_tcp_trace_mi_1, {"trace_mode", 0}},
@@ -162,7 +163,7 @@ static mi_export_t mi_cmds[] = {
 };
 
 /* module dependencies */
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "proto_hep", DEP_SILENT },
 		{ MOD_TYPE_NULL, NULL, 0 }
@@ -260,9 +261,9 @@ static int mod_init(void)
 
 	*trace_is_on = trace_is_on_tmp;
 	if ( trace_filter_route ) {
-		trace_filter_route_id =
-			get_script_route_ID_by_name( trace_filter_route, sroutes->request,
-				RT_NO);
+		trace_filter_route_ref =
+			ref_script_route_by_name( trace_filter_route,
+				sroutes->request, RT_NO, REQUEST_ROUTE, 0 );
 	}
 
 	return 0;
@@ -428,7 +429,7 @@ static int proto_tcp_send(struct socket_info* send_sock,
 
 				/* trace the message */
 				if ( TRACE_ON( c->flags ) &&
-						check_trace_route( trace_filter_route_id, c) ) {
+						check_trace_route( trace_filter_route_ref, c) ) {
 					if ( tcpconn2su( c, &src_su, &dst_su) < 0 ) {
 						LM_ERR("can't create su structures for tracing!\n");
 					} else {
@@ -458,7 +459,7 @@ static int proto_tcp_send(struct socket_info* send_sock,
 			/* our first connect attempt succeeded - go ahead as normal */
 			/* trace the attempt */
 			if (  TRACE_ON( c->flags ) &&
-					check_trace_route( trace_filter_route_id, c) ) {
+					check_trace_route( trace_filter_route_ref, c) ) {
 				c->proto_flags |= F_TCP_CONN_TRACED;
 				if ( tcpconn2su( c, &src_su, &dst_su) < 0 ) {
 					LM_ERR("can't create su structures for tracing!\n");
@@ -476,7 +477,7 @@ static int proto_tcp_send(struct socket_info* send_sock,
 			}
 
 			if ( TRACE_ON( c->flags ) &&
-					check_trace_route( trace_filter_route_id, c) ) {
+					check_trace_route( trace_filter_route_ref, c) ) {
 				c->proto_flags |= F_TCP_CONN_TRACED;
 				if ( tcpconn2su( c, &src_su, &dst_su) < 0 ) {
 					LM_ERR("can't create su structures for tracing!\n");
@@ -660,7 +661,7 @@ static int tcp_read_req(struct tcp_connection* con, int* bytes_read)
 			ip_addr2a( &con->rcv.dst_ip ), con->rcv.dst_port );
 
 		if ( TRACE_ON( con->flags ) &&
-					check_trace_route( trace_filter_route_id, con) ) {
+					check_trace_route( trace_filter_route_ref, con) ) {
 			if ( tcpconn2su( con, &src_su, &dst_su) < 0 ) {
 				LM_ERR("can't create su structures for tracing!\n");
 			} else {
@@ -676,9 +677,9 @@ static int tcp_read_req(struct tcp_connection* con, int* bytes_read)
 
 	if (con->con_req) {
 		req=con->con_req;
-		LM_DBG("Using the per connection buff \n");
+		LM_DBG("Using the per connection buff for conn %p\n",con);
 	} else {
-		LM_DBG("Using the global ( per process ) buff \n");
+		LM_DBG("Using the global ( per process ) buff for conn %p\n",con);
 		init_tcp_req(&tcp_current_req, 0);
 		req=&tcp_current_req;
 	}
@@ -741,7 +742,7 @@ again:
 			goto error;
 	}
 
-	LM_DBG("tcp_read_req end\n");
+	LM_DBG("tcp_read_req end for conn %p, req is %p\n",con,con->con_req);
 done:
 	if (bytes_read) *bytes_read=total_bytes;
 	/* connection will be released */

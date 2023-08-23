@@ -509,7 +509,7 @@ int clone_sip_msg_body(struct sip_msg *src_msg, struct sip_msg *dst_msg,
 			extra_len = 0;
 		} else {
 			extra_len = (p->flags&SIP_BODY_PART_FLAG_NEW) ?
-				p->mime_s.len+p->body.len : 0 ;
+				p->mime_s.len+p->body.len+p->headers.len : 0 ;
 			if((np->next=func_malloc(my_malloc, sizeof(struct body_part)+extra_len))==NULL){
 				LM_ERR("failed to allocate new body_part clone (shared=%d)\n",
 					shared);
@@ -589,17 +589,7 @@ int should_update_sip_body(struct sip_msg *msg)
 
 str *get_body_part(struct sip_msg *msg, unsigned int type, unsigned int subtype)
 {
-	str body;
 	struct body_part *p;
-
-	if(parse_headers(msg, HDR_CONTENTLENGTH_F,0) < 0) {
-		LM_ERR("cannot parse cseq header\n");
-		return NULL;
-	}
-
-	body.len = get_content_length(msg);
-	if (!body.len)
-		return NULL;
 
 	if (parse_sip_body(msg)<0 || msg->body==NULL) {
 		LM_DBG("cannot parse body\n");

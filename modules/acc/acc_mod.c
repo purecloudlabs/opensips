@@ -149,7 +149,7 @@ static int fixup_init_dburl(void **param);
 /**
  * pseudo-variables exported by acc module
  */
-static pv_export_t mod_items[] = {
+static const pv_export_t mod_items[] = {
 	{ {"acc_extra", sizeof("acc_extra") - 1}, 2001, pv_get_acc_extra,
 		pv_set_acc_extra, pv_parse_acc_extra_name,
 		0 /* parse index(won't use here) */, 0, 0},
@@ -161,7 +161,7 @@ static pv_export_t mod_items[] = {
 	{ {0, 0}, 0, 0, 0, 0, 0, 0, 0 }
 };
 
-static cmd_export_t cmds[] = {
+static const cmd_export_t cmds[] = {
 	{"acc_log_request", (cmd_function)w_acc_log_request, {
 		{CMD_PARAM_STR, 0, 0}, {0,0,0}},
 		REQUEST_ROUTE|FAILURE_ROUTE|BRANCH_ROUTE|LOCAL_ROUTE},
@@ -200,7 +200,7 @@ static cmd_export_t cmds[] = {
 	{0,0,{{0,0,0}},0}
 };
 
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{"early_media",             INT_PARAM, &early_media               },
 	{"report_cancels",          INT_PARAM, &report_cancels            },
 	{"detect_direction",        INT_PARAM, &detect_direction          },
@@ -230,7 +230,7 @@ static param_export_t params[] = {
 	{0,0,0}
 };
 
-static module_dependency_t *get_deps_aaa_url(param_export_t *param)
+static module_dependency_t *get_deps_aaa_url(const param_export_t *param)
 {
 	char *aaa_url = *(char **)param->param_pointer;
 
@@ -240,7 +240,7 @@ static module_dependency_t *get_deps_aaa_url(param_export_t *param)
 	return alloc_module_dep(MOD_TYPE_AAA, NULL, DEP_WARN);
 }
 
-static module_dependency_t *get_deps_detect_dir(param_export_t *param)
+static module_dependency_t *get_deps_detect_dir(const param_export_t *param)
 {
 	if (*(int *)param->param_pointer == 0)
 		return NULL;
@@ -248,7 +248,7 @@ static module_dependency_t *get_deps_detect_dir(param_export_t *param)
 	return alloc_module_dep(MOD_TYPE_DEFAULT, "rr", DEP_ABORT);
 }
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "tm", DEP_ABORT  },
 		{ MOD_TYPE_DEFAULT, "dialog", DEP_SILENT  },
@@ -361,9 +361,6 @@ static int mod_init( void )
 			return -1;
 		}
 	}
-
-	/* init the extra engine */
-	init_acc_extra();
 
 	/* ----------- SYSLOG INIT SECTION ----------- */
 	acc_log_init();

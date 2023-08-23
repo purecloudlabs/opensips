@@ -34,9 +34,10 @@ static void cgrc_reconn_rpc(int sender, void *p);
 
 static int cgrc_reconn(struct cgr_conn *c)
 {
-	if (cgrc_conn(c) >= 0 && c == c->engine->default_con)
+	int ret = cgrc_conn(c);
+	if (ret >= 0 && c == c->engine->default_con)
 		return cgrc_start_listen(c);
-	return -1;
+	return ret;
 }
 
 #ifdef HAVE_TIMER_FD
@@ -269,7 +270,7 @@ static int cgrc_conn(struct cgr_conn *c)
 
 	tcp_con_get_profile(&c->engine->su, src_su, PROTO_TCP, &prof);
 
-	s = tcp_sync_connect_fd(src_su, &c->engine->su, PROTO_TCP, &prof);
+	s = tcp_sync_connect_fd(src_su, &c->engine->su, PROTO_TCP, &prof, 0);
 	if (s < 0) {
 		LM_ERR("cannot connect to %.*s:%d\n", c->engine->host.len,
 				c->engine->host.s, c->engine->port);

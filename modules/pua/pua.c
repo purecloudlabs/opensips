@@ -102,7 +102,7 @@ static int update_pua(ua_pres_t* p, unsigned int hash_code, unsigned int final);
 static void db_update(unsigned int ticks,void *param);
 static void hashT_clean(unsigned int ticks,void *param);
 
-static cmd_export_t cmds[]={
+static const cmd_export_t cmds[]={
 	{"pua_update_contact",(cmd_function)update_contact, {{0,0,0}},
 		REQUEST_ROUTE},
 	{"bind_libxml_api", (cmd_function)bind_libxml_api, {{0,0,0}}, 0},
@@ -110,7 +110,7 @@ static cmd_export_t cmds[]={
 	{0,0,{{0,0,0}},0}
 };
 
-static param_export_t params[]={
+static const param_export_t params[]={
 	{"hash_size" ,          INT_PARAM, &HASH_SIZE          },
 	{"db_url" ,             STR_PARAM, &db_url.s           },
 	{"db_table" ,           STR_PARAM, &db_table.s         },
@@ -122,7 +122,7 @@ static param_export_t params[]={
 	{0, 0, 0}
 };
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_SQLDB, NULL, DEP_ABORT },
 		{ MOD_TYPE_NULL, NULL, 0 },
@@ -214,8 +214,15 @@ static int mod_init(void)
 
 	if(HASH_SIZE<=1)
 		HASH_SIZE= 512;
-	else
+	else {
+		/* must fit in half of "long" when building the pres_id */
+		if ( HASH_SIZE > (sizeof(long)*8/2) ) {
+			LM_WARN("hash_size %d too large, limiting to max allowed %d\n",
+				HASH_SIZE, (int)(sizeof(long)*8/2) );
+			HASH_SIZE = (sizeof(long)*8/2);
+		}
 		HASH_SIZE = 1<<HASH_SIZE;
+	}
 
 	HashT= new_htable();
 	if(HashT== NULL)

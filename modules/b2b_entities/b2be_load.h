@@ -37,6 +37,7 @@
 #define _B2BE_LOAD_H_
 
 #include "../../bin_interface.h"
+#include "../../parser/parse_from.h"
 
 #define B2BCB_TRIGGER_EVENT    (1<<0)
 #define B2BCB_RECV_EVENT       (1<<1)
@@ -49,9 +50,12 @@
 
 #define B2B_NOTIFY_FL_TERMINATED (1<<0)
 #define B2B_NOTIFY_FL_ACK_NEG    (1<<1)
+/* entity has been terminated on the spot when receiving a BYE request
+ * while another transaction was ongoing(no final reply sent) */
+#define B2B_NOTIFY_FL_TERM_BYE   (1<<2)
 
 #define B2B_MAX_PREFIX_LEN    5
-#define B2B_MAX_KEY_SIZE	(B2B_MAX_PREFIX_LEN+4+10+10+INT2STR_MAX_LEN)
+#define B2B_MAX_KEY_SIZE	(B2B_MAX_PREFIX_LEN+5+10+10+INT2STR_MAX_LEN+10)
 
 enum b2b_entity_type {B2B_SERVER=0, B2B_CLIENT, B2B_NONE};
 
@@ -228,6 +232,33 @@ static inline b2b_dlginfo_t *b2b_new_dlginfo(str *callid, str *fromtag, str *tot
 static inline b2b_dlginfo_t *b2b_dup_dlginfo(b2b_dlginfo_t *info)
 {
 	return b2b_new_dlginfo(&info->callid, &info->fromtag, &info->totag);
+}
+
+static inline b2b_dlginfo_t *b2b_fill_dlginfo(struct sip_msg *msg, str *b2b_key)
+{
+	static b2b_dlginfo_t dlginfo;
+	str callid, fromtag;
+
+	if (msg->callid==NULL || msg->callid->body.s==NULL)
+	{
+		LM_ERR("failed to parse callid header\n");
+		return NULL;
+	}
+	callid = msg->callid->body;
+
+	if (msg->from->parsed == NULL)
+	{
+		if (parse_from_header(msg) < 0) {
+			LM_ERR("cannot parse From header\n");
+			return NULL;
+		}
+	}
+	fromtag = ((struct to_body*)msg->from->parsed)->tag_value;
+
+	dlginfo.totag  = *b2b_key;
+	dlginfo.callid = callid;
+	dlginfo.fromtag= fromtag;
+	return &dlginfo;
 }
 
 #endif

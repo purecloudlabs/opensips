@@ -445,7 +445,7 @@ inline static int hexstr2int(char *c, int len, unsigned int *val)
 
 /* double output length assumed ; does NOT zero-terminate */
 inline static int string2hex(
-	/* input */ unsigned char *str, int len,
+	/* input */ const char *str, int len,
 	/* output */ char *hex )
 {
 	int orig_len;
@@ -1298,19 +1298,46 @@ extern int tcp_timeout_send;
 			tcp_dbg = get_time_diff(&(begin)); \
 	} while(0)
 
-
+/* Note: limited to a max time diff of 2147 * 10^6 useconds! */
 static inline int get_time_diff(struct timeval *begin)
 {
 	struct timeval end;
-	long seconds,useconds,mtime;
 
-	gettimeofday(&end,NULL);
-	seconds  = end.tv_sec  - begin->tv_sec;
-	useconds = end.tv_usec - begin->tv_usec;
-	mtime = ((seconds) * 1000000 + useconds);
+	gettimeofday(&end, NULL);
 
-	return mtime;
+	/* difference is returned in microseconds */
+	return (long long)(end.tv_sec*1000000 + end.tv_usec)
+	         - (long long)(begin->tv_sec*1000000 + begin->tv_usec);
 }
+
+static inline unsigned long long get_clock_diff(struct timespec *begin)
+{
+    struct timespec end;
+
+    clock_gettime(CLOCK_REALTIME, &end);
+
+    return (end.tv_sec - begin->tv_sec) * 1000000000ULL
+             + (end.tv_nsec - begin->tv_nsec);
+}
+
+#define __clock_check_diff(__loglv__, start_tmspec, maxdf, fmt, ...) \
+	do { \
+		unsigned long long _diff_ns = get_clock_diff(start_tmspec); \
+		if (_diff_ns > (maxdf)) \
+			LM_GEN(__loglv__, "time spent: %0.*lfs " fmt "\n", 3, \
+			       (_diff_ns)/1e9, __VA_ARGS__); \
+	} while (0)
+#define _clock_check_diff(start_tmspec, maxdf, fmt, ...) \
+	__clock_check_diff(L_NOTICE, start_tmspec, maxdf, fmt, __VA_ARGS__)
+
+/**
+ * clock_check_diff() - measure code execution time relative to the @begin
+ *       timespec; print notice msg if the difference was exceeded
+ * @maxdf (unsigned long long) - the maximum accepted execution time
+ * @fmt (char *) - extra format string + variable # of arguments
+ */
+#define clock_check_diff(maxdf, fmt, ...) \
+	_clock_check_diff(&begin, maxdf, fmt, __VA_ARGS__)
 
 #define reset_longest_action_list(threshold) \
 	do { \
@@ -1536,5 +1563,10 @@ int _base32decode(unsigned char *out, unsigned char *in, int len,
 
 #define calc_word32_encode_len calc_base32_encode_len
 #define calc_max_word32_decode_len calc_max_base32_decode_len
+
+#ifdef howmany
+#undef howmany
+#endif
+#define howmany(x, y) (sizeof(x) / sizeof(y))
 
 #endif

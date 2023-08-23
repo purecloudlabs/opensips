@@ -34,13 +34,9 @@
  * \brief Statistics support
  */
 
-#ifdef HAVE_STDATOMIC
-#include <stdatomic.h>
-#else
-#include "atomic.h"
-#endif
 #include <string.h>
 
+#include "atomic.h"
 #include "mem/shm_mem.h"
 #include "mem/rpm_mem.h"
 #include "mi/mi.h"
@@ -66,8 +62,10 @@ static mi_response_t *w_mi_list_stats_1(const mi_params_t *params,
 								struct mi_handler *async_hdl);
 static mi_response_t *mi_reset_stats(const mi_params_t *params,
 								struct mi_handler *async_hdl);
+static mi_response_t *mi_reset_all_stats(const mi_params_t *params,
+								struct mi_handler *async_hdl);
 
-static mi_export_t mi_stat_cmds[] = {
+static const mi_export_t mi_stat_cmds[] = {
 	{ "get_statistics",
 		"prints the statistics (all, group or one) realtime values.", 0, 0, {
 		{mi_get_stats, {"statistics", 0}},
@@ -83,6 +81,11 @@ static mi_export_t mi_stat_cmds[] = {
 	},
 	{ "reset_statistics", "resets the value of a statistic variable", 0, 0, {
 		{mi_reset_stats, {"statistics", 0}},
+		{EMPTY_MI_RECIPE}
+		}
+	},
+	{ "reset_all_statistics", "resets the value of all resetable variables", 0, 0, {
+		{mi_reset_all_stats, {0}},
 		{EMPTY_MI_RECIPE}
 		}
 	},
@@ -571,7 +574,7 @@ error:
 	return -1;
 }
 
-int register_stat2( char *module, char *name, stat_var **pvar,
+int register_stat2(const char *module, char *name, stat_var **pvar,
 					unsigned short flags, void *ctx, int unsafe)
 {
 	str smodule, sname;
@@ -595,7 +598,7 @@ int register_dynamic_stat( str *name, stat_var **pvar)
 	return __register_dynamic_stat (NULL, name, pvar);
 }
 
-int __register_module_stats(char *module, stat_export_t *stats, int unsafe)
+int __register_module_stats(const char *module, const stat_export_t *stats, int unsafe)
 {
 	int ret;
 
@@ -958,6 +961,47 @@ static mi_response_t *mi_reset_stats(const mi_params_t *params,
 
 	if (!found)
 		return init_mi_error(404, MI_SSTR("Statistics Not Found"));
+
+	return init_mi_result_ok();
+}
+
+static mi_response_t *mi_reset_all_stats(const mi_params_t *params,
+								struct mi_handler *async_hdl)
+{
+	int i;
+	stat_var *stat;
+
+	if (collector==NULL)
+		return 0;
+
+	/* static stats */
+	for (i=0;i<STATS_HASH_SIZE;i++) {
+		for( stat=collector->hstats[i] ; stat ; stat=stat->hnext ) {
+			if ( !stat_is_hidden(stat)) {
+				reset_stat( stat );
+			}
+		}
+	}
+
+	/* dynamic stats */
+	lock_start_read((rw_lock_t *)collector->rwl);
+	for (i=0;i<STATS_HASH_SIZE;i++) {
+		for( stat=collector->dy_hstats[i] ; stat ; stat=stat->hnext ) {
+			if ( !stat_is_hidden(stat)) {
+				reset_stat( stat );
+			}
+		}
+	}
+	lock_stop_read((rw_lock_t *)collector->rwl);
+
+	/* module stats */
+	for( i=0 ; i<collector->mod_no ; i++ ) {
+		for( stat=collector->amodules[i].head ; stat ; stat=stat->hnext ) {
+			if ( !stat_is_hidden(stat)) {
+				reset_stat( stat );
+			}
+		}
+	}
 
 	return init_mi_result_ok();
 }

@@ -70,20 +70,20 @@ static int __crt_tr_bufs, __crt_tr_link;
 
 trans_extra_t *tr_extra_list;
 
-static trans_export_t core_trans[] = {
-	{str_init("s"), tr_parse_string, tr_eval_string},
-	{str_init("uri"), tr_parse_uri, tr_eval_uri},
-	{str_init("via"), tr_parse_via, tr_eval_via},
-	{str_init("param"), tr_parse_paramlist, tr_eval_paramlist},
-	{str_init("nameaddr"), tr_parse_nameaddr, tr_eval_nameaddr},
-	{str_init("ip"), tr_parse_ip, tr_eval_ip},
-	{str_init("csv"), tr_parse_csv, tr_eval_csv},
-	{str_init("sdp"), tr_parse_sdp, tr_eval_sdp},
-	{str_init("re"), tr_parse_re, tr_eval_re},
+static const trans_export_t core_trans[] = {
+	{str_const_init("s"), tr_parse_string, tr_eval_string},
+	{str_const_init("uri"), tr_parse_uri, tr_eval_uri},
+	{str_const_init("via"), tr_parse_via, tr_eval_via},
+	{str_const_init("param"), tr_parse_paramlist, tr_eval_paramlist},
+	{str_const_init("nameaddr"), tr_parse_nameaddr, tr_eval_nameaddr},
+	{str_const_init("ip"), tr_parse_ip, tr_eval_ip},
+	{str_const_init("csv"), tr_parse_csv, tr_eval_csv},
+	{str_const_init("sdp"), tr_parse_sdp, tr_eval_sdp},
+	{str_const_init("re"), tr_parse_re, tr_eval_re},
 	{{0,0}, 0, 0}
 };
 
-int tr_add_extra(trans_export_t *e)
+int tr_add_extra(const trans_export_t *e)
 {
 	trans_extra_t *tr_extra;
 	int i;
@@ -121,7 +121,7 @@ int tr_add_extra(trans_export_t *e)
 	return 0;
 }
 
-int register_trans_mod(char *mod_name, trans_export_t *tr_exports)
+int register_trans_mod(const char *mod_name, const trans_export_t *tr_exports)
 {
 	int i;
 
@@ -375,7 +375,7 @@ int tr_eval_string(struct sip_msg *msg, tr_param_t *tp, int subtype,
 			val->flags = PV_VAL_STR;
 			val->ri = 0;
 			val->rs.s = _tr_buffer;
-			val->rs.len = string2hex(sha_buf, sha_hash_len, _tr_buffer);
+			val->rs.len = string2hex((char *)sha_buf, sha_hash_len, _tr_buffer);
 			_tr_buffer[sha_hash_len*2] = '\0';
 			break;
 		case TR_S_CRC32:
@@ -2001,7 +2001,7 @@ int tr_eval_ip(struct sip_msg *msg, tr_param_t *tp,int subtype,
 			if(!(val->flags&PV_VAL_STR))
 				val->rs.s = int2str(val->ri, &val->rs.len);
 
-			val->ri = ip_addr_is_1918(&(val->rs));
+			val->ri = ip_addr_is_1918(&(val->rs), 0);
 
 			val->flags = PV_TYPE_INT|PV_VAL_INT|PV_VAL_STR;
 			val->rs.s = int2str(val->ri, &val->rs.len);
@@ -2409,6 +2409,9 @@ int tr_eval_nameaddr(struct sip_msg *msg, tr_param_t *tp, int subtype,
 		pv_value_t *val)
 {
 	struct to_param* topar;
+	pv_value_t v;
+	int index, total;
+	struct to_body *nameaddr = NULL;
 
 	if (!val)
 		return -1;
@@ -2458,7 +2461,7 @@ int tr_eval_nameaddr(struct sip_msg *msg, tr_param_t *tp, int subtype,
 			nameaddr_str.s[0] = 0;
 			goto error;
 		}
-		parse_to(nameaddr_str.s, nameaddr_str.s + nameaddr_str.len,
+		parse_multi_to(nameaddr_str.s, nameaddr_str.s + nameaddr_str.len,
 			nameaddr_to_body);
 	}
 
@@ -2468,23 +2471,68 @@ int tr_eval_nameaddr(struct sip_msg *msg, tr_param_t *tp, int subtype,
 		goto error;
 	}
 
+	/* check if there is an index set */
+	if (tp && (subtype != TR_NA_PARAM || tp->next)) {
+		/* we do have an index */
+		switch (tp->type) {
+			case TR_PARAM_NUMBER:
+				index = tp->v.n;
+				break;
+			case TR_PARAM_SPEC:
+				if(pv_get_spec_value(msg, (pv_spec_p)tp->v.data, &v)!=0
+						|| (!(v.flags&PV_VAL_INT)))
+				{
+					LM_ERR("invalid index type: %d; integer expected\n",
+							v.flags);
+					goto error;
+				}
+				index = v.ri;
+				break;
+			default:
+				LM_ERR("unsupported index type: %d\n", tp->type);
+				goto error;
+		}
+		tp = tp->next;
+		if (index < 0) {
+			total = 0;
+			for (nameaddr = nameaddr_to_body; nameaddr; nameaddr = nameaddr->next)
+				total++;
+			if (index + total < 0) {
+				LM_DBG("index %d out of bounds %d\n", index, total);
+				goto out_of_bounds;
+			}
+			index = total + index;
+		}
+		for (nameaddr = nameaddr_to_body;
+				nameaddr && index != 0;
+				nameaddr = nameaddr->next, index--);
+		if (index > 0 || !nameaddr) {
+			LM_DBG("index out of bounds\n");
+			goto out_of_bounds;
+		}
+
+	} else {
+		/* otherwise we default to first body */
+		nameaddr = nameaddr_to_body;
+	}
+
 	memset(val, 0, sizeof(pv_value_t));
 	val->flags = PV_VAL_STR;
 
 	switch(subtype)
 	{
 		case TR_NA_URI:
-			val->rs =(nameaddr_to_body->uri.s)?nameaddr_to_body->uri:_tr_empty;
+			val->rs =(nameaddr->uri.s)?nameaddr->uri:_tr_empty;
 			val->flags |= (val->rs.len) ? 0 : PV_VAL_NULL;
 			break;
 		case TR_NA_LEN:
 			val->flags = PV_TYPE_INT|PV_VAL_INT|PV_VAL_STR;
-			val->ri = nameaddr_to_body->body.len;
+			val->ri = nameaddr->body.len;
 			val->rs.s = int2str(val->ri, &val->rs.len);
 			break;
 		case TR_NA_NAME:
-			val->rs = (nameaddr_to_body->display.s)?
-				nameaddr_to_body->display:_tr_empty;
+			val->rs = (nameaddr->display.s)?
+				nameaddr->display:_tr_empty;
 			val->flags |= (val->rs.len) ? 0 : PV_VAL_NULL;
 			break;
 		case TR_NA_PARAM:
@@ -2493,7 +2541,7 @@ int tr_eval_nameaddr(struct sip_msg *msg, tr_param_t *tp, int subtype,
 				LM_ERR("Wrong type for parameter, it must string\n");
 				goto error;
 			}
-			topar = nameaddr_to_body->param_lst;
+			topar = nameaddr->param_lst;
 			/* search the parameter */
 			while(topar)
 			{
@@ -2506,7 +2554,7 @@ int tr_eval_nameaddr(struct sip_msg *msg, tr_param_t *tp, int subtype,
 			val->flags |= (val->rs.len) ? 0 : PV_VAL_NULL;
 			break;
 		case TR_NA_PARAMS:
-			topar = nameaddr_to_body->param_lst;
+			topar = nameaddr->param_lst;
 			if (!topar) {
 				LM_DBG("no params\n");
 				val->flags = PV_VAL_NULL;
@@ -2514,12 +2562,12 @@ int tr_eval_nameaddr(struct sip_msg *msg, tr_param_t *tp, int subtype,
 			else {
 				LM_DBG("We have params\n");
 				val->rs.s = topar->name.s;
-				if (nameaddr_to_body->last_param->value.s==NULL) {
-					val->rs.len = nameaddr_to_body->last_param->name.s +
-						nameaddr_to_body->last_param->name.len - val->rs.s;
+				if (nameaddr->last_param->value.s==NULL) {
+					val->rs.len = nameaddr->last_param->name.s +
+						nameaddr->last_param->name.len - val->rs.s;
 				} else {
-					val->rs.len = nameaddr_to_body->last_param->value.s +
-						nameaddr_to_body->last_param->value.len - val->rs.s;
+					val->rs.len = nameaddr->last_param->value.s +
+						nameaddr->last_param->value.len - val->rs.s;
 					/* compensate the len if the value of the last param is
 					 * a quoted value (include the closing quote in the len) */
 					if ( (val->rs.s+val->rs.len<nameaddr_str.len+nameaddr_str.s) &&
@@ -2539,6 +2587,9 @@ int tr_eval_nameaddr(struct sip_msg *msg, tr_param_t *tp, int subtype,
 error:
 	val->flags = PV_VAL_NULL;
 	return -1;
+out_of_bounds:
+	val->flags = PV_VAL_NULL;
+	return 0;
 }
 
 
@@ -2551,7 +2602,7 @@ char* parse_transformation(str *in, trans_t **tr)
 	trans_t *t = NULL;
 	trans_t *t0 = NULL;
 	str s;
-	trans_export_t *tr_export;
+	const trans_export_t *tr_export;
 	trans_extra_t *tr_extra;
 	int i, nesting_level = 0;
 
@@ -2712,7 +2763,7 @@ char *tr_parse_nparam(char *p, str *in, tr_param_t **tp)
 			(*tp)->type = TR_PARAM_NUMBER;
 			(*tp)->v.n = sign*n;
 		} else {
-			LM_ERR("tinvalid param in transformation: %.*s!!\n",
+			LM_ERR("invalid param in transformation: %.*s!!\n",
 				in->len, in->s);
 			goto error;
 		}
@@ -3447,10 +3498,11 @@ int tr_parse_nameaddr(str* in, trans_t *t)
 		return -1;
 
 	p = in->s;
-	name.s = in->s;
+parse_name:
+	name.s = p;
 
 	/* find next token */
-	while(is_in_str(p, in) && *p!=TR_PARAM_MARKER && *p!=TR_RBRACKET) p++;
+	while(is_in_str(p, in) && *p!=TR_PARAM_MARKER && *p!=TR_RBRACKET && *p!=TR_CLASS_MARKER) p++;
 	if(*p=='\0')
 	{
 		LM_ERR("invalid transformation: %.*s\n",
@@ -3459,6 +3511,22 @@ int tr_parse_nameaddr(str* in, trans_t *t)
 	}
 	name.len = p - name.s;
 	trim(&name);
+	if (*p == TR_CLASS_MARKER) {
+		if (t->params) {
+			LM_ERR("transformation [%.*s] already has an index!\n",
+					in->len, in->s);
+			goto error;
+		}
+		/* we either have a pvar, or an index */
+		if (tr_parse_nparam(name.s, &name, &tp) == NULL) {
+			LM_ERR("invalid index: %.*s\n", name.len, name.s);
+			goto error;
+		}
+		t->params = tp;
+		tp = 0;
+		p++;
+		goto parse_name;
+	}
 
 	if(name.len==3 && strncasecmp(name.s, "uri", 3)==0)
 	{
@@ -3482,7 +3550,10 @@ int tr_parse_nameaddr(str* in, trans_t *t)
 		p++;
 		if (tr_parse_sparam(p, in, &tp, 0) == NULL)
 			goto error;
-		t->params = tp;
+		if (t->params)
+			t->params->next = tp;
+		else
+			t->params = tp;
 		tp = 0;
 
 		return 0;

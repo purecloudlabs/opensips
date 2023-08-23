@@ -111,6 +111,7 @@
 #include "t_funcs.h"
 #include "t_reply.h"
 #include "t_cancel.h"
+#include "t_stats.h"
 
 
 static struct timer_table *timertable=0;
@@ -303,12 +304,20 @@ inline static void retransmission_handler( struct timer_link *retr_tl )
 			}
 
 			set_t(T_UNDEFINED);
+			switch(r_buf->retr_list) {
+			case RT_T1_TO_1: update_stat( tm_retran_req_T11, 1); break;
+			case RT_T1_TO_2: update_stat( tm_retran_req_T12, 1); break;
+			case RT_T1_TO_3: update_stat( tm_retran_req_T13, 1); break;
+			case RT_T2: update_stat( tm_retran_req_T2, 1);break;
+			default:;
+			}
 	} else {
 			LM_DBG("retransmission_handler : reply resending "
 				"(t=%p, %.9s ... )\n", r_buf->my_T, r_buf->buffer.s);
 			set_t(r_buf->my_T);
 			t_retransmit_reply(r_buf->my_T);
 			set_t(T_UNDEFINED);
+			update_stat( tm_retran_rpl_T2, 1);
 	}
 
 	id = r_buf->retr_list;
@@ -397,6 +406,12 @@ inline static void final_response_handler( struct timer_link *fr_tl )
 			sizeof(CANCEL_REASON_SIP_480)-1);
 		cancel_uacs(t, cancel_bitmap );
 		set_cancel_extra_hdrs( NULL, 0);
+	}
+
+	switch(r_buf->retr_list) {
+	case FR_TIMER_LIST: update_stat( tm_timeout_fr, 1); break;
+	case FR_INV_TIMER_LIST: update_stat( tm_timeout_fr_inv, 1); break;
+	default:;
 	}
 	/* lock reply processing to determine how to proceed reliably */
 	LOCK_REPLIES( t );
@@ -1071,7 +1086,10 @@ static void unlink_timers( struct cell *t )
 void timer_routine(unsigned int ticks , void *set)
 {
 	struct timer_link *tl, *tmp_tl;
+	struct timespec begin;
 	int                id;
+
+	clock_gettime(CLOCK_REALTIME, &begin);
 
 	lock_start_write( timertable[(long)set].ex_lock );
 
@@ -1096,6 +1114,10 @@ void timer_routine(unsigned int ticks , void *set)
 		}
 	}
 	lock_stop_write( timertable[(long)set].ex_lock );
+
+	clock_check_diff((double)TM_TIMER_ITV_S*1e9 * TM_TIMER_LOAD_WARN,
+	    "now at %d%%+ capacity, inuse_transactions: %lu", (int)(TM_TIMER_LOAD_WARN*100),
+	    (unsigned long)get_stat_val(tm_trans_inuse));
 }
 
 
@@ -1103,7 +1125,10 @@ void timer_routine(unsigned int ticks , void *set)
 void utimer_routine(utime_t uticks , void *set)
 {
 	struct timer_link *tl, *tmp_tl;
+	struct timespec begin;
 	int                id;
+
+	clock_gettime(CLOCK_REALTIME, &begin);
 
 	lock_start_write( timertable[(long)set].ex_lock );
 
@@ -1124,5 +1149,9 @@ void utimer_routine(utime_t uticks , void *set)
 		}
 	}
 	lock_stop_write( timertable[(long)set].ex_lock );
+
+	clock_check_diff((double)TM_UTIMER_ITV_US*1000 * TM_TIMER_LOAD_WARN,
+	    "now at %d%%+ capacity, inuse_transactions: %lu", (int)(TM_TIMER_LOAD_WARN*100),
+	    (unsigned long)get_stat_val(tm_trans_inuse));
 }
 

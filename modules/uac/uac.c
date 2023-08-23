@@ -38,7 +38,9 @@
 #include "../../sr_module.h"
 #include "../../dprint.h"
 #include "../../error.h"
+#include "../../context.h"
 #include "../../pvar.h"
+#include "../../route.h"
 #include "../../mem/mem.h"
 #include "../../parser/parse_from.h"
 #include "../tm/tm_load.h"
@@ -92,7 +94,7 @@ static int cfg_validate(void);
 static int uac_does_replace = 0;
 
 /* Exported functions */
-static cmd_export_t cmds[]={
+static const cmd_export_t cmds[]={
 	{"uac_replace_from",  (cmd_function)w_replace_from, {
 		{CMD_PARAM_STR|CMD_PARAM_OPT, fixup_replace_disp_uri, fixup_free_s},
 		{CMD_PARAM_STR, 0, 0},
@@ -115,7 +117,7 @@ static cmd_export_t cmds[]={
 
 
 /* Exported parameters */
-static param_export_t params[] = {
+static const param_export_t params[] = {
 	{"rr_from_store_param", STR_PARAM,                &rr_from_param.s       },
 	{"rr_to_store_param",   STR_PARAM,                &rr_to_param.s         },
 	{"restore_mode",        STR_PARAM,                &restore_mode_str      },
@@ -124,7 +126,7 @@ static param_export_t params[] = {
 	{0, 0, 0}
 };
 
-static module_dependency_t *get_deps_restore_mode(param_export_t *param)
+static module_dependency_t *get_deps_restore_mode(const param_export_t *param)
 {
 	char *mode = *(char **)param->param_pointer;
 
@@ -137,7 +139,7 @@ static module_dependency_t *get_deps_restore_mode(param_export_t *param)
 	return NULL;
 }
 
-static dep_export_t deps = {
+static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "tm",       DEP_ABORT  },
 		{ MOD_TYPE_DEFAULT, "dialog",   DEP_SILENT },
@@ -229,6 +231,10 @@ static int mod_init(void)
 
 	if ( is_script_func_used("uac_replace_from", -1) ||
 	is_script_func_used("uac_replace_to", -1) ) {
+
+		uac_replace_flags = context_register_int(CONTEXT_GLOBAL, NULL);
+		if (uac_replace_flags < 0)
+			return -1;
 
 		/* replace TO/FROM stuff is used, get prepared */
 
@@ -414,6 +420,14 @@ static int w_restore_from(struct sip_msg *msg)
 
 static int w_replace_from(struct sip_msg* msg, str* dsp, str* uri)
 {
+	unsigned flags = (unsigned)context_get_int(
+	      CONTEXT_GLOBAL, current_processing_ctx, uac_replace_flags);
+
+	if (flags & UAC_INUSE_REPLACE_FROM) {
+		LM_ERR("scripting bug: uac_replace_from() already called!\n");
+		return E_SCRIPT;
+	}
+
 	if (parse_from_header(msg)<0 ) {
 		LM_ERR("failed to find/parse FROM hdr\n");
 		return -1;
@@ -421,6 +435,10 @@ static int w_replace_from(struct sip_msg* msg, str* dsp, str* uri)
 
 	LM_DBG("dsp=%p (len=%d) , uri=%p (len=%d)\n",
 		dsp,dsp?dsp->len:0,uri,uri?uri->len:0);
+
+	if (route_type == REQUEST_ROUTE && !route_stack[route_stack_start])
+		context_put_int(CONTEXT_GLOBAL, current_processing_ctx,
+		                uac_replace_flags, (int)(flags|UAC_INUSE_REPLACE_FROM));
 
 	return (replace_uri(msg, dsp, uri, msg->from, 0)==0)?1:-1;
 }
@@ -440,11 +458,23 @@ static int w_restore_to(struct sip_msg *msg)
 
 static int w_replace_to(struct sip_msg* msg, str *dsp, str *uri)
 {
+	unsigned flags = (unsigned)context_get_int(
+	      CONTEXT_GLOBAL, current_processing_ctx, uac_replace_flags);
+
+	if (flags & UAC_INUSE_REPLACE_TO) {
+		LM_ERR("scripting bug: uac_replace_to() already called!\n");
+		return E_SCRIPT;
+	}
+
 	/* parse TO hdr */
 	if ( msg->to==0 && (parse_headers(msg,HDR_TO_F,0)!=0 || msg->to==0) ) {
 		LM_ERR("failed to parse TO hdr\n");
 		return -1;
 	}
+
+	if (route_type == REQUEST_ROUTE && !route_stack[route_stack_start])
+		context_put_int(CONTEXT_GLOBAL, current_processing_ctx,
+		                uac_replace_flags, (int)(flags|UAC_INUSE_REPLACE_TO));
 
 	return (replace_uri(msg, dsp, uri, msg->to, 1)==0)?1:-1;
 }
