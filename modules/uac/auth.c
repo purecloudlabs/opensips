@@ -258,8 +258,7 @@ int uac_auth( struct sip_msg *msg, int algmask)
 	str msg_body;
 	static struct authenticate_nc_cnonce auth_nc_cnonce;
 	struct uac_credential *crd;
-	int code, branch;
-	int new_cseq;
+	int code, branch, leg, new_cseq;
 	struct sip_msg *rpl;
 	struct cell *t;
 	struct digest_auth_response response;
@@ -268,7 +267,6 @@ int uac_auth( struct sip_msg *msg, int algmask)
 	char *p;
 	struct dlg_cell *dlg;
 	const struct match_auth_hf_desc *mdesc;
-	int dleg;
 
 	/* get transaction */
 	t = uac_tmb.t_gett();
@@ -365,7 +363,12 @@ int uac_auth( struct sip_msg *msg, int algmask)
 	else
 		dlg = NULL;
 
-	if (ttag.s==NULL || dlg==NULL || (dlg->flags&DLG_FLAG_CSEQ_ENFORCE)==0) {
+	if (dlg)
+		leg = uac_auth_dlg_leg(dlg, &ttag);
+	else
+		leg = 0;
+
+	if (ttag.s==NULL || dlg==NULL || (dlg->flags&DLG_FLAG_CSEQ_ENFORCE)==0 || dlg->legs[leg].last_gen_cseq==0) {
 
 		/* initial request or no dialog support
 		 * => do the changes over cseq from here */
@@ -388,7 +391,6 @@ int uac_auth( struct sip_msg *msg, int algmask)
 		 * CSEQ handling must be done only for intial request */
 		if (ttag.s==NULL) {
 			if (dlg) {
-				/* dlg->legs[dlg->legs_no[DLG_LEGS_USED]-1].last_gen_cseq = new_cseq; */
 				dlg->flags |= DLG_FLAG_CSEQ_ENFORCE;
 			} else {
 				param.len=rr_uac_cseq_param.len+3;
@@ -413,19 +415,18 @@ int uac_auth( struct sip_msg *msg, int algmask)
 
 				pkg_free(param.s);
 			}
-		} else if (dlg) {
-			/* a sequential that has updated the cseq - we need to
-			 * inform dialog as well */
-			dlg->flags |= DLG_FLAG_CSEQ_ENFORCE;
-			dleg = uac_auth_dlg_leg(dlg, &ttag);
-			dlg->legs[dleg].last_gen_cseq = new_cseq;
-			if (msg->REQ_METHOD == METHOD_INVITE)
-				dlg->legs[dleg].last_inv_gen_cseq = new_cseq;
-			if ((force_master_cseq_change(msg, new_cseq)) < 0) {
-				LM_ERR("failed to forced new in-dialog cseq\n");
-				goto error;
+		}
+		else {
+			if (dlg) {
+				dlg->flags |= DLG_FLAG_CSEQ_ENFORCE;
+				leg = uac_auth_dlg_leg(dlg, &ttag);
+				dlg->legs[leg].last_gen_cseq = new_cseq;
+				LM_DBG("setting last_gen_cseq to [%d] for leg [%d]\n", new_cseq, leg);
+				if ( (force_master_cseq_change( msg, new_cseq)) < 0) {
+					LM_ERR("failed to forced new in-dialog cseq\n");
+					goto error;
+				}
 			}
-
 		}
 
 	} else {
@@ -433,10 +434,9 @@ int uac_auth( struct sip_msg *msg, int algmask)
 		/* this is a sequential with dialog support, so the dialog module
 		 * is already managing the cseq => tell directly the dialog module
 		 * about the cseq increasing */
-		dleg = uac_auth_dlg_leg(dlg, &ttag);
-		new_cseq = ++dlg->legs[dleg].last_gen_cseq;
-		if (msg->REQ_METHOD == METHOD_INVITE)
-			dlg->legs[dleg].last_inv_gen_cseq = new_cseq;
+		leg = uac_auth_dlg_leg(dlg, &ttag);
+		new_cseq = ++dlg->legs[leg].last_gen_cseq;
+		LM_DBG("incrementing last_gen_cseq to [%d] for leg[%d]\n", new_cseq, leg);
 
 		/* as we expect to have the request already altered (by the dialog 
 		 * module) with a new cseq, to invalidate that change, we do a trick
