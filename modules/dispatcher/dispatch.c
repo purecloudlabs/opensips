@@ -46,6 +46,7 @@
 #include "../../db/db_res.h"
 #include "../../str.h"
 #include "../../rw_locking.h"
+#include "../../map.h"
 #include <fnmatch.h>
 
 #include "dispatch.h"
@@ -67,6 +68,7 @@
 extern ds_partition_t *partitions;
 
 extern struct socket_info *probing_sock;
+extern map_t probing_sock_map;
 extern event_id_t dispatch_evi_id;
 extern ds_partition_t *default_partition;
 
@@ -2592,6 +2594,7 @@ void ds_check_timer(unsigned int ticks, void* param)
 	ds_set_p list;
 	int_str val;
 	int j;
+	struct socket_info** prob_sock = NULL;
 
 	if ( !ds_cluster_shtag_is_active() )
 		return;
@@ -2630,7 +2633,11 @@ void ds_check_timer(unsigned int ticks, void* param)
 						break;
 					}
 
-					pack->sock = list->dlist[j].sock;
+					char setid_s[10];
+					snprintf(setid_s, sizeof(setid_s), "%d", list->id);
+					str setid_str = {setid_s, strlen(setid_s)};
+					prob_sock = (struct socket_info **)map_find(probing_sock_map, setid_str);
+					pack->sock = prob_sock != NULL ? *prob_sock : list->dlist[j].sock;
 
 					if (partition->attrs_avp_name>=0) {
 						val.s = list->dlist[j].attrs;

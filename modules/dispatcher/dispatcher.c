@@ -37,6 +37,7 @@
 #include "../../mem/mem.h"
 #include "../../mod_fix.h"
 #include "../../db/db.h"
+#include "../../map.h"
 
 #include "../freeswitch/fs_api.h"
 
@@ -144,8 +145,8 @@ pv_spec_t ds_setid_pv;
 static str options_reply_codes_str= {0, 0};
 static int* options_reply_codes = NULL;
 static int options_codes_no;
-static char *probing_sock_s = NULL;
 struct socket_info *probing_sock = NULL;
+map_t probing_sock_map = NULL;
 
 ds_partition_t *partitions = NULL, *default_partition = NULL;
 
@@ -198,6 +199,7 @@ static int mi_child_init(void);
 
 static int set_partition_arguments(unsigned int type, void * val);
 static int set_probing_list(unsigned int type, void * val);
+static int set_probing_sock(unsigned int type, void *val);
 
 static cmd_export_t cmds[] = {
 	{"ds_select_dst",    (cmd_function)w_ds_select_dst, {
@@ -297,7 +299,7 @@ static param_export_t params[]={
 	{"ds_ping_maxfwd",        INT_PARAM, &ds_ping_maxfwd},
 	{"ds_probing_mode",       INT_PARAM, &ds_probing_mode},
 	{"options_reply_codes",   STR_PARAM, &options_reply_codes_str.s},
-	{"ds_probing_sock",       STR_PARAM, &probing_sock_s},
+	{"ds_probing_sock",       STR_PARAM|USE_FUNC_PARAM, (void*)set_probing_sock},
 	{"ds_probing_list",       STR_PARAM|USE_FUNC_PARAM, (void*)set_probing_list},
 	{"ds_define_blacklist",   STR_PARAM|USE_FUNC_PARAM, (void*)set_ds_bl},
 	{"persistent_state",      INT_PARAM, &ds_persistent_state},
@@ -506,6 +508,72 @@ static int parse_partition_argument(str *arg, ds_db_head_t **found_head)
 	new_partition->partition_name = partition_name;
 
 	*found_head = new_partition;
+	return 0;
+}
+
+
+static int parse_probing_sock(const str s, str *setid, str *host, int *port, int *proto) {
+	str tmp = {s.s, s.len};
+
+	static const char delim = ';';
+	static const char setid_prefix[] = "setid:";
+
+	if (strncmp(tmp.s, setid_prefix, strlen(setid_prefix)) == 0) {
+		if (tmp.len - strlen(setid_prefix) <= 0) {
+			LM_ERR("setid value <%s> is empty\n", tmp.s);
+			return -1;
+		}
+		tmp.s += strlen(setid_prefix);
+		tmp.len -= strlen(setid_prefix);
+		setid->s = tmp.s;
+		while (tmp.len && tmp.s[0] != delim) {
+			tmp.s++;
+			tmp.len--;
+			setid->len++;
+		}
+		if (!tmp.len) {
+			LM_ERR("separator <%c> is missing\n", delim);
+			return -1;
+		}
+		tmp.s[0] = '\0';
+		tmp.s++;
+		tmp.len--;
+	}
+
+	if (parse_phostport(tmp.s, tmp.len, &host->s, &host->len, port, proto) != 0) {
+		LM_ERR("socket description <%s> is not valid\n", tmp.s);
+		return -1;
+	}
+
+	return 0;
+}
+
+
+static int set_probing_sock(unsigned int type, void *val) {
+	str input = {(char*)val, strlen(val)};
+	str host;
+	str setid;
+	int port, proto;
+
+	if (parse_probing_sock(input, &setid, &host, &port, &proto) != 0) {
+		return -1;
+	}
+
+	probing_sock = grep_internal_sock_info(&host, port, proto);
+	if (probing_sock == NULL) {
+		LM_ERR("socket <%s> is not local to opensips (we must listen on it)\n", input.s);
+		return -1;
+	}
+
+	if (probing_sock_map == NULL) {
+		probing_sock_map = map_create(AVLMAP_SHARED);
+		if (!probing_sock_map) {
+			LM_ERR("OOM\n");
+			return -1;
+		}
+	}
+	map_put(probing_sock_map, setid, probing_sock);
+
 	return 0;
 }
 
@@ -920,8 +988,6 @@ next_part:
 	if (ds_ping_interval > 0)
 	{
 		load_tm_f load_tm;
-		str host;
-		int port,proto;
 
 		if (ds_ping_from.s)
 			ds_ping_from.len = strlen(ds_ping_from.s);
@@ -934,21 +1000,6 @@ next_part:
 			&options_codes_no )< 0) {
 				LM_ERR("Bad format for options_reply_code parameter"
 						" - Need a code list separated by commas\n");
-				return -1;
-			}
-		}
-		/* parse and look for the socket to ping from */
-		if (probing_sock_s && probing_sock_s[0]!=0 ) {
-			if (parse_phostport( probing_sock_s, strlen(probing_sock_s),
-			&host.s, &host.len, &port, &proto)!=0 ) {
-				LM_ERR("socket description <%s> is not valid\n",
-					probing_sock_s);
-				return -1;
-			}
-			probing_sock = grep_internal_sock_info( &host, port, proto);
-			if (probing_sock==NULL) {
-				LM_ERR("socket <%s> is not local to opensips (we must listen "
-					"on it\n", probing_sock_s);
 				return -1;
 			}
 		}
@@ -1080,6 +1131,8 @@ static void destroy(void)
         /* destroy probing list */
         if (ds_probing_list)
             free_int_list(ds_probing_list, NULL);
+
+	if (probing_sock_map != NULL) map_destroy(probing_sock_map, NULL);
 }
 
 /**

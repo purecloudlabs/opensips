@@ -359,7 +359,7 @@ modparam("dispatcher", "ds_ping_maxfwd", 2)
 	<section id="param_ds_probing_sock" xreflabel="ds_probing_sock">
 		<title><varname>ds_probing_sock</varname> (str)</title>
 		<para>
-		A socket description [proto:]host[:port] of the local socket (which
+		A socket description [setid:setid-value][proto:]host[:port] of the local socket (which
 		is used by OpenSIPS for SIP traffic) to be used (if multiple) for
 		sending the probing messages from.
 		</para>
@@ -373,6 +373,15 @@ modparam("dispatcher", "ds_ping_maxfwd", 2)
 <programlisting format="linespecific">
 ...
 modparam("dispatcher", "ds_probing_sock", "udp:192.168.1.100:5077")
+...
+</programlisting>
+		</example>
+		<example>
+		<title>Set the <quote>ds_probing_sock</quote> parameter</title>
+<programlisting format="linespecific">
+...
+modparam("dispatcher", "ds_probing_sock", "setid:2;udp:192.168.1.100:5077")
+modparam("dispatcher", "ds_probing_sock", "setid:4;tls:192.168.1.100:5077")
 ...
 </programlisting>
 		</example>
