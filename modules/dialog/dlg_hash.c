@@ -711,6 +711,11 @@ int dlg_update_routing(struct dlg_cell *dlg, unsigned int leg,
 		rr->len,rr->s,
 		contact->len,contact->s );
 
+    if (contact->len == 0) {
+        LM_ERR("contact header is not set\n");
+        return -1;
+    }
+
 	if (dlg->legs[leg].contact.s)
 		shm_free(dlg->legs[leg].contact.s);
 
