@@ -711,21 +711,18 @@ int dlg_update_routing(struct dlg_cell *dlg, unsigned int leg,
 		rr->len,rr->s,
 		contact->len,contact->s );
 
-    if (contact->len == 0) {
-        LM_ERR("contact header is not set\n");
-        return -1;
+    if (contact->len) {
+        if (dlg->legs[leg].contact.s)
+            shm_free(dlg->legs[leg].contact.s);
+
+        dlg->legs[leg].contact.s = shm_malloc(contact->len);
+        if (dlg->legs[leg].contact.s==NULL) {
+            LM_ERR("no more shm mem\n");
+            return -1;
+        }
+        dlg->legs[leg].contact.len = contact->len;
+        memcpy( dlg->legs[leg].contact.s, contact->s, contact->len);
     }
-
-	if (dlg->legs[leg].contact.s)
-		shm_free(dlg->legs[leg].contact.s);
-
-	dlg->legs[leg].contact.s = shm_malloc(contact->len);
-	if (dlg->legs[leg].contact.s==NULL) {
-		LM_ERR("no more shm mem\n");
-		return -1;
-	}
-	dlg->legs[leg].contact.len = contact->len;
-	memcpy( dlg->legs[leg].contact.s, contact->s, contact->len);
 	/* rr */
 	if (rr->len) {
 		if (dlg->legs[leg].route_set.s)
