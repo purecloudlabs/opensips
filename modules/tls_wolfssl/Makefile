@@ -30,21 +30,34 @@ endif
 
 include ../../Makefile.modules
 
-lib/lib/libwolfssl.a:
+lib/wolfssl/configure:
 ifeq ($(WOLFSSL_FIPS_ENABLED),)
-	@cd ./lib/wolfssl; \
-	if [ ! -f "configure" ]; then \
-		./autogen.sh; \
-	fi; \
-	if [ ! -f "Makefile" ]; then \
+	$(Q)cd ./lib/wolfssl && ./autogen.sh
+endif
+
+lib/wolfssl/Makefile: lib/wolfssl/configure
+ifeq ($(WOLFSSL_FIPS_ENABLED),)
+	$(Q)cd ./lib/wolfssl && \
 		env -u DEFS -u CFLAGS -u LDFLAGS -u LIBS ./configure \
 		--enable-all --disable-fpecc --disable-examples -disable-aligndata \
 		--enable-writedup --enable-tlsv10 --disable-shared --enable-static \
 		--disable-jni --disable-crl-monitor \
 		--prefix=$(MOD_DIR)/lib \
-		--exec-prefix=$(MOD_DIR)/lib C_EXTRA_FLAGS="-fPIC" CFLAGS="-DWOLFSSL_STATIC_RSA"; \
-	fi;
-	@$(MAKE) -C ./lib/wolfssl install
+		--exec-prefix=$(MOD_DIR)/lib C_EXTRA_FLAGS="-fPIC" CFLAGS="-DWOLFSSL_STATIC_RSA";
+endif
+
+PATCHED_FILES = lib/wolfssl/src/internal.c lib/wolfssl/src/ssl.c
+
+lib/lib/libwolfssl.a: lib/wolfssl/Makefile $(PATCHED_FILES)
+ifeq ($(WOLFSSL_FIPS_ENABLED),)
+	$(Q)$(MAKE) -C ./lib/wolfssl install
+endif
+
+lib/wolfssl/src/internal.c: lib/patches/wolfssl-internal-memleak-fix.patched
+
+lib/patches/wolfssl-internal-memleak-fix.patched: lib/patches/wolfssl-internal-memleak-fix.patch
+ifeq ($(WOLFSSL_FIPS_ENABLED),)
+	 $(Q)patch -sNR -p1 -d lib/wolfssl --dry-run < $< || patch -N -p1 -d lib/wolfssl  < $< && cp $< $@
 endif
 
 clean:	clean-wolfssl-lib
@@ -52,9 +65,11 @@ clean:	clean-wolfssl-lib
 .PHONY: clean-wolfssl-lib
 clean-wolfssl-lib:
 ifeq ($(WOLFSSL_FIPS_ENABLED),)
-	@if [ -f ./lib/wolfssl/Makefile ]; then \
+	-@if [ -f ./lib/wolfssl/Makefile ]; then \
 		$(MAKE) -C ./lib/wolfssl clean; \
 	fi;
-	@rm -rf ./lib/bin ./lib/include ./lib/lib ./lib/share \
-	./lib/wolfssl/Makefile ./lib/wolfssl/configure
+	-@patch -stNR -p1 -d lib/wolfssl < lib/patches/wolfssl-internal-memleak-fix.patch
+	-@rm -rf ./lib/bin ./lib/include ./lib/lib ./lib/share \
+	./lib/wolfssl/Makefile ./lib/wolfssl/configure \
+	lib/patches/wolfssl-internal-memleak-fix.patched
 endif
