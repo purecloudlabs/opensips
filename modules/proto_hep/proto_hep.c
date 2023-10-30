@@ -421,7 +421,9 @@ static int hep_tcp_or_tls_send(struct socket_info* send_sock,
 	}
 
 	if (is_connection_max_lifetime_exceeded(c)) {
+		lock_get(&c->write_lock);
 		tcp_conn_destroy(c);
+		lock_release(&c->write_lock);
 		c = NULL;
 	}
 
