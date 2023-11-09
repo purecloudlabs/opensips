@@ -52,9 +52,9 @@ clean:	clean-wolfssl-lib
 .PHONY: clean-wolfssl-lib
 clean-wolfssl-lib:
 ifeq ($(WOLFSSL_FIPS_ENABLED),)
-	@if [ -f ./lib/wolfssl/Makefile ]; then \
+	-@if [ -f ./lib/wolfssl/Makefile ]; then \
 		$(MAKE) -C ./lib/wolfssl clean; \
 	fi;
-	@rm -rf ./lib/bin ./lib/include ./lib/lib ./lib/share \
+	-@rm -rf ./lib/bin ./lib/include ./lib/lib ./lib/share \
 	./lib/wolfssl/Makefile ./lib/wolfssl/configure
 endif
