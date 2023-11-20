@@ -1276,7 +1276,7 @@ error:
 		for (t=0; t<offset; t++)
 			if (*(buffer+t)) *(prn+t)=*(buffer+t);
 			else *(prn+t)=248U;
-		LM_ERR("parsed so far: %.*s\n", offset, ZSW(prn) );
+		LM_ERR("parsed so far: %.*s\n", offset, ZSRW(prn) );
 		pkg_free( prn );
 	};
 error1:

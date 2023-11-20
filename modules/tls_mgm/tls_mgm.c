@@ -692,10 +692,10 @@ static int init_tls_domains(struct tls_domain **dom)
 		if (init_tls_dom(d) < 0) {
 			db = d->flags & DOM_FLAG_DB;
 			if (!db)
-				LM_ERR("Failed to init TLS domain '%.*s'\n", d->name.len, ZSW(d->name.s));
+				LM_ERR("Failed to init TLS domain '%.*s'\n", d->name.len, ZSRW(d->name.s));
 			else
 				LM_WARN("Failed to init TLS domain '%.*s', skipping...\n",
-					d->name.len, ZSW(d->name.s));
+					d->name.len, ZSRW(d->name.s));
 
 			if (d == *dom)
 				*dom = d->next;
@@ -742,10 +742,10 @@ static int init_tls_domains(struct tls_domain **dom)
 		if (rc < 0) {
 			db = d->flags & DOM_FLAG_DB;
 			if (!db)
-				LM_ERR("Failed to init TLS domain '%.*s'\n", d->name.len, ZSW(d->name.s));
+				LM_ERR("Failed to init TLS domain '%.*s'\n", d->name.len, ZSRW(d->name.s));
 			else
 				LM_WARN("Failed to init TLS domain '%.*s', skipping...\n",
-					d->name.len, ZSW(d->name.s));
+					d->name.len, ZSRW(d->name.s));
 
 			if (d == *dom)
 				*dom = d->next;

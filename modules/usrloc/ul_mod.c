@@ -415,7 +415,7 @@ static void ul_rpc_data_load(int sender_id, void *unsused)
 	for( ptr=root ; ptr ; ptr=ptr->next) {
 		if (preload_udomain(ul_dbh, ptr->d) < 0) {
 			LM_ERR("failed to preload domain '%.*s'\n",
-				ptr->name.len, ZSW(ptr->name.s));
+				ptr->name.len, ZSRW(ptr->name.s));
 			/* continue with the other ul domains */;
 		}
 	}

@@ -584,6 +584,9 @@ MKTAGS=ctags -R .
 #		turns off some of the debug messages (DBG(...)).
 # -DNO_LOG
 #		completely turns of all the logging (and DBG(...))
+# -DREDACT_LOG
+#       obscure customer data in error logging. helps organizations
+#       comply with government and industry regulations.
 # -DEXTRA_DEBUG
 #		compiles in some extra debugging code
 # -DSHM_MMAP

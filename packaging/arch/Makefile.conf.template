@@ -89,6 +89,7 @@ DEFS+= -DF_MALLOC #Fast memory allocator with minimal runtime overhead
 DEFS+= -DF_MALLOC_OPTIMIZATIONS #Remove all safety checks in F_MALLOC
 #DEFS+= -DNO_DEBUG #Turns off all debug messages
 #DEFS+= -DNO_LOG #Completely turns off all the logging
+#DEFS+= -DREDACT_LOG #Obsure customer sensitive data in error logging
 #DEFS+= -DFAST_LOCK #Uses fast architecture specific locking
 DEFS+= -DUSE_FUTEX #Uses linux futexs with fast architecture specific locking
 #DEFS+= -DUSE_SYSV_SEM #Uses SYSV sems for locking ( slower & limited number of locks

@@ -2260,7 +2260,7 @@ endofpacket:
 		vb->port=str2s(vb->port_str.s, vb->port_str.len, &err);
 		if (err){
 					LM_ERR(" invalid port number <%.*s>\n",
-						vb->port_str.len, ZSW(vb->port_str.s));
+						vb->port_str.len, ZSRW(vb->port_str.s));
 					goto parse_error;
 		}
 	}
@@ -2273,7 +2273,7 @@ nextvia:
 		vb->port=str2s(vb->port_str.s, vb->port_str.len, &err);
 		if (err){
 					LM_ERR(" invalid port number <%.*s>\n",
-						vb->port_str.len, ZSW(vb->port_str.s));
+						vb->port_str.len, ZSRW(vb->port_str.s));
 					goto parse_error;
 		}
 	}
@@ -2289,11 +2289,11 @@ nextvia:
 
 parse_error:
 	if (end>buffer){
-		LM_ERR(" <%.*s>\n", (int)(end-buffer), ZSW(buffer));
+		LM_ERR(" <%.*s>\n", (int)(end-buffer), ZSRW(buffer));
 	}
 	if ((tmp>buffer)&&(tmp<end)){
 		LM_ERR("parsed so far:<%.*s>\n",
-				(int)(tmp-buffer), ZSW(buffer) );
+				(int)(tmp-buffer), ZSRW(buffer) );
 	}else{
 		LM_ERR("via parse failed\n");
 	}

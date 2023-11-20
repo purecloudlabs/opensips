@@ -58,6 +58,13 @@ struct sip_msg;
 /* the amount of decimals to be displayed for "float" and "double" values */
 #define FLOATING_POINT_PRECISION 8
 
+/* zero-string redaction wrapper */
+#ifdef REDACT_LOG
+       #define ZSRW(_c) ((_c)?("****"):"")
+#else
+       #define ZSRW(_c) ((_c)?(_c):"")
+#endif
+
 /* zero-string wrapper */
 #define ZSW(_c) ((_c)?(_c):"")
 
