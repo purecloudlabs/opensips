@@ -770,7 +770,7 @@ int openssl_init_tls_dom(struct tls_domain *d, int init_flags)
 #endif
 		if (((void**)d->ctx)[i] == NULL) {
 			LM_ERR("cannot create ssl context for tls domain '%.*s'\n",
-				d->name.len, ZSW(d->name.s));
+				d->name.len, ZSRW(d->name.s));
 			return -1;
 		}
 
@@ -781,7 +781,7 @@ int openssl_init_tls_dom(struct tls_domain *d, int init_flags)
 				!SSL_CTX_set_max_proto_version(((void**)d->ctx)[i],
 					ssl_versions[d->method_max - 1])) {
 				LM_ERR("cannot enforce ssl version for tls domain '%.*s'\n",
-						d->name.len, ZSW(d->name.s));
+						d->name.len, ZSRW(d->name.s));
 				return -1;
 			}
 		}

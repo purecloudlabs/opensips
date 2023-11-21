@@ -606,7 +606,7 @@ int dp_can_connect_str(str *domain, int rec_level) {
 	 */
 	if ((naptr->flags_len != 1) || (tolower(naptr->flags[0]) != 'u')) {
 	    LM_ERR("terminal NAPTR needs flag = 'u' and not '%.*s'.\n",
-					(int)naptr->flags_len, ZSW(naptr->flags));
+					(int)naptr->flags_len, ZSRW(naptr->flags));
 		/*
 		 * It's not that clear what we should do now: Ignore this records or regard it as failed.
 		 * We go with "ignore" for now.
