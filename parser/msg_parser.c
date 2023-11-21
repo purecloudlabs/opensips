@@ -723,21 +723,21 @@ int parse_msg(char* buf, unsigned int len, struct sip_msg* msg)
 		case SIP_REQUEST:
 			LM_DBG("SIP Request:\n");
 			LM_DBG(" method:  <%.*s>\n",fl->u.request.method.len,
-				ZSW(fl->u.request.method.s));
+				ZSRW(fl->u.request.method.s));
 			LM_DBG(" uri:     <%.*s>\n",fl->u.request.uri.len,
-				ZSW(fl->u.request.uri.s));
+				ZSRW(fl->u.request.uri.s));
 			LM_DBG(" version: <%.*s>\n",fl->u.request.version.len,
-				ZSW(fl->u.request.version.s));
+				ZSRW(fl->u.request.version.s));
 			flags=HDR_EOH_F;
 			break;
 		case SIP_REPLY:
 			LM_DBG("SIP Reply  (status):\n");
 			LM_DBG(" version: <%.*s>\n",fl->u.reply.version.len,
-					ZSW(fl->u.reply.version.s));
+					ZSRW(fl->u.reply.version.s));
 			LM_DBG(" status:  <%.*s>\n", fl->u.reply.status.len,
-					ZSW(fl->u.reply.status.s));
+					ZSRW(fl->u.reply.status.s));
 			LM_DBG(" reason:  <%.*s>\n", fl->u.reply.reason.len,
-					ZSW(fl->u.reply.reason.s));
+					ZSRW(fl->u.reply.reason.s));
 			flags=HDR_EOH_F;
 			break;
 		default:
