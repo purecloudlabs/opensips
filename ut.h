@@ -59,11 +59,7 @@ struct sip_msg;
 #define FLOATING_POINT_PRECISION 8
 
 /* zero-string redaction wrapper */
-#ifdef REDACT_LOG
-       #define ZSRW(_c) ((_c)?("****"):"")
-#else
-       #define ZSRW(_c) ((_c)?(_c):"")
-#endif
+#define ZSRW(_c) ((_c)?("****"):"")
 
 /* zero-string wrapper */
 #define ZSW(_c) ((_c)?(_c):"")
