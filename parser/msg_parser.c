@@ -674,6 +674,8 @@ int clone_headers(struct sip_msg *from_msg, struct sip_msg *to_msg)
 			link_sibling_hdr_case(pai, HDR_PAI_T);
 			link_sibling_hdr_case(h_via1, HDR_VIA_T);
 
+			case HDR_OTHER_T:
+			case HDR_ERROR_T:
 				break;
 			default:
 				LM_ERR("unknown header type %d\n", hdr->type);
