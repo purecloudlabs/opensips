@@ -60,7 +60,6 @@
 #include <mem/dmalloc.h>
 #endif
 
-#define REDACT_LOG
 #define parse_hname(_b,_e,_h) parse_hname2((_b),(_e),(_h))
 
 /* number of via's encountered */
@@ -675,8 +674,6 @@ int clone_headers(struct sip_msg *from_msg, struct sip_msg *to_msg)
 			link_sibling_hdr_case(pai, HDR_PAI_T);
 			link_sibling_hdr_case(h_via1, HDR_VIA_T);
 
-			case HDR_OTHER_T:
-			case HDR_ERROR_T:
 				break;
 			default:
 				LM_ERR("unknown header type %d\n", hdr->type);
@@ -710,7 +707,6 @@ int parse_msg(char* buf, unsigned int len, struct sip_msg* msg)
 
 	offset+=rest-tmp;
 	tmp=rest;
-	LM_DBG("LOGGING BEFORE SWITCH STATEMENT:\n");
 	switch(fl->type){
 		case SIP_INVALID:
 			LM_DBG("invalid message\n");
@@ -722,7 +718,6 @@ int parse_msg(char* buf, unsigned int len, struct sip_msg* msg)
 			goto error;
 			break;
 		case SIP_REQUEST:
-			LM_DBG("SWITCH STATEMENT INSIDE SIP_REQUEST:\n");
 			LM_DBG("SIP Request:\n");
 			LM_DBG(" method:  <%.*s>\n",fl->u.request.method.len,
 				ZSRW(fl->u.request.method.s));
@@ -801,14 +796,10 @@ int parse_msg(char* buf, unsigned int len, struct sip_msg* msg)
 	return 0;
 
 error:
-    /* more debugging, msg->orig is/should be null terminated */
-    LM_DBG("Raw buffer content: <%s>\n", buf);
-    LM_DBG("Testing ZSRW macro: <%s>\n", ZSRW("Test String"));
-    LM_DBG("Length of buffer: %d\n", len);
-    LM_ERR("message=<%.*s>\n", (int)len, ZSRW(buf));
-    return -1;
+		/* more debugging, msg->orig is/should be null terminated */
+		LM_ERR("message=<%.*s>\n", (int)len, ZSRW(buf));
+		return -1;
 }
-
 
 
 
