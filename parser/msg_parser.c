@@ -722,11 +722,11 @@ int parse_msg(char* buf, unsigned int len, struct sip_msg* msg)
 		case SIP_REQUEST:
 			LM_DBG("SIP Request:\n");
 			LM_DBG(" method:  <%.*s>\n",fl->u.request.method.len,
-				ZSRW(fl->u.request.method.s));
+				ZSW(fl->u.request.method.s));
 			LM_DBG(" uri:     <%.*s>\n",fl->u.request.uri.len,
 				ZSRW(fl->u.request.uri.s));
 			LM_DBG(" version: <%.*s>\n",fl->u.request.version.len,
-				ZSRW(fl->u.request.version.s));
+				ZSW(fl->u.request.version.s));
 			flags=HDR_EOH_F;
 			break;
 		case SIP_REPLY:
@@ -736,7 +736,7 @@ int parse_msg(char* buf, unsigned int len, struct sip_msg* msg)
 			LM_DBG(" status:  <%.*s>\n", fl->u.reply.status.len,
 					ZSRW(fl->u.reply.status.s));
 			LM_DBG(" reason:  <%.*s>\n", fl->u.reply.reason.len,
-					ZSRW(fl->u.reply.reason.s));
+					ZSW(fl->u.reply.reason.s));
 			flags=HDR_EOH_F;
 			break;
 		default:
@@ -798,9 +798,9 @@ int parse_msg(char* buf, unsigned int len, struct sip_msg* msg)
 	return 0;
 
 error:
-		/* more debugging, msg->orig is/should be null terminated */
-		LM_ERR("message=<%.*s>\n", (int)len, ZSRW(buf));
-		return -1;
+	/* more debugging, msg->orig is/should be null terminated */
+	LM_ERR("message=<%.*s>\n", (int)len, ZSRW(buf));
+	return -1;
 }
 
 

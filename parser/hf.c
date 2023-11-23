@@ -250,7 +250,7 @@ void free_hdr_field_lst(struct hdr_field* hf)
 void dump_hdr_field( struct hdr_field* hf )
 {
 	LM_ERR("type=%d, name=%.*s, body=%.*s, parsed=%p, next=%p\n",
-		hf->type, hf->name.len, ZSRW(hf->name.s),
+		hf->type, hf->name.len, ZSW(hf->name.s),
 		hf->body.len, ZSRW(hf->body.s),
 		hf->parsed, hf->next );
 }

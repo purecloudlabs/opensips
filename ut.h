@@ -58,14 +58,15 @@ struct sip_msg;
 /* the amount of decimals to be displayed for "float" and "double" values */
 #define FLOATING_POINT_PRECISION 8
 
+/* zero-string wrapper */
+#define ZSW(_c) ((_c)?(_c):"")
+
 /* zero-string redaction wrapper */
 #ifdef REDACT_LOG
 	#define ZSRW(_c) ((_c)?("****"):"")
 #else
-	#define ZSRW(_c) ((_c)?(_c):"")
+	#define ZSRW(_c) ZSW(_c) 
 #endif
-/* zero-string wrapper */
-#define ZSW(_c) ((_c)?(_c):"")
 
 /* returns string beginning and length without insignificant chars */
 #define trim_len( _len, _begin, _mystr ) \
