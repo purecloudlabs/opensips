@@ -29,9 +29,12 @@
 #include <dirent.h>
 
 #include "../../pt.h"
+#include "../../redact_pii.h
 #include "../tls_mgm/tls_helper.h"
 
 #include "openssl_api.h"
+
+int redact_pii = 0;
 
 void tls_dump_cert_info(char* s, X509* cert);
 void tls_print_errstack(void);
@@ -770,7 +773,7 @@ int openssl_init_tls_dom(struct tls_domain *d, int init_flags)
 #endif
 		if (((void**)d->ctx)[i] == NULL) {
 			LM_ERR("cannot create ssl context for tls domain '%.*s'\n",
-				d->name.len, ZSW(d->name.s));
+				d->name.len, redact_pii(d->name.s));
 			return -1;
 		}
 
@@ -781,7 +784,7 @@ int openssl_init_tls_dom(struct tls_domain *d, int init_flags)
 				!SSL_CTX_set_max_proto_version(((void**)d->ctx)[i],
 					ssl_versions[d->method_max - 1])) {
 				LM_ERR("cannot enforce ssl version for tls domain '%.*s'\n",
-						d->name.len, ZSW(d->name.s));
+						d->name.len, redact_pii(d->name.s));
 				return -1;
 			}
 		}
