@@ -24,5 +24,5 @@
 #define redact_pii_h
 
 
-int redact_pii(char* input);
+char* redact_pii(char* input);
 #endif
