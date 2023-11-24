@@ -105,7 +105,7 @@ db_key_t *cid_keys=NULL;
 db_val_t *cid_vals=NULL;
 
 int cid_regen=0;
-int redact_pii=0;
+int redact_sip_pii=0;
 
 /*
  * Module parameters and their default values

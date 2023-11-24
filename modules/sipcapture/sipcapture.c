@@ -443,7 +443,7 @@ int moni_port_end   = 0;
 int *capture_on_flag = NULL;
 int promisc_on = 0;
 int bpf_on = 0;
-int redact_pii = 0;
+int redact_sip_pii=0;
 
 char* hep_route=0;
 str hep_route_s;
