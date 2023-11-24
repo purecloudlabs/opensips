@@ -57,6 +57,7 @@
 #include "../../pvar.h"
 #include "../../db/db.h"
 #include "../../str_list.h"
+#include "../../redact_pii.h"
 
 #include "../tls_openssl/openssl_api.h"
 #include "../tls_wolfssl/wolfssl_api.h"
@@ -107,6 +108,7 @@ static mi_response_t *tls_reload(const mi_params_t *params,
 static mi_response_t *tls_list(const mi_params_t *params,
 								struct mi_handler *async_hdl);
 static int list_domain(mi_item_t *domains_arr, struct tls_domain *d);
+int redact_sip_pii=0;
 
 /* DB handler */
 static db_con_t *db_hdl = 0;
@@ -692,10 +694,10 @@ static int init_tls_domains(struct tls_domain **dom)
 		if (init_tls_dom(d) < 0) {
 			db = d->flags & DOM_FLAG_DB;
 			if (!db)
-				LM_ERR("Failed to init TLS domain '%.*s'\n", d->name.len, ZSW(d->name.s));
+				LM_ERR("Failed to init TLS domain '%.*s'\n", d->name.len, redact_pii(d->name.s));
 			else
 				LM_WARN("Failed to init TLS domain '%.*s', skipping...\n",
-					d->name.len, ZSW(d->name.s));
+					d->name.len, redact_pii(d->name.s));
 
 			if (d == *dom)
 				*dom = d->next;
@@ -742,10 +744,10 @@ static int init_tls_domains(struct tls_domain **dom)
 		if (rc < 0) {
 			db = d->flags & DOM_FLAG_DB;
 			if (!db)
-				LM_ERR("Failed to init TLS domain '%.*s'\n", d->name.len, ZSW(d->name.s));
+				LM_ERR("Failed to init TLS domain '%.*s'\n", d->name.len, redact_pii(d->name.s));
 			else
 				LM_WARN("Failed to init TLS domain '%.*s', skipping...\n",
-					d->name.len, ZSW(d->name.s));
+					d->name.len, redact_pii(d->name.s));
 
 			if (d == *dom)
 				*dom = d->next;
