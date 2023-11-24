@@ -29,7 +29,7 @@
 #include <dirent.h>
 
 #include "../../pt.h"
-#include "../../redact_pii.h
+#include "../../redact_pii.h"
 #include "../tls_mgm/tls_helper.h"
 
 #include "openssl_api.h"

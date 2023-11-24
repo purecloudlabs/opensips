@@ -44,7 +44,7 @@
 #include "../../forward.h"
 #include "../../mem/mem.h"
 #include "../../parser/msg_parser.h"
-#include "../../redact_pii.h
+#include "../../redact_pii.h"
 
 
 /* a forced_proto takes precedence if != PROTO_NONE */
