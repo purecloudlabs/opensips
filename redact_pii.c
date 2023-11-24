@@ -1,5 +1,5 @@
 #include <string.h> 
-int redact_sip_pii = 1;
+int redact_sip_pii = 0;
 
 char* redact_pii(char* input) {
     if (input == NULL) {
