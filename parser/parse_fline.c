@@ -42,7 +42,6 @@
 */
 
 /*known methods: INVITE, ACK, CANCEL, BYE*/
-int redact_sip_pii=0;
 
 enum { START,
        INVITE1, INVITE2, INVITE3, INVITE4, INVITE5,

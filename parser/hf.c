@@ -53,8 +53,6 @@
 #include "parse_fcaps.h"
 #include "../redact_pii.h"
 
-int redact_sip_pii=0;
-
 /*
  * Frees a hdr_field structure,
  * WARNING: it frees only parsed (and not name.s, body.s)

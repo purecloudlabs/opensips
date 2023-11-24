@@ -34,8 +34,6 @@
 
 #include "openssl_api.h"
 
-int redact_sip_pii=0;
-
 void tls_dump_cert_info(char* s, X509* cert);
 void tls_print_errstack(void);
 

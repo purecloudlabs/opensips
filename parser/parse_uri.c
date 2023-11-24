@@ -54,7 +54,6 @@ static const str uri_type_names[7] = {
 	str_init("urn:nena:service")
 };
 
-int redact_sip_pii=0;
 
 char* uri_type2str(const uri_type type, char *result)
 {

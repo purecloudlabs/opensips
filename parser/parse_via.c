@@ -55,8 +55,6 @@
 #include "parse_def.h"
 #include "../redact_pii.h"
 
-int redact_sip_pii=0;
-
 
 /* main via states (uri:port ...) */
 enum {

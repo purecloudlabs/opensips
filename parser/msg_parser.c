@@ -60,7 +60,6 @@
 #ifdef DEBUG_DMALLOC
 #include <mem/dmalloc.h>
 #endif
-int redact_sip_pii=0;
 
 
 #define parse_hname(_b,_e,_h) parse_hname2((_b),(_e),(_h))

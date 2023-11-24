@@ -35,7 +35,6 @@
 #include "wolfssl.h"
 
 #define VERIFY_DEPTH_S 3
-int redact_sip_pii=0;
 
 struct {
 	char *name;

@@ -108,7 +108,6 @@ static mi_response_t *tls_reload(const mi_params_t *params,
 static mi_response_t *tls_list(const mi_params_t *params,
 								struct mi_handler *async_hdl);
 static int list_domain(mi_item_t *domains_arr, struct tls_domain *d);
-int redact_sip_pii=0;
 
 /* DB handler */
 static db_con_t *db_hdl = 0;
