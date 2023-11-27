@@ -86,7 +86,6 @@ DEFS+= -DDBG_MALLOC #Include additional, debug-enabled allocator flavors
 #DEFS+= -DQM_DBG_MALLOC_HIST=3 #Size of debug history for Q_MALLOC (default is 1)
 #DEFS+= -DNO_DEBUG #Compile out all debug messages
 #DEFS+= -DNO_LOG #Compile out all logging
-#DEFS+= -DREDACT_LOG #Obscure customer data in error logging. helps organizations comply with government and industry regulations.
 #DEFS_GROUP_START
 #DEFS+= -DFAST_LOCK #Use fast architecture specific locking
 #DEFS+= -DUSE_SYSV_SEM #Use SYSV sems for locking ( slower & limited number of locks

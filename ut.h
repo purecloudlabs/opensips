@@ -61,13 +61,6 @@ struct sip_msg;
 /* zero-string wrapper */
 #define ZSW(_c) ((_c)?(_c):"")
 
-/* zero-string redaction wrapper */
-#ifdef REDACT_LOG
-	#define ZSRW(_c) ((_c)?("****"):"")
-#else
-	#define ZSRW(_c) ZSW(_c) 
-#endif
-
 /* returns string beginning and length without insignificant chars */
 #define trim_len( _len, _begin, _mystr ) \
 	do{ 	static char _c; \
