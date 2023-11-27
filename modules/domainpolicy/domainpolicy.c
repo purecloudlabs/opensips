@@ -44,8 +44,6 @@
 
 #define IS_D2PNAPTR(naptr) ((naptr->services_len >= 7) && (!strncasecmp("D2P+SIP", naptr->services, 7)))
 
-int redact_sip_pii=0;
-
 static db_con_t* db_handle=0;
 static db_func_t domainpolicy_dbf;
 

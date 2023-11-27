@@ -54,7 +54,6 @@ static const str uri_type_names[7] = {
 	str_init("urn:nena:service")
 };
 
-
 char* uri_type2str(const uri_type type, char *result)
 {
 	if (type == ERROR_URI_T)

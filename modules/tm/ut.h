@@ -46,7 +46,6 @@
 #include "../../parser/msg_parser.h"
 #include "../../redact_pii.h"
 
-
 /* a forced_proto takes precedence if != PROTO_NONE */
 inline static enum sip_protos get_proto(enum sip_protos force_proto,
 										enum sip_protos proto)
