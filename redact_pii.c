@@ -1,5 +1,6 @@
 #include <string.h>
 #include "ut.h"
+#include "redact_pii.h"
 
 int redact_sip_pii = 0;
 
