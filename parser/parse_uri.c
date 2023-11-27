@@ -42,6 +42,7 @@
 #include "../errinfo.h"
 #include "../core_stats.h"
 #include "../strcommon.h"
+#include "../redact_pii.h"
 
 static const str uri_type_names[7] = {
 	{NULL, 0}, /*This is the error type*/
@@ -52,6 +53,7 @@ static const str uri_type_names[7] = {
 	str_init("urn:service"),
 	str_init("urn:nena:service")
 };
+
 
 char* uri_type2str(const uri_type type, char *result)
 {
@@ -1601,25 +1603,25 @@ int parse_uri(char* buf, int len, struct sip_uri* uri)
 
 error_too_short:
 	LM_ERR("uri too short: <%.*s> (%d)\n",
-			len, ZSRW(buf), len);
+			len, redact_pii(buf), len);
 	goto error_exit;
 error_bad_char:
 	LM_ERR("bad char '%c' in state %d"
 			" parsed: <%.*s> (%d) / <%.*s> (%d)\n",
 			p < end ? *p : *(buf+len-1), state, (int)(p-buf), ZSW(buf),
-			(int)(p-buf), len, ZSRW(buf), len);
+			(int)(p-buf), len, redact_pii(buf), len);
 	goto error_exit;
 error_bad_host:
 	LM_ERR("bad host in uri (error at char %c in"
 			" state %d) parsed: <%.*s>(%d) /<%.*s> (%d)\n",
 			p < end ? *p : *(buf+len-1), state, (int)(p-buf), ZSW(buf),
-			(int)(p-buf), len, ZSRW(buf), len);
+			(int)(p-buf), len, redact_pii(buf), len);
 	goto error_exit;
 error_bad_port:
 	LM_ERR("bad port in uri (error at char '%c' in"
 			" state %d) parsed: <%.*s>(%d) /<%.*s> (%d)\n",
 			p < end ? *p : *(buf+len-1), state, (int)(p-buf), ZSW(buf),
-			(int)(p-buf), len, ZSRW(buf), len);
+			(int)(p-buf), len, redact_pii(buf), len);
 	goto error_exit;
 error_bad_uri:
 	LM_ERR("bad uri, state %d parsed: <%.*s> (%d) / <%.*s> (%d)\n",
@@ -1629,11 +1631,11 @@ error_bad_uri:
 error_headers:
 	LM_ERR("bad uri headers: <%.*s>(%d) / <%.*s>(%d)\n",
 			uri->headers.len, ZSW(uri->headers.s), uri->headers.len,
-			len, ZSRW(buf), len);
+			len, redact_pii(buf), len);
 	goto error_exit;
 error_bug:
 	LM_CRIT("bad state %d parsed: <%.*s> (%d) / <%.*s> (%d)\n",
-			 state, (int)(p-buf), ZSW(buf), (int)(p-buf), len, ZSRW(buf), len);
+			 state, (int)(p-buf), ZSW(buf), (int)(p-buf), len, redact_pii(buf), len);
 error_exit:
 	ser_error=E_BAD_URI;
 	uri->type=ERROR_URI_T;

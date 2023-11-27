@@ -47,6 +47,7 @@
 #include "../../action.h"
 #include "../../socket_info.h"
 #include "../../ipc.h"
+#include "../../redact_pii.h"
 
 /* BPF structure */
 #ifdef __OS_linux
@@ -4314,7 +4315,7 @@ static int w_hep_relay(struct sip_msg *msg)
 		&uri.host,
 		uri.port_no?uri.port_no:SIP_PORT, proto, 0 );
 	if (proxy == 0) {
-		LM_ERR("bad host name in URI <%.*s>\n", uri_s->len, ZSRW(uri_s->s));
+		LM_ERR("bad host name in URI <%.*s>\n", uri_s->len, redact_pii(uri_s->s));
 		return 0;
 	}
 

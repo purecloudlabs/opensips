@@ -55,6 +55,7 @@
 #include "parse_uri.h"
 #include "parse_content.h"
 #include "../msg_callbacks.h"
+#include "../redact_pii.h"
 
 #ifdef DEBUG_DMALLOC
 #include <mem/dmalloc.h>
@@ -724,7 +725,7 @@ int parse_msg(char* buf, unsigned int len, struct sip_msg* msg)
 			LM_DBG(" method:  <%.*s>\n",fl->u.request.method.len,
 				ZSW(fl->u.request.method.s));
 			LM_DBG(" uri:     <%.*s>\n",fl->u.request.uri.len,
-				ZSRW(fl->u.request.uri.s));
+				redact_pii(fl->u.request.uri.s));
 			LM_DBG(" version: <%.*s>\n",fl->u.request.version.len,
 				ZSW(fl->u.request.version.s));
 			flags=HDR_EOH_F;
@@ -732,9 +733,9 @@ int parse_msg(char* buf, unsigned int len, struct sip_msg* msg)
 		case SIP_REPLY:
 			LM_DBG("SIP Reply  (status):\n");
 			LM_DBG(" version: <%.*s>\n",fl->u.reply.version.len,
-					ZSRW(fl->u.reply.version.s));
+					redact_pii(fl->u.reply.version.s));
 			LM_DBG(" status:  <%.*s>\n", fl->u.reply.status.len,
-					ZSRW(fl->u.reply.status.s));
+					redact_pii(fl->u.reply.status.s));
 			LM_DBG(" reason:  <%.*s>\n", fl->u.reply.reason.len,
 					ZSW(fl->u.reply.reason.s));
 			flags=HDR_EOH_F;
@@ -798,8 +799,8 @@ int parse_msg(char* buf, unsigned int len, struct sip_msg* msg)
 	return 0;
 
 error:
-	/* more debugging, msg->orig is/should be null terminated */
-	LM_ERR("message=<%.*s>\n", (int)len, ZSRW(buf));
+	/* more debugging, msg->orig is/should be null terminated*/
+	LM_ERR("message=<%.*s>\n", (int)len, redact_pii(buf));
 	return -1;
 }
 
