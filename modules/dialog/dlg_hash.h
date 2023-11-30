@@ -165,6 +165,8 @@ struct dlg_cell
 	int                  rt_on_timeout;
 	int                  rt_on_hangup;
 
+	unsigned int         force_sips_contact;
+
 #ifdef DBG_DIALOG
 	struct struct_hist   *hist;
 #endif

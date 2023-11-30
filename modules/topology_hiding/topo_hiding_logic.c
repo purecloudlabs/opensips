@@ -369,6 +369,26 @@ static char * topo_ct_param_copy(char *buf, str *name, str *val, int should_quot
 	return buf;
 }
 
+static int is_forced_sips_contact_required(const struct sip_msg* msg, const struct dlg_cell* dlg, const uri_type ct_type) {
+	str top_rr;
+
+	if (dlg->state != DLG_STATE_UNCONFIRMED) return 0;
+
+	// RURI is SIPS
+	if (msg->parsed_uri_ok && msg->parsed_uri.type == SIPS_URI_T) return 1;
+
+	if (msg->record_route == NULL) {
+		// There is no RR and Contact is SIPS
+		if (ct_type == SIPS_URI_T) return 1;
+	} else {
+		// Top RR is SIPS
+		top_rr = ((rr_t*)msg->record_route->parsed)->nameaddr.uri;
+		if (top_rr.len > 5 && strncmp(top_rr.s, "sips:", 5) == 0) return 1;
+	}
+
+	return 0;
+}
+
 static int topo_dlg_replace_contact(struct sip_msg* msg, struct dlg_cell* dlg)
 {
 	char *prefix=NULL,*suffix=NULL,*p,*p_init,*ct_username=NULL;
@@ -379,6 +399,7 @@ static int topo_dlg_replace_contact(struct sip_msg* msg, struct dlg_cell* dlg)
 	param_t *it;
 	str *rr_param;
 	struct lump* lump;
+	uri_type ct_type = ERROR_URI_T;
 
 	if(!msg->contact)
 	{
@@ -408,6 +429,8 @@ static int topo_dlg_replace_contact(struct sip_msg* msg, struct dlg_cell* dlg)
 			} else {
 				ct_username = ctu.user.s;
 				ct_username_len = ctu.user.len;
+				ct_type = ctu.type;
+				if (ct_type == SIPS_URI_T) prefix_len += 1;
 				LM_DBG("Trying to propagate username [%.*s]\n",ct_username_len,
 									ct_username);
 				if (ct_username_len > 0) {
@@ -418,6 +441,8 @@ static int topo_dlg_replace_contact(struct sip_msg* msg, struct dlg_cell* dlg)
 	}
 	if (dlg_api.is_mod_flag_set(dlg,TOPOH_DID_IN_USER))
 		prefix_len += RR_DLG_PARAM_SIZE + 1;
+
+	if (dlg->force_sips_contact && ct_type == SIP_URI_T) prefix_len += 1;
 
 	prefix = pkg_malloc(prefix_len);
 	if (!prefix) {
@@ -474,14 +499,22 @@ static int topo_dlg_replace_contact(struct sip_msg* msg, struct dlg_cell* dlg)
 	rr_param = dlg_api.get_rr_param();
 
 	p = prefix;
-	memcpy( p, "<sip:", 5);
-	p += 5;
+	if (dlg->force_sips_contact) {
+		memcpy(p, "<sips:", 6);
+		p += 6;
+	} else {
+		memcpy(p, "<sip:", 5);
+		p += 5;
+	}
+
+	if (is_forced_sips_contact_required(msg, dlg, ct_type)) dlg->force_sips_contact = 1;
+
 	if (dlg_api.is_mod_flag_set(dlg,TOPOH_KEEP_USER) && ct_username_len > 0) {
 		memcpy( p, ct_username, ct_username_len);
 		p += ct_username_len;
 	}
 	if (dlg_api.is_mod_flag_set(dlg,TOPOH_DID_IN_USER)) {
-		if (p==prefix+5)
+		if (p == prefix + prefix_len)
 			*(p++) = 'X';
 		/* add '.' */
 		*(p++) = DLG_SEPARATOR;
@@ -505,7 +538,7 @@ static int topo_dlg_replace_contact(struct sip_msg* msg, struct dlg_cell* dlg)
 			return -1;
 		}
 	}
-	if (p!=prefix+5)
+	if (p != prefix + prefix_len)
 		*(p++) = '@';
 
 	prefix_len = p - prefix;
