@@ -734,9 +734,9 @@ int parse_msg(char* buf, unsigned int len, struct sip_msg* msg)
 		case SIP_REPLY:
 			LM_DBG("SIP Reply  (status):\n");
 			LM_DBG(" version: <%.*s>\n",fl->u.reply.version.len,
-					redact_pii(fl->u.reply.version.s));
+					ZSW(fl->u.reply.version.s));
 			LM_DBG(" status:  <%.*s>\n", fl->u.reply.status.len,
-					redact_pii(fl->u.reply.status.s));
+					ZSW(fl->u.reply.status.s));
 			LM_DBG(" reason:  <%.*s>\n", fl->u.reply.reason.len,
 					ZSW(fl->u.reply.reason.s));
 			flags=HDR_EOH_F;

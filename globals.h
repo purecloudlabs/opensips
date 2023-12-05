@@ -100,7 +100,7 @@ extern int mcast_ttl;
 extern int tos;
 
 extern int disable_dns_failover;
-extern int redact_sip_pii;
+extern int redact_pii;
 extern int disable_dns_blacklist;
 
 extern int cfg_errors;

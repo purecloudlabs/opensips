@@ -771,7 +771,7 @@ int openssl_init_tls_dom(struct tls_domain *d, int init_flags)
 #endif
 		if (((void**)d->ctx)[i] == NULL) {
 			LM_ERR("cannot create ssl context for tls domain '%.*s'\n",
-				d->name.len, redact_pii(d->name.s));
+				d->name.len, ZSW(d->name.s));
 			return -1;
 		}
 
