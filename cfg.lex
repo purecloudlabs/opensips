@@ -267,7 +267,7 @@ MCAST_LOOPBACK		"mcast_loopback"
 MCAST_TTL			"mcast_ttl"
 TOS					"tos"
 DISABLE_DNS_FAILOVER  "disable_dns_failover"
-REDACT_PII "redact_pii"
+REDACTING_PII "redacting_pii"
 DISABLE_DNS_BLACKLIST "disable_dns_blacklist"
 DST_BLACKLIST		"dst_blacklist"
 MAX_WHILE_LOOPS "max_while_loops"
@@ -492,8 +492,8 @@ SPACE		[ ]
 									return TOS; }
 <INITIAL>{DISABLE_DNS_FAILOVER}	{	count(); yylval.strval=yytext;
 									return DISABLE_DNS_FAILOVER; }
-<INITIAL>{REDACT_PII}	{	count(); yylval.strval=yytext; 
-									return REDACT_PII;}
+<INITIAL>{REDACTING_PII}	{	count(); yylval.strval=yytext; 
+									return REDACTING_PII;}
 <INITIAL>{DISABLE_DNS_BLACKLIST}	{	count(); yylval.strval=yytext;
 									return DISABLE_DNS_BLACKLIST; }
 <INITIAL>{DST_BLACKLIST}	{	count(); yylval.strval=yytext;
