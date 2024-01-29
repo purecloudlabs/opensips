@@ -356,6 +356,7 @@ extern int cfg_parse_only_routes;
 %token MCAST_TTL
 %token TOS
 %token DISABLE_DNS_FAILOVER
+%token REDACT_PII_
 %token DISABLE_DNS_BLACKLIST
 %token DST_BLACKLIST
 %token DISABLE_STATELESS_FWD
@@ -1228,6 +1229,10 @@ assign_stm: LOGLEVEL EQUAL snumber { IFOR();
 										disable_dns_failover=$3;
 									}
 		| DISABLE_DNS_FAILOVER error { yyerror("boolean value expected"); }
+		| REDACT_PII_ EQUAL NUMBER { IFOR();
+										redact_pii_=$3;
+									}
+		| REDACT_PII_ error { yyerror("boolean value expected"); }				
 		| DISABLE_DNS_BLACKLIST EQUAL NUMBER { IFOR();
 										disable_dns_blacklist=$3;
 									}
