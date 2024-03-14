@@ -48,6 +48,7 @@ static int topo_hiding_no_dlg(struct sip_msg *req,struct cell* t,int extra_flags
 static int topo_dlg_replace_contact(struct sip_msg* msg, struct dlg_cell* dlg, int leg);
 static int topo_delete_vias(struct sip_msg* req);
 static int topo_delete_record_routes(struct sip_msg *req); 
+static int topo_delete_routes(struct sip_msg *req);
 static struct lump* delete_existing_contact(struct sip_msg *msg, int del_hdr);
 static int topo_parse_passed_params(str *params,struct th_ct_params **lst);
 static void topo_dlg_onroute (struct dlg_cell* dlg, int type,
@@ -265,6 +266,23 @@ static int topo_delete_record_routes(struct sip_msg *req)
 		if (del_lump(req,it->name.s - buf,it->len, 0) == 0) {
 			LM_ERR("del_lump failed - while deleting record-route\n");
 			return -1;
+		}
+	}
+
+	return 0;
+}
+
+static int topo_delete_routes(struct sip_msg *req) {
+	struct hdr_field *it;
+	struct lump* lmp;
+
+	if (req->route) {
+		for (it = req->route; it; it=it->sibling) {
+			if (it->parsed && ((rr_t*)it->parsed)->deleted) continue;
+			if ((lmp = del_lump(req, it->name.s - req->buf, it->len, HDR_ROUTE_T)) == 0) {
+				LM_ERR("del_lump failed while deleting route\n");
+				return -1;
+			}
 		}
 	}
 
@@ -861,6 +879,11 @@ static void _th_no_dlg_onreply(struct cell* t, int type, struct tmcb_params *par
 
 	if(topo_delete_vias(rpl) < 0) {
 		LM_ERR("Failed to remove via headers\n");
+		return;
+	}
+
+	if (topo_delete_routes(rpl) < 0) {
+		LM_ERR("Failed to remove route headers\n");
 		return;
 	}
 
@@ -1554,9 +1577,9 @@ error:
 /* Via headers will be restored using the TM module, no need to save anything for them */
 static char* build_encoded_contact_suffix(struct sip_msg* msg,int *suffix_len)
 {
-	short rr_len,ct_len,addr_len,enc_len;
+	short rr_len,route_len,ct_len,addr_len,enc_len;
 	char *suffix_plain,*suffix_enc,*p,*s;
-	str rr_set = {NULL, 0};
+	str rr_set = {NULL, 0}, route_set = {NULL, 0};
 	str contact;
 	int i,total_len;
 	struct sip_uri ctu;
@@ -1564,6 +1587,7 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg,int *suffix_len)
 	param_t *it;
 	int is_req = (msg->first_line.type==SIP_REQUEST)?1:0;
 	int local_len = sizeof(short) /* RR length */ +
+			sizeof(short) /* Route length */ +
 			sizeof(short) /* Contact length */ +
 			sizeof(short) /* bind addr */;
 
@@ -1584,6 +1608,16 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg,int *suffix_len)
 		rr_len = 0;
 	}
 
+	if (msg->route) {
+		if (print_rr_body(msg->route, &route_set, !is_req, 0, NULL) != 0) {
+			LM_ERR("failed to print route records \n");
+			return NULL;
+		}
+		route_len = (short)route_set.len;
+	} else {
+		route_len = 0;
+	}
+
 	if ( parse_contact(msg->contact)<0 ||
 	((contact_body_t *)msg->contact->parsed)->contacts==NULL ||
 	((contact_body_t *)msg->contact->parsed)->contacts->next!=NULL ) {
@@ -1595,7 +1629,7 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg,int *suffix_len)
 	}
 
 	addr_len = (short)msg->rcv.bind_address->sock_str.len;
-	local_len += rr_len + ct_len + addr_len; 
+	local_len += rr_len + route_len + ct_len + addr_len;
 	enc_len = th_ct_enc_scheme == ENC_BASE64 ?
 		calc_word64_encode_len(local_len) : calc_word32_encode_len(local_len);
 	total_len = enc_len +  
@@ -1658,6 +1692,12 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg,int *suffix_len)
 		memcpy(p,rr_set.s,rr_set.len);
 		p+= rr_set.len;
 	}
+	memcpy(p, &route_len, sizeof(short));
+	p += sizeof(short);
+	if (route_len) {
+		memcpy(p, route_set.s, route_set.len);
+		p += route_set.len;
+	}
 	memcpy(p,&ct_len,sizeof(short));
 	p+= sizeof(short);
 	if (ct_len) {
@@ -1709,12 +1749,16 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg,int *suffix_len)
 
 	if (rr_set.s)
 		pkg_free(rr_set.s);
+	if (route_set.s)
+		pkg_free(route_set.s);
 	pkg_free(suffix_plain);
 	*suffix_len = total_len;
 	return suffix_enc;
 error:
 	if (rr_set.s)
 		pkg_free(rr_set.s);
+	if (route_set.s)
+		pkg_free(route_set.s);
 	return NULL;
 }
 
@@ -1813,7 +1857,7 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg,str *info)
 	int max_size,dec_len,i,size;
 	char *dec_buf,*p,*route=NULL,*hdrs,*remote_contact;
 	struct hdr_field *it;
-	str rr_buf,ct_buf,bind_buf;
+	str rr_buf,route_buf,ct_buf,bind_buf;
 	rr_t *head = NULL, *rrp;
 	int next_strict=0;
 	struct sip_uri fru;
@@ -1876,11 +1920,17 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg,str *info)
 	p = dec_buf;
 	size = dec_len;
 	__extract_len_and_buf(p, size, rr_buf);
+	__extract_len_and_buf(p, size, route_buf);
 	__extract_len_and_buf(p, size, ct_buf);
 	__extract_len_and_buf(p, size, bind_buf);
 
-	LM_DBG("extracted routes [%.*s] , ct [%.*s] and bind [%.*s]\n",
-		rr_buf.len,rr_buf.s,ct_buf.len,ct_buf.s,bind_buf.len,bind_buf.s);
+	LM_DBG("extracted record-routes [%.*s], routes [%.*s], ct [%.*s] and bind [%.*s]\n",
+		rr_buf.len,rr_buf.s,route_buf.len, route_buf.s,ct_buf.len,ct_buf.s,bind_buf.len,bind_buf.s);
+
+	if (!rr_buf.len) {
+		rr_buf.len = route_buf.len;
+		rr_buf.s = route_buf.s;
+	}
 
 	if (rr_buf.len) {
 		if (parse_rr_body(rr_buf.s,rr_buf.len,&head) != 0) {
