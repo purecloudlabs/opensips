@@ -626,6 +626,7 @@ int rl_pipe_check(rl_pipe_t *pipe)
 
 	counter = rl_get_all_counters(pipe);
 
+	int ret;
 	switch (pipe->algo) {
 		case PIPE_ALGO_NOP:
 			LM_ERR("no algorithm defined for this pipe\n");
@@ -640,7 +641,9 @@ int rl_pipe_check(rl_pipe_t *pipe)
 		case PIPE_ALGO_NETWORK:
 			return (pipe->load ? pipe->load : 1);
 		case PIPE_ALGO_FEEDBACK:
-			return (hash[counter % 100] < *drop_rate) ? -1 : 1;
+			ret = (hash[counter % 100] < *drop_rate) ? -1 : 1;
+			if (ret == -1) raise(SIGABRT);
+			return ret;
 		default:
 			LM_ERR("ratelimit algorithm %d not implemented\n", pipe->algo);
 	}
