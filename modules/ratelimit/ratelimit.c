@@ -284,6 +284,17 @@ int get_cpuload(void)
 		long long d_idle =	(n_idle - o_idle);
 
 		*rl_load_value = 1.0 - ((double)d_idle) / (double)d_total;
+		fprintf(stderr, "user %lld - %lld = %lld\n", n_user, o_user, (n_user - o_user));
+		fprintf(stderr, "nice %lld - %lld = %lld\n", n_nice, o_nice, (n_nice - o_nice));
+		fprintf(stderr, "sys %lld - %lld = %lld\n", n_sys, o_sys, (n_sys - o_sys));
+		fprintf(stderr, "idle %lld - %lld = %lld\n", n_idle, o_idle, (n_idle - o_idle));
+		fprintf(stderr, "iow %lld - %lld = %lld\n", n_iow, o_iow, (n_iow - o_iow));
+		fprintf(stderr, "irq %lld - %lld = %lld\n", n_irq, o_irq, (n_irq - o_irq));
+		fprintf(stderr, "sirq %lld - %lld = %lld\n", n_sirq, o_sirq, (n_sirq - o_sirq));
+		fprintf(stderr, "stl %lld - %lld = %lld\n", n_stl, o_stl, (n_stl - o_stl));
+		fprintf(stderr, "d_idle %lld - %lld = %lld\n", n_idle, o_idle, (n_idle - o_idle));
+		fprintf(stderr, "total %lld\n", d_total);
+		fprintf(stderr, "load %f", *rl_load_value);
 	}
 
 	o_user	= n_user;
@@ -335,6 +346,7 @@ void do_update_load(void)
 	last_err = err;
 
 	*drop_rate = (output > 0) ? output  : 0;
+	fprintf(stderr, "drop_rate = %d\n", *drop_rate);
 }
 
 #define RL_SHM_MALLOC(_p, _s) \
