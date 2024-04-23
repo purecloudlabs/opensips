@@ -472,7 +472,7 @@ int pv_get_json_ext(struct sip_msg* msg,  pv_param_t* pvp, pv_value_t* val, int 
 		val->rs.len = strlen(val->rs.s);
 #endif
 	} else {
-		val->flags = PV_VAL_STR;
+		val->flags = JSON_C_TO_STRING_NOSLASHESCAPE;
 		val->rs.s = (char*)json_object_to_json_string_ext( obj, flags);
 		val->rs.len = strlen(val->rs.s);
 	}
