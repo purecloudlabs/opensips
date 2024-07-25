@@ -45,7 +45,7 @@
 
 Summary:  Very fast and configurable SIP server
 Name:     opensips
-Version:  3.4.3
+Version:  3.4.7
 Release:  1%{?dist}
 License:  GPLv2+
 Group:    System Environment/Daemons
@@ -1049,7 +1049,6 @@ fi
 %doc docdir/AUTHORS
 %doc docdir/NEWS
 %doc docdir/README
-%doc docdir/README-MODULES
 %doc COPYING
 
 %{_libdir}/opensips/modules/acc.so
@@ -1587,6 +1586,18 @@ fi
 
 
 %changelog
+* Wed Jul 24 2024 Liviu Chircu <liviu@opensips.org> - 3.4.7-1
+- OpenSIPS minor stable release: 3.4.7-1
+
+* Wed Jun 19 2024 Liviu Chircu <liviu@opensips.org> - 3.4.6-1
+- OpenSIPS minor stable release: 3.4.6-1
+
+* Thu Apr 18 2024 Liviu Chircu <liviu@opensips.org> - 3.4.5-1
+- OpenSIPS minor stable release: 3.4.5-1
+
+* Wed Feb 21 2024 Liviu Chircu <liviu@opensips.org> - 3.4.4-1
+- OpenSIPS minor stable release: 3.4.4-1
+
 * Wed Dec 20 2023 Liviu Chircu <liviu@opensips.org> - 3.4.3-1
 - OpenSIPS minor stable release: 3.4.3-1
 

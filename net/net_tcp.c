@@ -725,8 +725,15 @@ end:
 		evi_free_params(list);
 }
 
+/* convenience macro to aid in shm_free() debugging */
+#define _tcpconn_rm(c, ne) \
+	do {\
+		__tcpconn_rm(c, ne);\
+		shm_free(c);\
+	} while (0)
+
 /*! \brief unsafe tcpconn_rm version (nolocks) */
-static void _tcpconn_rm(struct tcp_connection* c, int no_event)
+static void __tcpconn_rm(struct tcp_connection* c, int no_event)
 {
 	int r;
 
@@ -759,8 +766,9 @@ static void _tcpconn_rm(struct tcp_connection* c, int no_event)
 	c->hist = NULL;
 #endif
 
-	shm_free(c);
+	/* shm_free(c); -- freed by _tcpconn_rm() */
 }
+
 
 
 #if 0
@@ -1204,8 +1212,8 @@ inline static int handle_tcpconn_ev(struct tcp_connection* tcpconn, int fd_i,
 				tcpconn->flags|=F_CONN_REMOVED;
 				tcp_trigger_report(tcpconn, TCP_REPORT_CLOSE,
 					"Async connect failed");
-				tcpconn_destroy(tcpconn);
 				sh_log(tcpconn->hist, TCP_UNREF, "tcpconn connect, (%d)", tcpconn->refcnt);
+				tcpconn_destroy(tcpconn);
 				return 0;
 			}
 
@@ -1762,7 +1770,7 @@ int tcp_init(void)
 		return 0;
 
 #ifdef DBG_TCPCON
-	con_hist = shl_init("TCP con", 10000, 1);
+	con_hist = shl_init("TCP con", 10000, 0);
 	if (!con_hist) {
 		LM_ERR("oom con hist\n");
 		goto error;

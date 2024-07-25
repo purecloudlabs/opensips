@@ -128,6 +128,8 @@ enum request_method {
                                       * one, not received */
 #define FL_HAS_ROUTE_LUMP    (1<<22) /* the message had Route headers added
                                       * as lumps */
+#define FL_USE_SIPTRACE_B2B  (1<<23) /* used by tracer to check if the b2b
+                                      * tracing was enabled */
 
 /* define the # of unknown URI parameters to parse */
 #define URI_MAX_U_PARAMS 10
@@ -360,6 +362,9 @@ int parse_msg(char* buf, unsigned int len, struct sip_msg* msg);
 int parse_headers(struct sip_msg* msg, hdr_flags_t flags, int next);
 
 char* get_hdr_field(char* buf, char* end, struct hdr_field* hdr);
+
+/* add DEL lumps for all headers matching the given @hdr */
+int delete_headers(struct sip_msg *msg, struct hdr_field *hdr);
 
 void free_sip_msg(struct sip_msg* msg);
 

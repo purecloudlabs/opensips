@@ -168,7 +168,7 @@ void src_free_session(struct src_sess *sess)
 		list_del(&node->list);
 		shm_free(node);
 	}
-	srec_logic_destroy(sess);
+	srec_logic_destroy(sess, 0);
 	if (sess->dlg)
 		srec_dlg.dlg_ctx_put_ptr(sess->dlg, srec_dlg_idx, NULL);
 	lock_destroy(&sess->lock);
@@ -399,7 +399,7 @@ void srec_loaded_callback(struct dlg_cell *dlg, int type,
 				goto error;
 			}
 			memcpy(&uuid, tmp.s, tmp.len);
-			if (srs_add_raw_sdp_stream(label, medianum, &uuid, sess,
+			if (srs_fill_sdp_stream(label, medianum, &uuid, sess,
 					&sess->participants[sess->participants_no - 1]) < 0) {
 				LM_ERR("cannot add new media stream!\n");
 				goto error;
