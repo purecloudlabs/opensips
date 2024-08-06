@@ -186,25 +186,20 @@ static void receive_tm_repl(bin_packet_t *packet)
 	TM_BIN_POP(str, &tmp, "dst host");
 	TM_BIN_POP(int, &port, "dst port");
 
-	if (!tm_bypass_anycast_check) {
-		ri.bind_address = grep_internal_sock_info(&tmp, port, proto);
-		if (!ri.bind_address) {
-			LM_WARN("received replicated message for an interface"
-					" we don't know %s:%.*s:%d; discarding...\n",
-					proto2a(proto), tmp.len, tmp.s, port);
-			return;
-		}
-		if (!(ri.bind_address->flags & SI_IS_ANYCAST)) {
-			LM_WARN("received replicated message for a non-anycast interface"
-					" %s:%.*s:%d\n",
-					proto2a(proto), tmp.len, tmp.s, port);
-		}
-		ri.dst_port = ri.bind_address->port_no;
-		ri.dst_ip = ri.bind_address->address;
-		ri.dst_port = ri.bind_address->port_no;
-		ri.dst_ip = ri.bind_address->address;
+	ri.bind_address = grep_internal_sock_info(&tmp, port, proto);
+	if (!ri.bind_address) {
+		LM_WARN("received replicated message for an interface"
+				" we don't know %s:%.*s:%d; discarding...\n",
+				proto2a(proto), tmp.len, tmp.s, port);
+		return;
 	}
-	
+	if (!tm_bypass_anycast_check && !(ri.bind_address->flags & SI_IS_ANYCAST)) {
+		LM_WARN("received replicated message for a non-anycast interface"
+				" %s:%.*s:%d\n",
+				proto2a(proto), tmp.len, tmp.s, port);
+	}
+	ri.dst_port = ri.bind_address->port_no;
+	ri.dst_ip = ri.bind_address->address;
 	ri.proto = proto;
 	/* XXX: do we care about this? Only UDP should work with anycast */
 	ri.proto_reserved1 = ri.proto_reserved2 = 0;
