@@ -186,6 +186,9 @@ static void receive_tm_repl(bin_packet_t *packet)
 	TM_BIN_POP(str, &tmp, "dst host");
 	TM_BIN_POP(int, &port, "dst port");
 
+	if (tm_bypass_anycast_check) {
+		tmp.len = 0;
+	}
 	ri.bind_address = grep_internal_sock_info(&tmp, port, proto);
 	if (!ri.bind_address) {
 		LM_WARN("received replicated message for an interface"
