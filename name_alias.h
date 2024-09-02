@@ -65,17 +65,41 @@ static inline int grep_aliases(char* name, int len, unsigned short port,
 {
 	struct  host_alias* a;
 	struct alias_function *af;
+	char *wildcard_prefix, *name_to_compare, *alias_to_compare;
+	int wildcard_prefix_len, len_to_compare, index_offset;
+
+	wildcard_prefix = "*.";
+	wildcard_prefix_len = 2;
 
 	if ((len>2)&&((*name)=='[')&&(name[len-1]==']')){
 		/* ipv6 reference, skip [] */
 		name++;
 		len-=2;
 	}
-	for(a=aliases;a;a=a->next)
-		if ((a->alias.len==len) && ((a->port==0) || (port==0) ||
-				(a->port==port)) && ((a->proto==0) || (proto==0) ||
-				(a->proto==proto)) && (strncasecmp(a->alias.s, name, len)==0))
-			return 1;
+
+	for(a=aliases;a;a=a->next) {
+		if (((a->port==0) || (port==0) || (a->port==port)) &&
+		    ((a->proto==0) || (proto==0) || (a->proto==proto))) {
+			/* Check if the alias starts with the wildcard prefix and if so calculate the index offset to start the comparison
+			 * Given an alias my.domain.com or my.great.domain.com and a wildcard of *.domain.com the comparison should start at domain.com
+			 */
+			if (strncasecmp(a->alias.s, wildcard_prefix, wildcard_prefix_len)==0) {
+				index_offset = len - a->alias.len + wildcard_prefix_len;
+				if (index_offset < 0) // the host we're checking is a shorter len than the alias so no need to compare
+					continue;
+
+				name_to_compare = name + index_offset;
+				alias_to_compare = a->alias.s + wildcard_prefix_len;
+
+				len_to_compare = a->alias.len - wildcard_prefix_len;
+
+				if (strncasecmp(alias_to_compare, name_to_compare, len_to_compare)==0)
+					return 1;
+			} else if (len == a->alias.len && strncasecmp(a->alias.s, name, len)==0) {
+				return 1;
+			}
+		}
+	}
 
 	for( af=alias_fcts ; af ; af=af->next ) {
 		if ( af->alias_f(name,len,port,proto)>0 )
@@ -83,7 +107,6 @@ static inline int grep_aliases(char* name, int len, unsigned short port,
 	}
 	return 0;
 }
-
 
 /* adds an alias to the list (only if it isn't already there) */
 int add_alias(char* name, int len, unsigned short port, unsigned short proto);
