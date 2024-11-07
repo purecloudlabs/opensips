@@ -42,8 +42,9 @@
  * by one in order to make difference between 0 (not set)
  * and 0 (zero value) - bogdan */
 #define IS_MAXWD_STORED(_msg_) \
-	((_msg_)->maxforwards->parsed)
+	((_msg_)->maxforwards->flags & HF_MAXFWD_STORED)
 #define STORE_MAXWD_VAL(_msg_,_val_) \
+	(_msg_)->maxforwards->flags |= HF_MAXFWD_STORED; \
 	(_msg_)->maxforwards->parsed = ((void*)(long)((_val_)+1))
 #define FETCH_MAXWD_VAL(_msg_) \
 	(((int)(long)(_msg_)->maxforwards->parsed)-1)

@@ -179,18 +179,26 @@ typedef unsigned long long hdr_flags_t;
 typedef enum _hdr_types_t hdr_types_t;
 
 /**
+ * Flags for each specific header
+ * Can be used for module specific logic
+ */
+enum hdr_field_flags { HF_NONE=0, HF_MAXFWD_STORED=1 };
+
+/**
  * Data structure for a SIP header.
  * Format: name':' body
  */
 struct hdr_field {
-	hdr_types_t type;       /**< Header field type */
-	str name;               /**< Header field name */
-	str body;               /**< Header field body (may not include CRLF) */
-	int len;                /**< length from hdr start until EoHF (incl.CRLF) */
-	void* parsed;           /**< Parsed data structures */
-	struct hdr_field* next; /**< Next header field in the list */
-	struct hdr_field* sibling; /**< Next header of same type */
+	hdr_types_t type;           /**< Header field type */
+	str name;                   /**< Header field name */
+	str body;                   /**< Header field body (may not include CRLF) */
+	int len;                    /**< length from hdr start until EoHF (incl.CRLF) */
+	void* parsed;               /**< Parsed data structures */
+	enum hdr_field_flags flags; /**< Read/write flags */
+	struct hdr_field* next;     /**< Next header field in the list */
+	struct hdr_field* sibling;  /**< Next header of same type */
 };
+
 
 
 
