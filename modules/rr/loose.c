@@ -730,7 +730,7 @@ static inline int after_loose(struct sip_msg* _m, int preloaded)
 	ret=is_myself(&puri.user, &puri);
 	if (ret>0)
 #else
-	if (is_myself(&puri))
+	if (is_myself(&puri) || find_si_matching_subnet(&puri.host, puri.proto))
 #endif
 	{
 		LM_DBG("Topmost route URI: '%.*s' is me\n",
@@ -785,7 +785,10 @@ static inline int after_loose(struct sip_msg* _m, int preloaded)
 			if (si) {
 				_m->force_send_socket = si;
 			} else {
-				if (enable_socket_mismatch_warning)
+				si = find_si_matching_subnet(&puri.host, puri.proto);
+				if (si != 0)
+					_m->force_send_socket = si;
+				else if (enable_socket_mismatch_warning)
 					LM_WARN("no socket found to match 2nd RR [%d][%.*s:%d]\n",
 						puri.proto, puri.host.len, puri.host.s, puri.port_no);
 			}
