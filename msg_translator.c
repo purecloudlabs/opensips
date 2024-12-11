@@ -2107,15 +2107,17 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 								str *via_params, unsigned int flags)
 {
 	unsigned int len, new_len, received_len, rport_len, uri_len, via_len, body_delta;
-	char *line_buf, *received_buf, *rport_buf, *new_buf, *buf, *id_buf;
+	char *line_buf, *received_buf, *rport_buf, *new_buf, *buf, *id_buf, *contact_hdr;
 	unsigned int offset, s_offset, size, id_len;
-	struct lump *anchor, *via_insert_param;
-	str branch, extra_params, body;
+	struct lump *anchor, *via_insert_param, *contact_insert_param;
+	str branch, extra_params, body, old_contact, new_contact;
 	struct hostport hp;
 
+	contact_hdr=0;
 	id_buf=0;
 	id_len=0;
 	via_insert_param=0;
+	contact_insert_param=0;
 	extra_params.len=0;
 	extra_params.s=0;
 	uri_len=0;
@@ -2291,6 +2293,46 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 		if (insert_new_lump_after(via_insert_param, rport_buf, rport_len,
 									HDR_VIA_T) ==0 )
 			goto error03; /* free rport_buf */
+	}
+
+	/* Set advertised contact port. */
+	if (msg->set_global_port_contact.len > 0 && msg->contact && msg->contact->len > 0) {
+		contact_hdr = pkg_malloc(msg->contact->len + 6);
+		if (contact_hdr == NULL) {
+			LM_ERR("failed to allocate new contact header\n");
+		} else {
+			old_contact = msg->contact->body;
+
+			new_contact.s = contact_hdr;
+			new_contact.len = old_contact.len + 6;
+
+			contact_insert_param = del_lump(
+				msg,
+				msg->contact->body.s - msg->buf,
+				msg->contact->body.len,
+				HDR_CONTACT_T
+			);
+
+			if (contact_insert_param == 0) {
+				LM_ERR("failed to delete contact lump\n");
+				pkg_free(contact_hdr);
+			} else {
+				if (set_contact_port(new_contact, msg->set_global_port_contact, old_contact) == 0) {
+					LM_ERR("failed to rewrite contact port\n");
+					pkg_free(contact_hdr);
+				} else {
+					if (insert_new_lump_after(
+						contact_insert_param,
+						new_contact.s,
+						new_contact.len,
+						HDR_CONTACT_T
+					) == 0) {
+						LM_ERR("failed to insert contact lump\n");
+						pkg_free(contact_hdr);
+					}
+				}
+			}
+		}
 	}
 
 build_msg:
@@ -2956,4 +2998,45 @@ char *contact_builder(struct socket_info* send_sock, int *ct_len)
 		*ct_len = p - uri_buff;
 
 	return uri_buff;
+}
+
+int set_contact_port(str new_contact, const str port, const str old_contact) {
+	if (old_contact.len < 5) {
+		return 0;
+	}
+
+	int first_colon_index = -1;
+	if (old_contact.s[3] == ':') {
+		first_colon_index = 3;
+	} else if (old_contact.s[4] == ':') {
+		first_colon_index = 4;
+	}
+
+	if (first_colon_index == -1 || first_colon_index + 1 >= old_contact.len) {
+		return 0;
+	}
+
+	int last_colon_index = -1;
+	for (int i = first_colon_index + 1; i < old_contact.len; ++i) {
+		if (old_contact.s[i] == ':') last_colon_index = i;
+	}
+
+	if (last_colon_index == -1) {
+		last_colon_index = old_contact.len;
+	}
+
+	int prefix_len = last_colon_index;
+	int total_len = prefix_len + snprintf(NULL, 0, ":%s", port.s);
+
+	if (total_len > new_contact.len) {
+		new_contact.len = 0;
+		return 0;
+	}
+
+	strncpy(new_contact.s, old_contact.s, prefix_len);
+	snprintf(new_contact.s + prefix_len, total_len - prefix_len + 1, ":%s", port.s);
+
+	new_contact.len = total_len;
+
+	return 1;
 }

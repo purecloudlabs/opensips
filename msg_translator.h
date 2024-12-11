@@ -165,6 +165,8 @@ int branch_builder( unsigned int hash_index,
 
 char *contact_builder(struct socket_info* send_sock, int *ct_len);
 
+int set_contact_port(str out, const str port, const str contact);
+
 /* check if IP address in Via != source IP address of signaling */
 int received_test( struct sip_msg *msg );
 
