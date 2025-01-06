@@ -45,6 +45,9 @@
 
 #define TABLE_VERSION 5
 
+extern int current_subnet_count;
+extern int current_address_count;
+
 str def_part = str_init("default");
 
 /* table & column names */
@@ -330,6 +333,9 @@ int reload_address_table(struct pm_part_struct *part_struct)
 	*part_struct->hash_table = new_hash_table;
 	*part_struct->subnet_table = new_subnet_table;
 	LM_DBG("address table reloaded successfully.\n");
+
+	current_subnet_count = new_subnet_table->size;
+	current_address_count = pm_count_hash(new_hash_table);
 
 	return 1;
 error:

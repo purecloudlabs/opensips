@@ -305,6 +305,22 @@ int pm_hash_mi_print(struct address_list **table, mi_item_t *part_item,
 	return 0;
 }
 
+int pm_count_hash(struct address_list **table)
+{
+	int i, count;
+	struct address_list *node, *next = NULL;
+
+	count = 0;
+	for (i = 0; i < PERM_HASH_SIZE; i++) {
+		for (node = table[i]; node; node = next) {
+			next = node->next;
+			count++;
+		}
+	}
+
+	return count;
+}
+
 void pm_empty_hash(struct address_list** table) {
 	int i;
 

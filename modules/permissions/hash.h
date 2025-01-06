@@ -90,6 +90,8 @@ int pm_hash_match(struct sip_msg *msg, struct address_list** table,
 int pm_hash_mi_print(struct address_list **table, mi_item_t *part_item,
 		struct pm_part_struct *pm);
 
+int pm_count_hash(struct address_list **table);
+
 /*
  * Empty hash table
  */
