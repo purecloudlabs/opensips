@@ -47,10 +47,6 @@ struct pm_part_struct {
 	struct address_list **hash_table_1;   /* Pointer to hash table 1 */
 	struct address_list **hash_table_2;   /* Pointer to hash table 2 */
 
-	struct subnet **subnet_table;        /* Ptr to current subnet table */
-	struct subnet *subnet_table_1;       /* Ptr to subnet table 1 */
-	struct subnet *subnet_table_2;       /* Ptr to subnet table 2 */
-
 	db_con_t* db_handle;
 	db_func_t perm_dbf;
 
