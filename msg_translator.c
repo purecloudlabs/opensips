@@ -125,6 +125,9 @@
 #include "pt.h"
 #include "context.h"
 #include "net/trans.h"
+#include "parser/contact/parse_contact.h"
+#include "parser/hf.h"
+#include "parser/parse_uri.h"
 
 int disable_503_translation = 0;
 
@@ -2212,13 +2215,15 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 	unsigned int len, new_len, received_len, rport_len, uri_len, via_len, body_delta;
 	char *line_buf, *received_buf, *rport_buf, *new_buf, *buf, *id_buf;
 	unsigned int offset, s_offset, size, id_len;
-	struct lump *anchor, *via_insert_param;
-	str branch, extra_params, body;
+	struct lump *anchor, *via_insert_param, *contact_addr_insert_lump;
+	str branch, extra_params, body, contact;
 	struct hostport hp;
+	struct sip_uri contact_uri;
 
 	id_buf=0;
 	id_len=0;
 	via_insert_param=0;
+	contact_addr_insert_lump=0;
 	extra_params.len=0;
 	extra_params.s=0;
 	uri_len=0;
@@ -2394,6 +2399,55 @@ char * build_req_buf_from_sip_req( struct sip_msg* msg,
 		if (insert_new_lump_after(via_insert_param, rport_buf, rport_len,
 									HDR_VIA_T) ==0 )
 			goto error03; /* free rport_buf */
+	}
+
+	if (msg->set_global_port_contact.len && 1 == 2) {
+		if (parse_contact(msg->contact) < 0 ||
+				((contact_body_t *)msg->contact->parsed)->contacts == NULL ||
+				((contact_body_t *)msg->contact->parsed)->contacts->next != NULL ) {
+			LM_ERR("Bad Contact HDR\n");
+		} else {
+			contact = ((contact_body_t *)msg->contact->parsed)->contacts->uri;
+			if (parse_uri(contact.s, contact.len, &contact_uri) < 0) {
+				LM_ERR("Bad Contact URI\n");
+			} else {
+				contact_addr_insert_lump = del_lump(
+					msg,
+					msg->contact->body.s - msg->buf,
+					msg->contact->body.len,
+					HDR_CONTACT_T
+				);
+				if (contact_addr_insert_lump == 0) {
+					LM_ERR("Failed to delete contact body\n");
+				} else {
+					unsigned int prefix_len = (msg->contact->body.s[0] == '<' ? 1 : 0) + (contact_uri.type == SIPS_URI_T ? 5 : 4) + contact_uri.user.len + 1;
+					char* prefix = pkg_malloc(prefix_len);
+					memcpy(prefix, msg->contact->body.s, prefix_len);
+
+					if (!(contact_addr_insert_lump = insert_new_lump_after(contact_addr_insert_lump, prefix, prefix_len, 0))) {
+						LM_ERR("Failed to instert contact prefix\n");
+						pkg_free(prefix);
+					}
+
+					if (!(contact_addr_insert_lump = insert_subst_lump_after(contact_addr_insert_lump, SUBST_SND_ALL_CONTACT, 0))) {
+						LM_ERR("Failed to instert contact address\n");
+					}
+
+					unsigned int addr_len = contact_uri.host.len + (contact_uri.port.len > 0 ? (1 + contact_uri.port.len) : 0);
+					unsigned int suffix_len = msg->contact->body.len - prefix_len - addr_len;
+					if (suffix_len > 0) {
+						char* suffix = pkg_malloc(suffix_len);
+						memcpy(suffix, msg->contact->body.s + prefix_len + addr_len, suffix_len);
+
+						if (!(contact_addr_insert_lump = insert_new_lump_after(contact_addr_insert_lump, suffix, suffix_len, 0))) {
+							LM_ERR("Failed to instert contact suffix\n");
+							pkg_free(suffix);
+						}
+					}
+					fprintf(stderr, "%*.s %*.s\n", msg->contact->body.len, msg->contact->body.s, contact_uri.port.len, contact_uri.port.s);
+				}
+			}
+		}
 	}
 
 build_msg:
