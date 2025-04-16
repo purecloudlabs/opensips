@@ -1075,12 +1075,12 @@ static int hep_udp_read_req(struct socket_info* si, int* bytes_read)
 	 * to hep context; this way callbacks will have all the data
 	 * needed */
 	set_global_context(ctx);
-	ret = run_hep_cbs();
+	ret=run_hep_cbs();
+	set_global_context(NULL);
 	if (ret < 0) {
 		LM_ERR("failed to run hep callbacks\n");
 		return -1;
 	}
-	set_global_context(NULL);
 
 	if (hep_ctx->h.version == 3) {
 		/* HEPv3 */

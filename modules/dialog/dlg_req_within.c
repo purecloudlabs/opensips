@@ -259,7 +259,7 @@ static void dual_bye_event(struct dlg_cell* dlg, struct sip_msg *req,
 			if (push_new_processing_context( dlg, &old_ctx, &new_ctx, &fake_msg)==0) {
 				/* dialog terminated (BYE) */
 				run_dlg_callbacks( DLGCB_TERMINATED, dlg, fake_msg,
-					DLG_DIR_NONE, NULL, 0, is_active);
+					DLG_DIR_NONE, -1, NULL, 0, is_active);
 				/* reset the processing context */
 				if (current_processing_ctx == NULL)
 					*new_ctx = NULL;
@@ -272,7 +272,7 @@ static void dual_bye_event(struct dlg_cell* dlg, struct sip_msg *req,
 			/* we should have the msg and context from upper levels */
 			/* dialog terminated (BYE) */
 			run_dlg_callbacks( DLGCB_TERMINATED, dlg, req,
-				DLG_DIR_NONE, NULL, 0, is_active);
+				DLG_DIR_NONE, -1, NULL, 0, is_active);
 		}
 
 		LM_DBG("first final reply\n");
@@ -621,6 +621,8 @@ int send_leg_msg(struct dlg_cell *dlg,str *method,int src_leg,int dst_leg,
 	/* set new processing context */
 	if (push_new_processing_context( dlg, &old_ctx, &new_ctx, NULL)!=0)
 		return -1;
+
+	ctx_lastdstleg_set(dst_leg);
 
 	dialog_info->T_flags=T_NO_AUTOACK_FLAG;
 
@@ -1007,11 +1009,14 @@ struct dlg_indialog_req_param {
 	struct dlg_cell *dlg;
 	indialog_reply_f func;
 	void *param;
+	indialog_release_f release;
 };
 
 static void dlg_indialog_reply_release(void *param)
 {
 	struct dlg_indialog_req_param *p = (struct dlg_indialog_req_param *)param;
+	if (p->release)
+		p->release(p->param);
 	unref_dlg(p->dlg, 1);
 	shm_free(p);
 }
@@ -1040,8 +1045,8 @@ static void dlg_indialog_reply(struct cell* t, int type, struct tmcb_params* ps)
 
 }
 
-int send_indialog_request(struct dlg_cell *dlg, str *method,
-		int dstleg, str *body, str *ct, str *hdrs, indialog_reply_f func, void *param)
+int send_indialog_request(struct dlg_cell *dlg, str *method, int dstleg, str *body,
+		str *ct, str *hdrs, indialog_reply_f func, void *param, indialog_release_f release)
 {
 	str extra_headers;
 	struct dlg_indialog_req_param *p;
@@ -1064,6 +1069,7 @@ int send_indialog_request(struct dlg_cell *dlg, str *method,
 	p->dlg = dlg;
 	p->func = func;
 	p->param = param;
+	p->release = release;
 	p->leg = dstleg;
 
 	ref_dlg(dlg, 1);

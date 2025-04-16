@@ -642,16 +642,16 @@ static int mod_init(void)
 
 static int child_init(int rank)
 {
-	return 0;
+	int res = mi_init_address();
+	if_update_stat(mod_stat_enabled, subnet_count_stat, current_subnet_count);
+	if_update_stat(mod_stat_enabled, address_count_stat, current_address_count);
+	return res;
 }
 
 
 static int mi_address_child_init(void)
 {
-	int res = mi_init_address();
-	if_update_stat(mod_stat_enabled, subnet_count_stat, current_subnet_count);
-	if_update_stat(mod_stat_enabled, address_count_stat, current_address_count);
-	return res;
+    return 0;
 }
 
 /*

@@ -1,29 +1,30 @@
 /**
- * Topology Hiding Module
- *
- * Copyright (C) 2015 OpenSIPS Foundation
- *
- * This file is part of opensips, a free SIP server.
- *
- * opensips is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version
- *
- * opensips is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
- *
- * History
- * -------
- *  2015-02-17  initial version (Vlad Paiu)
+* Topology Hiding Module
+*
+* Copyright (C) 2015 OpenSIPS Foundation
+*
+* This file is part of opensips, a free SIP server.
+*
+* opensips is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License as published by
+* the Free Software Foundation; either version 2 of the License, or
+* (at your option) any later version
+*
+* opensips is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program; if not, write to the Free Software
+* Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
+*
+* History
+* -------
+*  2015-02-17  initial version (Vlad Paiu)
 */
 
+#include "../../ut.h"
 #include "topo_hiding_logic.h"
 #include "../../socket_info.h"
 #include "../../ut.h"
@@ -39,8 +40,8 @@ extern str th_contact_encode_param;
 extern int th_ct_enc_scheme;
 
 struct th_ct_params {
-	str param_name;
-	struct th_ct_params *next;
+str param_name;
+struct th_ct_params *next;
 };
 static struct th_ct_params *th_param_list=NULL;
 static struct th_ct_params *th_hdr_param_list=NULL;
@@ -53,7 +54,7 @@ static int topo_delete_record_routes(struct sip_msg *req);
 static struct lump* delete_existing_contact(struct sip_msg *msg, int del_hdr);
 static int topo_parse_passed_params(str *params,struct th_ct_params **lst);
 static void topo_dlg_onroute (struct dlg_cell* dlg, int type,
-		struct dlg_cb_params * params);
+	struct dlg_cb_params * params);
 static void topo_dlg_initial_reply (struct dlg_cell* dlg, int type,
 		struct dlg_cb_params * params);
 static void th_down_onreply(struct cell* t, int type,struct tmcb_params *param);
@@ -63,7 +64,7 @@ static void th_no_dlg_user_onreply(struct cell* t, int type, struct tmcb_params 
 static int topo_no_dlg_encode_contact(struct sip_msg *req,int flags,str *routes);
 static int topo_no_dlg_seq_handling(struct sip_msg *msg,str *info);
 static int dlg_th_onreply(struct dlg_cell *dlg, struct sip_msg *rpl, struct sip_msg *req,
-		int init_req, int dir);
+		int init_req, int dir, int dst_leg);
 
 /* exposed logic below */
 
@@ -1067,7 +1068,7 @@ static void topo_dlg_initial_reply (struct dlg_cell* dlg, int type,
 	if (t == T_UNDEFINED || t == NULL)
 		return;
 
-	if(dlg_th_onreply(dlg, params->msg, t->uas.request, 1, DLG_DIR_UPSTREAM) < 0)
+	if(dlg_th_onreply(dlg, params->msg, t->uas.request, 1, DLG_DIR_UPSTREAM, params->dst_leg) < 0)
 		LM_ERR("Failed to transform the reply for topology hiding\n");
 }
 
@@ -1077,7 +1078,7 @@ static void topo_dlg_onroute (struct dlg_cell* dlg, int type,
 {
 	int dir = params->direction;
 	struct sip_msg *req = params->msg;
-	int adv_leg = -1;
+	int adv_leg = -1, leg;
 
 	if (!req) {
 		LM_ERR("Called with NULL SIP message \n");
@@ -1116,12 +1117,17 @@ static void topo_dlg_onroute (struct dlg_cell* dlg, int type,
 		return;
 	}
 
-	if (dir == DLG_DIR_UPSTREAM) {
+	leg = (params->dst_leg < 0?DLG_CALLER_LEG:params->dst_leg);
+	req->force_send_socket = dlg->legs[leg].bind_addr;
+	switch (dir) {
+	case DLG_DIR_UPSTREAM:
 		if (dlg_api.is_mod_flag_set(dlg, TOPOH_KEEP_ADV_A))
-			adv_leg = DLG_CALLER_LEG;
-	} else {
+			adv_leg = leg;
+		break;
+	case DLG_DIR_DOWNSTREAM:
 		if (dlg_api.is_mod_flag_set(dlg, TOPOH_KEEP_ADV_B))
-			adv_leg = callee_idx(dlg);
+			adv_leg = leg;
+		break;
 	}
 
 	/* replace contact*/
@@ -1139,24 +1145,11 @@ static void topo_dlg_onroute (struct dlg_cell* dlg, int type,
 		dlg_api.dlg_unref(dlg,1);
 		return;
 	}
-
-	if (dir == DLG_DIR_UPSTREAM) {
-		/* destination leg is the caller - force the send socket
-		 * as the one the caller was inited from */
-		req->force_send_socket = dlg->legs[DLG_CALLER_LEG].bind_addr;
-		LM_DBG("forcing send socket for req going to caller\n");
-	} else {
-		/* destination leg is the callee - force the send socket
-		 * as the one the callee was inited from */
-		req->force_send_socket = dlg->legs[callee_idx(dlg)].bind_addr;
-		LM_DBG("forcing send socket for req going to callee\n");
-	}
 }
 
 static int dlg_th_onreply(struct dlg_cell *dlg, struct sip_msg *rpl,
-								struct sip_msg *req, int init_req, int dir)
+								struct sip_msg *req, int init_req, int dir, int dst_leg)
 {
-	int peer_leg;
 	struct lump* lmp;
 	int size;
 	char* route;
@@ -1168,14 +1161,20 @@ static int dlg_th_onreply(struct dlg_cell *dlg, struct sip_msg *rpl,
 		LM_ERR("Failed to parse reply\n");
 		return -1;
 	}
+	if (dst_leg < 0) {
+		if (dir == DLG_DIR_DOWNSTREAM)
+			dst_leg = callee_idx(dlg);
+		else
+			dst_leg = DLG_CALLER_LEG;
+	}
 
 	if (!init_req) {
 		if (dir == DLG_DIR_UPSTREAM) {
 			if (dlg_api.is_mod_flag_set(dlg, TOPOH_KEEP_ADV_A))
-				adv_leg = DLG_CALLER_LEG;
+				adv_leg = dst_leg;
 		} else {
 			if (dlg_api.is_mod_flag_set(dlg, TOPOH_KEEP_ADV_B))
-				adv_leg = callee_idx(dlg);
+				adv_leg = dst_leg;
 		}
 	}
 
@@ -1188,11 +1187,7 @@ static int dlg_th_onreply(struct dlg_cell *dlg, struct sip_msg *rpl,
 		}
 	}
 
-	if(dir == DLG_DIR_UPSTREAM)
-		peer_leg = DLG_CALLER_LEG;
-	else
-		peer_leg = callee_idx(dlg);
-	leg = &dlg->legs[peer_leg];
+	leg = &dlg->legs[dst_leg];
 
 	if (topo_delete_record_routes(rpl) < 0) {
 		LM_ERR("Failed to remove Record Route header \n");
@@ -1244,7 +1239,7 @@ static void th_down_onreply(struct cell* t, int type,struct tmcb_params *param)
 	if (dlg==0)
 		return;
 
-	if(dlg_th_onreply(dlg, param->rpl, param->req,0, DLG_DIR_DOWNSTREAM) < 0)
+	if(dlg_th_onreply(dlg, param->rpl, param->req,0, DLG_DIR_DOWNSTREAM, -1) < 0)
 		LM_ERR("Failed to transform the reply for topology hiding\n");
 }
 
@@ -1256,7 +1251,7 @@ static void th_up_onreply(struct cell* t, int type, struct tmcb_params *param)
 	if (dlg==0)
 		return;
 
-	if(dlg_th_onreply(dlg, param->rpl, param->req, 0, DLG_DIR_UPSTREAM) < 0)
+	if(dlg_th_onreply(dlg, param->rpl, param->req, 0, DLG_DIR_UPSTREAM, -1) < 0)
 		LM_ERR("Failed to transform the reply for topology hiding\n");
 }
 
@@ -1580,7 +1575,7 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, int 
 	int is_req = (msg->first_line.type==SIP_REQUEST)?1:0;
 	int local_len = sizeof(short) /* RR length */ +
 			sizeof(short) /* Contact length */ +
-			sizeof(short) /* RR length */ +
+			sizeof(short) /* Flags length */ +
 			sizeof(short) /* bind addr */;
 
 	/* parse all headers as we can have multiple
@@ -1593,7 +1588,6 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, int 
 	if (routes) {
 		rr_set = *routes;
 		rr_len = (short)routes->len;
-		LM_INFO("XXX: adding [%.*s]\n", routes->len, routes->s);
 	} else if(msg->record_route){
 		if(print_rr_body(msg->record_route, &rr_set, !is_req, 0, NULL) != 0){
 			LM_ERR("failed to print route records \n");
@@ -1641,7 +1635,7 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, int 
 					/* we just iterate over the unknown params */
 					for (i=0;i<ctu.u_params_no;i++) {
 						if (str_match(&el->param_name, &ctu.u_name[i]))
-							suffix_len += topo_ct_param_len(&ctu.u_name[i], &ctu.u_val[i], 0);
+							total_len += topo_ct_param_len(&ctu.u_name[i], &ctu.u_val[i], 0);
 					}
 				}
 			}
@@ -1657,7 +1651,7 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, int 
 			for (el=th_hdr_param_list;el;el=el->next) {
 				for (it=((contact_body_t *)msg->contact->parsed)->contacts->params;it;it=it->next) {
 					if (str_match(&el->param_name, &it->name))
-						suffix_len += topo_ct_param_len(&it->name, &it->body, 1);
+						total_len += topo_ct_param_len(&it->name, &it->body, 1);
 				}
 			}
 		}

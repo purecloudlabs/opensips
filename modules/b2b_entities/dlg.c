@@ -357,8 +357,8 @@ str* b2b_generate_key(unsigned int hash_index, unsigned int local_index)
 	str* b2b_key;
 	int len;
 
-	len = sprintf(buf, "%s.%d.%d.%ld.%d", b2b_key_prefix.s, hash_index, local_index,
-		startup_time+get_ticks(), rand());
+	len = sprintf(buf, "%s.%d.%d.%lld.%d", b2b_key_prefix.s, hash_index, local_index,
+		(long long)(startup_time+get_ticks()), rand());
 
 	b2b_key = (str*)pkg_malloc(sizeof(str)+ len);
 	if(b2b_key== NULL)
@@ -713,6 +713,7 @@ int b2b_register_cb(b2b_cb_t cb, int cb_type, str *mod_name)
 	return 0;
 }
 
+
 int b2b_prescript_f(struct sip_msg *msg, void *uparam)
 {
 	str b2b_key;
@@ -766,8 +767,7 @@ int b2b_prescript_f(struct sip_msg *msg, void *uparam)
 				rt->nameaddr.uri.len,rt->nameaddr.uri.s);
 			return SCB_RUN_ALL;
 		}
-		if (check_self( &puri.host, puri.port_no?puri.port_no:SIP_PORT,
-		puri.proto?puri.proto:PROTO_UDP)!= 1 ) {
+		if (check_self_strict( &puri.host, puri.port_no, puri.proto)!= 1 ) {
 			LM_DBG("First Route uri is not mine\n");
 			return SCB_RUN_ALL;  /* not for b2b */
 
@@ -785,13 +785,12 @@ int b2b_prescript_f(struct sip_msg *msg, void *uparam)
 			}
 		}
 		if (rt) {
-			if ( parse_uri(rt->nameaddr.uri.s,rt->nameaddr.uri.len,&puri)!=0 ) {
+			if ( parse_uri(rt->nameaddr.uri.s,rt->nameaddr.uri.len,&puri)!=0 ){
 				LM_ERR("Second route uri is not valid <%.*s>\n",
 					rt->nameaddr.uri.len,rt->nameaddr.uri.s);
 				return SCB_RUN_ALL;
 			}
-			if (check_self( &puri.host, puri.port_no?puri.port_no:SIP_PORT,
-			puri.proto?puri.proto:PROTO_UDP)!= 1 ) {
+			if (check_self_strict( &puri.host, puri.port_no, puri.proto)!= 1 ){
 				LM_DBG("Second Route uri is not mine\n");
 				return SCB_RUN_ALL;  /* not for b2b */
 			}
@@ -822,7 +821,7 @@ int b2b_prescript_f(struct sip_msg *msg, void *uparam)
 	if(method_value!= METHOD_CANCEL)
 	{
 		LM_DBG("<uri> host:port [%.*s][%d]\n", host.len, host.s, port);
-		if (!check_self( &host, port ? port : SIP_PORT, msg->rcv.proto))
+		if (check_self_strict( &host, port, msg->parsed_uri.proto)!= 1 )
 		{
 			LM_DBG("RURI does not point to me\n");
 			return SCB_RUN_ALL;
@@ -885,13 +884,13 @@ search_dialog:
 		*/
 		dlg = b2bl_search_iteratively(&callid, &from_tag, T_invite,
 			hash_index);
-		tmb.unref_cell( T_invite );
 		if(dlg == NULL)
 		{
 			B2BE_LOCK_RELEASE(server_htable, hash_index);
 			LM_DBG("No dialog found for cancel\n");
 			return SCB_RUN_ALL;
 		}
+		tmb.unref_cell( T_invite );
 
 		ctx = b2b_get_context();
 		if (!ctx) {
@@ -1013,9 +1012,6 @@ search_dialog:
 			if(method_value == METHOD_ACK)
 			{
 				tmb.t_newtran(msg);
-				tm_tran = tmb.t_gett();
-				if (tm_tran && tm_tran!=T_UNDEFINED)
-					tmb.unref_cell(tm_tran);
 			} else
 			if(method_value == METHOD_BYE)
 			{
@@ -1025,6 +1021,9 @@ search_dialog:
 				str ko = str_init("Call/Transaction Does Not Exist");
 				tmb.t_reply(msg, 481, &ko);
 			}
+			tm_tran = tmb.t_gett();
+			if (tm_tran && tm_tran!=T_UNDEFINED)
+				tmb.unref_cell(tm_tran);
 			B2BE_LOCK_RELEASE(table, hash_index);
 			return SCB_DROP_MSG;
 		}
@@ -1382,8 +1381,12 @@ run_cb:
 			return SCB_DROP_MSG;
 		}
 	} else {
-		b2b_cback(msg, &b2b_key, B2B_REQUEST, logic_key.s?&logic_key:0,
-			dlg->param, b2b_cb_flags);
+		if (!b2b_cback)
+			LM_DBG("calback not yet registered for [%.*s]\n",
+					(logic_key.s?logic_key.len:0), (logic_key.s?logic_key.s:""));
+		else
+			b2b_cback(msg, &b2b_key, B2B_REQUEST, logic_key.s?&logic_key:0,
+				dlg->param, b2b_cb_flags);
 
 		if(logic_key.s)
 			pkg_free(logic_key.s);
@@ -2468,7 +2471,6 @@ int _b2b_send_request(b2b_dlg_t* dlg, b2b_req_data_t* req_data)
 			if(dlg->uac_tran)
 			{
 				struct cell *inv_t;
-				struct cell *bk_t = tmb.t_gett();
 				LM_DBG("send cancel request\n");
 				if (tmb.t_lookup_ident( &inv_t, dlg->uac_tran->hash_index,
 				dlg->uac_tran->label) != 1) {
@@ -2478,7 +2480,6 @@ int _b2b_send_request(b2b_dlg_t* dlg, b2b_req_data_t* req_data)
 				// FIXME - tracing: how do we get to the cancel transaction?
 				ret = tmb.t_cancel_trans( inv_t, &ehdr);
 				tmb.unref_cell(inv_t);
-				tmb.t_sett(bk_t);
 				if (dlg->state > B2B_CONFIRMED)
 					method_value = METHOD_INVITE;
 			}
@@ -3686,8 +3687,12 @@ done1:
 			goto error1;
 		}
 	} else {
-		b2b_cback(msg, b2b_key, B2B_REPLY, logic_key.s?&logic_key:0,
-			b2b_param, b2b_cb_flags);
+		if (!b2b_cback)
+			LM_DBG("calback not yet registered for [%.*s]\n",
+					(logic_key.s?logic_key.len:0), (logic_key.s?logic_key.s:""));
+		else
+			b2b_cback(msg, b2b_key, B2B_REPLY, logic_key.s?&logic_key:0,
+				b2b_param, b2b_cb_flags);
 		if(logic_key.s)
 		{
 			pkg_free(logic_key.s);

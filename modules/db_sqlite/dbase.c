@@ -34,7 +34,7 @@
 #include "../../db/db_ut.h"
 #include "../../db/db_insertq.h"
 #include "../../db/db_res.h"
-#include "my_con.h"
+#include "sqlite_con.h"
 #include "val.h"
 #include "res.h"
 #include "row.h"
@@ -93,7 +93,7 @@ static inline int db_copy_rest_of_count(const str* _qh, str* count_query)
 	const str searched_str = {" from ", sizeof(" from ")-1};
 
 	count_query->len = sizeof(COUNT_QUERY)-1;
-	if ((found=str_strstr(_qh, &searched_str)) != NULL) {
+	if ((found=str_strcasestr(_qh, &searched_str)) != NULL) {
 		const int len=_qh->len-(found-_qh->s);
 		/* check for overflow */
 		if (len > COUNT_BUF_SIZE-(sizeof(COUNT_QUERY)-1)) {

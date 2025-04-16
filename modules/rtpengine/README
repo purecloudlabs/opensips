@@ -734,7 +734,7 @@ rtpengine_offer("... codec-mask-PCMA codec-strip-opus transcode-opus ...
 
 1.5.4.  rtpengine_delete([flags[, sock_var]])
 
-   Tears down the RTPProxy session for the current call.
+   Tears down the RTPEngine session for the current call.
 
    See rtpengine_offer() function description above for the
    meaning of the parameters. Note that not all flags make sense
@@ -749,7 +749,7 @@ rtpengine_delete();
 
 1.5.5.  rtpengine_manage([flags[, sock_var[, sdp_var[, body]]]])
 
-   Manage the RTPProxy session - it combines the functionality of
+   Manage the RTPEngine session - it combines the functionality of
    rtpengine_offer(), rtpengine_answer() and rtpengine_delete(),
    detecting internally based on message type and method which one
    to execute.
@@ -1266,7 +1266,7 @@ Chapter 3. Contributors
    Table 3.1. Top contributors by DevScore^(1), authored
    commits^(2) and lines added/removed^(3)
      Name DevScore Commits Lines ++ Lines --
-   1. Razvan Crainea (@razvancrainea) 214 114 5948 3065
+   1. Razvan Crainea (@razvancrainea) 224 123 6040 3091
    2. Bogdan-Andrei Iancu (@bogdan-iancu) 31 17 423 595
    3. John Burke (@john08burke) 25 17 647 102
    4. Liviu Chircu (@liviuchircu) 20 16 91 173
@@ -1279,7 +1279,8 @@ Chapter 3. Contributors
 
    All remaining contributors: Maksym Sobolyev (@sobomax), Zero
    King (@l2dy), Rob Gagnon (@rgagnon24), Flavio E. Goncalves, Dan
-   Pascu (@danpascu), Oliver Severin Mulelid-Tynes (@olivermt).
+   Pascu (@danpascu), Oliver Severin Mulelid-Tynes (@olivermt),
+   Peter Kelly.
 
    (1) DevScore = author_commits + author_lines_added /
    (project_lines_added / project_commits) + author_lines_deleted
@@ -1301,21 +1302,21 @@ Chapter 3. Contributors
 
    Table 3.2. Most recently active contributors^(1) to this module
                       Name                   Commit Activity
-   1.  Razvan Crainea (@razvancrainea)     Jun 2014 - Nov 2023
-   2.  Liviu Chircu (@liviuchircu)         Jul 2014 - May 2023
-   3.  Maksym Sobolyev (@sobomax)          Jan 2021 - Feb 2023
-   4.  Peter Lemenkov (@lemenkov)          Jun 2018 - Apr 2022
-   5.  John Burke (@john08burke)           Jun 2019 - Apr 2022
-   6.  Bogdan-Andrei Iancu (@bogdan-iancu) Jun 2014 - Apr 2022
-   7.  Nick Altmann (@nikbyte)             May 2021 - May 2021
-   8.  Flavio E. Goncalves                 Oct 2020 - Oct 2020
-   9.  Zero King (@l2dy)                   Mar 2020 - Sep 2020
-   10. Ovidiu Sas (@ovidiusas)             Jun 2020 - Jun 2020
+   1.  Razvan Crainea (@razvancrainea)     Jun 2014 - Mar 2025
+   2.  Peter Kelly                         Feb 2025 - Feb 2025
+   3.  Liviu Chircu (@liviuchircu)         Jul 2014 - May 2023
+   4.  Maksym Sobolyev (@sobomax)          Jan 2021 - Feb 2023
+   5.  Peter Lemenkov (@lemenkov)          Jun 2018 - Apr 2022
+   6.  John Burke (@john08burke)           Jun 2019 - Apr 2022
+   7.  Bogdan-Andrei Iancu (@bogdan-iancu) Jun 2014 - Apr 2022
+   8.  Nick Altmann (@nikbyte)             May 2021 - May 2021
+   9.  Flavio E. Goncalves                 Oct 2020 - Oct 2020
+   10. Zero King (@l2dy)                   Mar 2020 - Sep 2020
 
-   All remaining contributors: Vlad Patrascu (@rvlad-patrascu),
-   Dan Pascu (@danpascu), Oliver Severin Mulelid-Tynes
-   (@olivermt), Rob Gagnon (@rgagnon24), Eric Tamme (@etamme),
-   Richard Fuchs.
+   All remaining contributors: Ovidiu Sas (@ovidiusas), Vlad
+   Patrascu (@rvlad-patrascu), Dan Pascu (@danpascu), Oliver
+   Severin Mulelid-Tynes (@olivermt), Rob Gagnon (@rgagnon24),
+   Eric Tamme (@etamme), Richard Fuchs.
 
    (1) including any documentation-related commits, excluding
    merge commits

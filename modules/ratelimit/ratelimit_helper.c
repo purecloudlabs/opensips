@@ -172,8 +172,8 @@ static int rl_get_counter(str *name, rl_pipe_t * pipe)
 int init_cachedb(str * db_url)
 {
 	if (cachedb_bind_mod(db_url, &cdbf) < 0) {
-		LM_ERR("cannot bind functions for db_url %.*s\n",
-			db_url->len, db_url->s);
+		LM_ERR("cannot bind functions for db_url %s\n",
+			db_url_escape(db_url));
 		return -1;
 	}
 	if (!CACHEDB_CAPABILITY(&cdbf,
@@ -183,7 +183,7 @@ int init_cachedb(str * db_url)
 	}
 	cdbc = cdbf.init(db_url);
 	if (!cdbc) {
-		LM_ERR("cannot connect to db_url %.*s\n", db_url->len, db_url->s);
+		LM_ERR("cannot connect to db_url %s\n", db_url_escape(db_url));
 		return -1;
 	}
 	/* guessing that the name is not larger than 32 */
@@ -459,8 +459,8 @@ int w_rl_check(struct sip_msg *_m, str *name, int *limit, str *algorithm)
 		if ((*pipe)->algo == PIPE_ALGO_NETWORK)
 			should_update = 1;
 	} else {
-		LM_DBG("Pipe %.*s found: %p - last used %lu\n",
-			pipe_name.len, pipe_name.s, *pipe, (*pipe)->last_used);
+		LM_DBG("Pipe %.*s found: %p - last used %lld\n",
+			pipe_name.len, pipe_name.s, *pipe, (long long)(*pipe)->last_used);
 		if (algo != PIPE_ALGO_NOP && (*pipe)->algo != algo) {
 			LM_WARN("algorithm %d different from the initial one %d for pipe "
 				"%.*s\n", algo, (*pipe)->algo, pipe_name.len, pipe_name.s);
@@ -912,8 +912,8 @@ void rl_rcv_bin(bin_packet_t *packet)
 			LM_DBG("Pipe %.*s doesn't exist, but was created %p\n",
 				name.len, name.s, *pipe);
 		} else {
-			LM_DBG("Pipe %.*s found: %p - last used %lu\n",
-				name.len, name.s, *pipe, (*pipe)->last_used);
+			LM_DBG("Pipe %.*s found: %p - last used %lld\n",
+				name.len, name.s, *pipe, (long long)(*pipe)->last_used);
 			if ((*pipe)->algo != algo)
 				LM_WARN("algorithm %d different from the initial one %d for "
 				"pipe %.*s", algo, (*pipe)->algo, name.len, name.s);

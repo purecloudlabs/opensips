@@ -29,11 +29,10 @@
 #include "siprec_sess.h"
 #include "../b2b_entities/b2be_load.h"
 
-int src_start_recording(struct sip_msg *msg, struct src_sess *sess);
 void tm_start_recording(struct cell *t, int type, struct tmcb_params *ps);
 int srec_register_callbacks(struct src_sess *sess);
 int srec_restore_callback(struct src_sess *sess);
-void srec_logic_destroy(struct src_sess *sess);
+void srec_logic_destroy(struct src_sess *sess, int keep_sdp);
 int src_pause_recording(void);
 int src_resume_recording(void);
 

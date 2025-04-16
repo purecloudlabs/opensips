@@ -1000,11 +1000,6 @@ static int w_stir_auth(struct sip_msg *msg, str *attest, str *origid,
 		return -1;
 	}
 
-	if (get_header_by_static_name(msg, "Identity")) {
-		LM_NOTICE("Identity header already exists\n");
-		return -2;
-	}
-
 	if (!orig_tn_p) {
 		if ((rc = get_orig_tn_from_msg(msg, &orig_tn)) < 0) {
 			if (rc == -1)
@@ -1063,7 +1058,8 @@ static int w_stir_auth(struct sip_msg *msg, str *attest, str *origid,
 
 		if (labs(now - date_ts) > auth_date_freshness) {
 			LM_NOTICE("Date header timestamp diff exceeds local policy "
-			    "(diff: %lds, auth-freshness: %ds)\n", now - date_ts, auth_date_freshness);
+			    "(diff: %llds, auth-freshness: %ds)\n",
+			    (long long)(now - date_ts), auth_date_freshness);
 			return -4;
 		}
 	}
@@ -1794,7 +1790,7 @@ static int w_stir_verify(struct sip_msg *msg, str *cert_buf,
 	if ((rc = get_parsed_identity(identity_hdr, &parsed)) < 0) {
 		if (rc == -1) {
 			LM_ERR("Failed to parse identity header\n");
-			SET_VERIFY_ERR_VARS(IERROR_CODE, IERROR_REASON);
+			SET_VERIFY_ERR_VARS(IERROR_CODE, IERROR_REASON_PARSE_IDENTITY);
 		} else {  /* rc == -4 */
 			LM_INFO("Invalid identity header\n");
 			SET_VERIFY_ERR_VARS(INVALID_IDENTITY_CODE, INVALID_IDENTITY_REASON);
@@ -1830,7 +1826,7 @@ static int w_stir_verify(struct sip_msg *msg, str *cert_buf,
 
 	if ((now = time(0)) == -1) {
 		LM_ERR("Failed to get current time\n");
-		SET_VERIFY_ERR_VARS(IERROR_CODE, IERROR_REASON);
+		SET_VERIFY_ERR_VARS(IERROR_CODE, IERROR_REASON_GET_CURRENT_TIME);
 		rc = -1;
 		goto error;
 	}
@@ -1847,14 +1843,15 @@ static int w_stir_verify(struct sip_msg *msg, str *cert_buf,
 
 		if (get_date_ts(date_hf, &date_ts) < 0) {
 			LM_ERR("Failed to get UNIX time from Date header\n");
-			SET_VERIFY_ERR_VARS(IERROR_CODE, IERROR_REASON);
+			SET_VERIFY_ERR_VARS(IERROR_CODE, IERROR_REASON_GET_TIME_FROM_DATE_HEADER);
 			rc = -1;
 			goto error;
 		}
 
 		if (labs(now - date_ts) > verify_date_freshness) {
 			LM_NOTICE("Date header timestamp diff exceeds local policy "
-			    "(diff: %lds, verify-freshness: %ds)\n", now - date_ts, verify_date_freshness);
+			    "(diff: %llds, verify-freshness: %ds)\n",
+			    (long long)(now - date_ts), verify_date_freshness);
 			SET_VERIFY_ERR_VARS(STALE_DATE_CODE, STALE_DATE_REASON);
 			rc = -6;
 			goto error;
@@ -1862,7 +1859,8 @@ static int w_stir_verify(struct sip_msg *msg, str *cert_buf,
 	} else {
 		if (labs(now - iat_ts) > verify_date_freshness) {
 			LM_NOTICE("'iat' timestamp diff exceeds local policy "
-			    "(diff: %lds, verify-freshness: %ds)\n", now - iat_ts, verify_date_freshness);
+			    "(diff: %llds, verify-freshness: %ds)\n",
+			    (long long)(now - iat_ts), verify_date_freshness);
 			SET_VERIFY_ERR_VARS(STALE_DATE_CODE, STALE_DATE_REASON);
 			rc = -6;
 			goto error;
@@ -1895,7 +1893,7 @@ static int w_stir_verify(struct sip_msg *msg, str *cert_buf,
 
 	if (load_cert(&cert, &certchain, cert_buf) < 0) {
 		LM_ERR("Failed to load certificate\n");
-		SET_VERIFY_ERR_VARS(IERROR_CODE, IERROR_REASON);
+		SET_VERIFY_ERR_VARS(IERROR_CODE, IERROR_REASON_LOAD_CERTIFICATE);
 		rc = -1;
 		goto error;
 	}
@@ -1919,7 +1917,7 @@ static int w_stir_verify(struct sip_msg *msg, str *cert_buf,
 	if ((rc = validate_certificate(cert, certchain)) < 0) {
 		if (rc == -1) {
 			LM_ERR("Error validating certificate\n");
-			SET_VERIFY_ERR_VARS(IERROR_CODE, IERROR_REASON);
+			SET_VERIFY_ERR_VARS(IERROR_CODE, IERROR_REASON_VALIDATE_CERTIFICATE);
 			goto error;
 		} else {  /* rc == -8 */
 			LM_INFO("Invalid certificate\n");
@@ -1935,7 +1933,7 @@ static int w_stir_verify(struct sip_msg *msg, str *cert_buf,
 	if ((rc = verify_signature(cert, parsed, iat_ts, orig_tn_p, dest_tn_p)) <= 0) {
 		if (rc < 0) {
 			LM_ERR("Error while verifying signature\n");
-			SET_VERIFY_ERR_VARS(IERROR_CODE, IERROR_REASON);
+			SET_VERIFY_ERR_VARS(IERROR_CODE, IERROR_REASON_VERIFY_SIGNATURE);
 			rc = -1;
 			goto error;
 		} else {
