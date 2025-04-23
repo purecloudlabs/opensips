@@ -272,13 +272,15 @@ static inline char* int2bstr(uint64_t l, char *s, int* len)
 /* INTeger-TO-STRing : convers a 64-bit integer to a string
  * returns a pointer to a static buffer containing l in asciiz & sets len */
 #define INT2STR_BUF_NO    7
+extern unsigned int int2str_buf_index;
 extern char int2str_buf[INT2STR_BUF_NO][INT2STR_MAX_LEN];
+static inline unsigned int getstrbufindex(void) {
+	return ((int2str_buf_index++) % INT2STR_BUF_NO);
+}
+
 static inline char* int2str(uint64_t l, int* len)
 {
-	static unsigned int it = 0;
-
-	if ((++it)==INT2STR_BUF_NO) it = 0;
-	return int2bstr( l, int2str_buf[it], len);
+	return int2bstr( l, int2str_buf[getstrbufindex()], len);
 }
 
 
@@ -304,9 +306,9 @@ static inline char* sint2str(long l, int* len)
 
 static inline char* double2str(double d, int* len)
 {
-	static int buf;
+	unsigned int buf;
 
-	buf = (buf + 1) % INT2STR_BUF_NO;
+	buf = getstrbufindex();
 	*len = snprintf(int2str_buf[buf], INT2STR_MAX_LEN - 1, "%0.*lf",
 	                FLOATING_POINT_PRECISION, d);
 	int2str_buf[buf][*len] = '\0';
@@ -1161,6 +1163,48 @@ static inline char* str_strstr(const str *stra, const str *strb)
 
 		for (i=1; i<strb->len; i++)
 			if (stra->s[len+i]!=strb->s[i]) {
+				len++;
+				break;
+			}
+
+		if (i != strb->len)
+			continue;
+
+		return stra->s+len;
+	}
+
+
+	return NULL;
+}
+
+/*
+ * search @strb in @stra ignoring case of both, return pointer to 1st occurrence
+ */
+static inline char* str_strcasestr(const str *stra, const str *strb)
+{
+	int i;
+	int len;
+
+	if (stra==NULL || strb==NULL || stra->s==NULL || strb->s==NULL
+			|| stra->len<=0 || strb->len<=0) {
+#ifdef EXTRA_DEBUG
+		LM_DBG("bad parameters\n");
+#endif
+		return NULL;
+	}
+
+	if (strb->len > stra->len)
+		return NULL;
+
+	len=0;
+	while (stra->len-len >= strb->len){
+		if (tolower(stra->s[len]) != tolower(strb->s[0])) {
+			len++;
+			continue;
+		}
+
+		for (i=1; i<strb->len; i++)
+			if (tolower(stra->s[len+i])!=tolower(strb->s[i])) {
 				len++;
 				break;
 			}

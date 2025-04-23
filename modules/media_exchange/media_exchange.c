@@ -31,6 +31,7 @@ struct rtp_relay_binds media_rtp;
 
 static str b2b_media_exchange_cap = str_init("media_exchange");
 
+static int mod_preinit(void);
 static int mod_init(void);
 static int media_fork_to_uri(struct sip_msg *msg, str *uri,
 		int leg, str *headers, int *medianum);
@@ -174,7 +175,7 @@ struct module_exports exports = {
 	0,								/* exported pseudo-variables */
 	0,								/* extra processes */
 	0,								/* extra transformations */
-	0,								/* module pre-initialization function */
+	mod_preinit,							/* module pre-initialization function */
 	mod_init,						/* module initialization function */
 	NULL,							/* response handling function */
 	NULL,							/* destroy function */
@@ -182,13 +183,8 @@ struct module_exports exports = {
 	0								/* reload confirm function */
 };
 
-/**
- * init module function
- */
-static int mod_init(void)
+static int mod_preinit(void)
 {
-	LM_DBG("initializing media_exchange module ...\n");
-
 	if (load_dlg_api(&media_dlg) != 0) {
 		LM_ERR("dialog module not loaded! Cannot use media bridging module\n");
 		return -1;
@@ -205,6 +201,24 @@ static int mod_init(void)
 		return -1;
 	}
 
+	if (load_rtp_relay(&media_rtp) != 0)
+		LM_DBG("rtp_relay module not loaded! Cannot use streaming module\n");
+
+	if (init_media_sessions() < 0) {
+		LM_ERR("could not initialize media sessions!\n");
+		return -1;
+	}
+
+	return 0;
+}
+
+/**
+ * init module function
+ */
+static int mod_init(void)
+{
+	LM_DBG("initializing media_exchange module ...\n");
+
 	if (media_b2b.register_cb(media_exchange_event_received,
 			B2BCB_RECV_EVENT, &b2b_media_exchange_cap) < 0) {
 		LM_ERR("could not register loaded callback!\n");
@@ -214,15 +228,6 @@ static int mod_init(void)
 	if (media_b2b.register_cb(media_exchange_event_trigger,
 			B2BCB_TRIGGER_EVENT, &b2b_media_exchange_cap) < 0) {
 		LM_ERR("could not register loaded callback!\n");
-		return -1;
-	}
-
-
-	if (load_rtp_relay(&media_rtp) != 0)
-		LM_DBG("rtp_relay module not loaded! Cannot use streaming module\n");
-
-	if (init_media_sessions() < 0) {
-		LM_ERR("could not initialize media sessions!\n");
 		return -1;
 	}
 
@@ -675,9 +680,10 @@ static int media_exchange_from_uri(struct sip_msg *msg, str *uri, int leg,
 	if (!body) {
 		if (media_rtp.get_ctx_dlg) {
 			ctx = media_rtp.get_ctx_dlg(dlg);
-			body = media_exchange_get_offer_sdp(ctx, dlg, leg, &release);
+			body = media_exchange_get_offer_sdp(ctx, dlg,
+					DLG_MEDIA_SESSION_LEG(dlg, leg), &release);
 		} else {
-			sbody = dlg_get_out_sdp(dlg, req_leg);
+			sbody = dlg_get_out_sdp(dlg, DLG_MEDIA_SESSION_LEG(dlg, other_leg(dlg, leg)));
 			body = &sbody;
 		}
 	}
@@ -710,14 +716,34 @@ static int media_exchange_from_uri(struct sip_msg *msg, str *uri, int leg,
 	return 1;
 }
 
+static void media_session_exchange_server_release(void *param)
+{
+	struct media_session_leg **mslp = (struct media_session_leg **)param;
+	if (!mslp) {
+		LM_BUG("media_session_leg should be here!\n");
+		return;
+	}
+	if (*mslp) {
+		MSL_UNREF((*mslp));
+		*mslp = NULL;
+	}
+	shm_free(mslp);
+}
+
+/* used just to indicate whether the session has been handled or not */
 static int media_session_exchange_server_reply(struct sip_msg *msg, int status, void *param)
 {
-	struct media_session_leg *msl;
+	struct media_session_leg *msl, **mslp;
 	str reason, body, *pbody;
+	int ret = -1;
 
 	if (status < 200) /* don't mind about provisional */
 		return 0;
-	msl = (struct media_session_leg *)param;
+	mslp = (struct media_session_leg **)param;
+
+	if (*mslp == NULL)
+		return 0;
+	msl = *mslp;
 
 	/* final reply here - unref the session */
 	if (msg == FAKED_REPLY || status >= 300)
@@ -740,7 +766,7 @@ static int media_session_exchange_server_reply(struct sip_msg *msg, int status, 
 		/* we need to put the other party on hold */
 		pbody = media_session_get_hold_sdp(msl);
 		if (!pbody)
-			goto error;
+			return -1; /* we don't unref - a reply might get through */
 		/* XXX: should we care whether the other party is properly on hold? */
 		if (media_session_reinvite(msl,
 				MEDIA_SESSION_DLG_OTHER_LEG(msl), pbody) < 0)
@@ -749,23 +775,19 @@ static int media_session_exchange_server_reply(struct sip_msg *msg, int status, 
 	}
 
 	/* finished processing this reply */
-	MSL_UNREF(msl);
-	return 0;
+	ret = 0;
+	goto end;
 
 terminate:
 	/* the client declined the invite - propagate the code */
 	reason.s = error_text(status);
 	reason.len = strlen(reason.s);
 	media_session_rpl(msl, METHOD_INVITE, status, &reason, NULL);
-
 	MSL_UNREF(msl);
-	/* no need of this session leg - remote it */
-	media_session_leg_free(msl);
-	return -1;
-
-error:
+end:
+	*mslp = NULL;
 	MSL_UNREF(msl);
-	return -1;
+	return ret;
 }
 
 static int media_exchange_to_call(struct sip_msg *msg, str *callid, int leg, int *nohold)
@@ -774,7 +796,7 @@ static int media_exchange_to_call(struct sip_msg *msg, str *callid, int leg, int
 	str contact;
 	str *b2b_key;
 	struct dlg_cell *dlg;
-	struct media_session_leg *msl;
+	struct media_session_leg *msl, **mslp;
 	static str inv = str_init("INVITE");
 
 	if (leg == MEDIA_LEG_UNSPEC) {
@@ -823,10 +845,19 @@ static int media_exchange_to_call(struct sip_msg *msg, str *callid, int leg, int
 		goto destroy;
 	}
 	msl->b2b_entity = B2B_SERVER;
+
+	mslp = shm_malloc(sizeof *mslp);
+	if (!mslp) {
+		LM_ERR("oom for new mslp\n");
+		goto destroy;
+	}
+	*mslp = msl;
+
 	/* all good - send the invite to the client */
 	MSL_REF(msl);
-	if (media_dlg.send_indialog_request(dlg, &inv, MEDIA_SESSION_DLG_LEG(msl),
-			&body, &msg->content_type->body, NULL, media_session_exchange_server_reply, msl) < 0) {
+	if (media_dlg.send_indialog_request(dlg, &inv, MEDIA_SESSION_DLG_LEG(msl), &body,
+			&msg->content_type->body, NULL, media_session_exchange_server_reply, mslp,
+			media_session_exchange_server_release) < 0) {
 		LM_ERR("could not send indialog request for callid %.*s\n", callid->len, callid->s);
 		MSL_UNREF(msl);
 		goto destroy;
@@ -1240,7 +1271,7 @@ static void handle_media_session_negative(struct media_session_leg *msl)
 		body = &sbody;
 	if (media_dlg.send_indialog_request(msl->ms->dlg,
 			&inv, dlg_leg, body, &content_type_sdp, NULL,
-			media_session_exchange_negative_reply, msl) < 0) {
+			media_session_exchange_negative_reply, msl, NULL) < 0) {
 		LM_ERR("could not forward INVITE!\n");
 		media_send_fail(p->t, msl->ms->dlg, dlg_leg);
 		msl->params = NULL;
@@ -1256,11 +1287,11 @@ static int handle_media_session_reply_exchange(struct media_session_leg *msl,
 	str sbody;
 	struct dlg_cell *dlg;
 
-	if (msl->ms->rtp)
-		body = media_exchange_get_answer_sdp(msl->ms->rtp, body,
-				msl->leg, &release);
-
 	dlg = msl->ms->dlg;
+	if (msl->ms->rtp)
+		body = media_exchange_get_answer_sdp(msl->ms->rtp, dlg, body,
+				MEDIA_SESSION_DLG_LEG(msl), &release);
+
 	if (!p) {
 		/* here we were triggered outside of a request - simply reinvite the
 		 * other leg with the new body */
@@ -1434,6 +1465,11 @@ static int b2b_media_notify(struct sip_msg *msg, str *key, int type,
 				MEDIA_LEG_LOCK(msl);
 				initial_state = msl->state;
 				MEDIA_LEG_UNLOCK(msl);
+				if (msg == FAKED_REPLY) {
+					LM_ERR("could not stream media due to timeout (callid=%.*s)\n",
+							msl->ms->dlg->callid.len, msl->ms->dlg->callid.s);
+					goto terminate;
+				}
 				if (msg->REPLY_STATUS >= 300) {
 					LM_ERR("could not stream media due to negative reply %d (callid=%.*s)\n",
 							msg->REPLY_STATUS, msl->ms->dlg->callid.len, msl->ms->dlg->callid.s);
@@ -1616,7 +1652,8 @@ static mi_response_t *mi_media_exchange_from_call_to_uri(const mi_params_t *para
 	if (try_get_mi_string_param(params, "body", &body.s, &body.len) < 0) {
 		if (media_rtp.get_ctx_dlg) {
 			ctx = media_rtp.get_ctx_dlg(dlg);
-			pbody = media_exchange_get_offer_sdp(ctx, dlg, media_leg, &release);
+			pbody = media_exchange_get_offer_sdp(ctx, dlg,
+					DLG_MEDIA_SESSION_LEG(dlg, media_leg), &release);
 		} else {
 			body = dlg_get_out_sdp(dlg, DLG_MEDIA_SESSION_LEG(dlg, media_leg));
 			pbody = &body;
@@ -1629,12 +1666,12 @@ static mi_response_t *mi_media_exchange_from_call_to_uri(const mi_params_t *para
 			hdrs, nohold, ctx, NULL) < 0) {
 		media_dlg.dlg_unref(dlg, 1);
 		if (release)
-			pkg_free(&body.s);
+			pkg_free(pbody->s);
 		return init_mi_error(500, MI_SSTR("Could not start media session"));
 	}
 
 	if (release)
-		pkg_free(&body.s);
+		pkg_free(pbody->s);
 	/* all good now, unref the dialog as it is reffed by the ms */
 	media_dlg.dlg_unref(dlg, 1);
 	return init_mi_result_ok();

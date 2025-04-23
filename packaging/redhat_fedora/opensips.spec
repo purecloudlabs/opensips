@@ -21,11 +21,7 @@
 %global _with_cachedb_mongodb 1
 %endif
 
-%if 0%{?rhel} > 7 || 0%{?fedora} > 23
-%global _without_aaa_radius 1
-%endif
-
-%if 0%{?rhel} > 7
+%if 0%{?rhel} > 7 || 0%{?fedora} > 36
 %global _with_python3 1
 %endif
 
@@ -41,11 +37,11 @@
 %global _with_wolfssl 1
 %endif
 
-%global EXCLUDE_MODULES %{!?_with_auth_jwt:auth_jwt} %{!?_with_cachedb_cassandra:cachedb_cassandra} %{!?_with_cachedb_couchbase:cachedb_couchbase} %{!?_with_cachedb_mongodb:cachedb_mongodb} %{!?_with_cachedb_redis:cachedb_redis} %{!?_with_db_oracle:db_oracle} %{!?_with_osp:osp} %{!?_with_sngtc:sngtc} %{!?_with_aaa_diameter:aaa_diameter} %{?_without_aaa_radius:aaa_radius} %{?_without_db_perlvdb:db_perlvdb} %{?_without_snmpstats:snmpstats} %{!?_with_wolfssl:tls_wolfssl}
+%global EXCLUDE_MODULES %{!?_with_auth_jwt:auth_jwt} %{!?_with_cachedb_cassandra:cachedb_cassandra} %{!?_with_cachedb_couchbase:cachedb_couchbase} %{!?_with_cachedb_mongodb:cachedb_mongodb} %{!?_with_cachedb_redis:cachedb_redis} %{!?_with_db_oracle:db_oracle} %{!?_with_osp:osp} %{!?_with_sngtc:sngtc} %{!?_with_aaa_diameter:aaa_diameter} %{?_without_db_perlvdb:db_perlvdb} %{?_without_snmpstats:snmpstats} %{!?_with_wolfssl:tls_wolfssl}
 
 Summary:  Very fast and configurable SIP server
 Name:     opensips
-Version:  3.4.3
+Version:  3.4.11
 Release:  1%{?dist}
 License:  GPLv2+
 Group:    System Environment/Daemons
@@ -87,6 +83,9 @@ BuildRequires:  pcre-devel
 BuildRequires:  python3-devel
 %else
 BuildRequires:  python-devel
+%endif
+%if 0%{?fedora} > 38
+BuildRequires:  python3-setuptools
 %endif
 %if 0%{?fedora} > 16 || 0%{?rhel} > 6
 BuildRequires:  systemd-units
@@ -634,9 +633,7 @@ module to publish RabbitMQ messages to a RabbitMQ server.
 Summary:  Radius modules for OpenSIPS
 Group:    System Environment/Daemons
 Requires: %{name} = %{version}-%{release}
-%if 0%{!?_without_aaa_radius:1}
-BuildRequires:  radiusclient-ng-devel
-%endif
+BuildRequires:  radcli-devel
 
 %description  radius-modules
 OpenSIPS is a very fast and flexible SIP (RFC3261)
@@ -1015,9 +1012,7 @@ fi
 %attr(755,root,root) %{_initrddir}/opensips
 %endif
 
-%if 0%{!?_without_aaa_radius:1}
 %config(noreplace) %{_sysconfdir}/opensips/dictionary.opensips
-%endif
 %config(noreplace) %{_sysconfdir}/sysconfig/%{name}
 %attr(640,%{name},%{name}) %config(noreplace) %{_sysconfdir}/opensips/opensips.cfg
 %attr(640,%{name},%{name}) %config(noreplace) %{_sysconfdir}/opensips/scenario_callcenter.xml
@@ -1049,7 +1044,6 @@ fi
 %doc docdir/AUTHORS
 %doc docdir/NEWS
 %doc docdir/README
-%doc docdir/README-MODULES
 %doc COPYING
 
 %{_libdir}/opensips/modules/acc.so
@@ -1487,10 +1481,8 @@ fi
 %files radius-modules
 %{_libdir}/opensips/modules/peering.so
 %doc docdir/README.peering
-%if 0%{!?_without_aaa_radius:1}
 %{_libdir}/opensips/modules/aaa_radius.so
 %doc docdir/README.aaa_radius
-%endif
 
 %if 0%{?_with_cachedb_redis:1}
 %files redis-module
@@ -1587,6 +1579,36 @@ fi
 
 
 %changelog
+* Wed Feb 19 2025 Liviu Chircu <liviu@opensips.org> - 3.4.11-1
+- OpenSIPS minor stable release: 3.4.11-1
+
+* Wed Dec 18 2024 Liviu Chircu <liviu@opensips.org> - 3.4.10-1
+- OpenSIPS minor stable release: 3.4.10-1
+
+* Wed Oct 23 2024 Liviu Chircu <liviu@opensips.org> - 3.4.9-1
+- OpenSIPS minor stable release: 3.4.9-1
+
+* Wed Aug 21 2024 Liviu Chircu <liviu@opensips.org> - 3.4.8-1
+- OpenSIPS minor stable release: 3.4.8-1
+
+* Tue Aug 20 2024 Razvan Crainea <razvan@opensips.org> - 3.4.7-1
+- Add python-setuptools dependency
+
+* Mon Aug 19 2024 Razvan Crainea <razvan@opensips.org> - 3.4.7-1
+- Replace deprecated dependency for radius modules
+
+* Wed Jul 24 2024 Liviu Chircu <liviu@opensips.org> - 3.4.7-1
+- OpenSIPS minor stable release: 3.4.7-1
+
+* Wed Jun 19 2024 Liviu Chircu <liviu@opensips.org> - 3.4.6-1
+- OpenSIPS minor stable release: 3.4.6-1
+
+* Thu Apr 18 2024 Liviu Chircu <liviu@opensips.org> - 3.4.5-1
+- OpenSIPS minor stable release: 3.4.5-1
+
+* Wed Feb 21 2024 Liviu Chircu <liviu@opensips.org> - 3.4.4-1
+- OpenSIPS minor stable release: 3.4.4-1
+
 * Wed Dec 20 2023 Liviu Chircu <liviu@opensips.org> - 3.4.3-1
 - OpenSIPS minor stable release: 3.4.3-1
 

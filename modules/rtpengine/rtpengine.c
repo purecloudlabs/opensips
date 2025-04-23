@@ -298,13 +298,15 @@ static int rtpengine_api_delete(struct rtp_relay_session *sess, struct rtp_relay
 			str *flags, str *extra);
 static int rtpengine_api_copy_offer(struct rtp_relay_session *sess,
 		struct rtp_relay_server *server, void **_ctx, str *flags,
-		unsigned int copy_flags, unsigned int streams, str *body);
+		unsigned int copy_flags, unsigned int streams, str *body,
+		struct rtp_relay_streams *streams_map);
 static int rtpengine_api_copy_answer(struct rtp_relay_session *sess,
 		struct rtp_relay_server *server, void *_ctx, str *flags, str *body);
 static int rtpengine_api_copy_delete(struct rtp_relay_session *sess,
 		struct rtp_relay_server *server, void *_ctx, str *flags);
 static int rtpengine_api_copy_serialize(void *_ctx, bin_packet_t *packet);
 static int rtpengine_api_copy_deserialize(void **_ctx, bin_packet_t *packet);
+static void rtpengine_api_copy_release(void **_ctx);
 
 static int parse_flags(struct ng_flags_parse *, struct sip_msg *, enum rtpe_operation *, const char *);
 
@@ -1487,6 +1489,7 @@ static int mod_preinit(void)
 		.copy_delete = rtpengine_api_copy_delete,
 		.copy_serialize = rtpengine_api_copy_serialize,
 		.copy_deserialize = rtpengine_api_copy_deserialize,
+		.copy_release = rtpengine_api_copy_release,
 	};
 	if (!pv_parse_spec(&rtpengine_relay_pvar_str, &media_pvar))
 		return -1;
@@ -1501,12 +1504,13 @@ mod_init(void)
 	pv_spec_t avp_spec;
 	unsigned short avp_flags;
 	str s;
+	int count = count_child_processes();
 
 	rtpe_ctx_idx = context_register_ptr(CONTEXT_GLOBAL, rtpe_ctx_free);
 
 	rtpe_no = (unsigned int*)shm_malloc(sizeof(unsigned int));
 	list_version = (unsigned int*)shm_malloc(sizeof(unsigned int));
-	child_versions=(unsigned int*)shm_malloc((1/*non-SIP at head*/ + udp_workers_no + tcp_workers_no) * sizeof(unsigned int));
+	child_versions=(unsigned int*)shm_malloc(count * sizeof(unsigned int));
 	child_versions_no = (unsigned int*)shm_malloc(sizeof(unsigned int));
 	rtpe_versions = (struct rtpe_version_head **)shm_malloc(sizeof(struct rtpe_version_head *));
 
@@ -1517,7 +1521,7 @@ mod_init(void)
 
 	*rtpe_no = 0;
 	*list_version = 0;
-	*child_versions_no = 1/*non-SIP at head*/ + udp_workers_no + tcp_workers_no;
+	*child_versions_no = count;
 	*rtpe_versions = 0;
 	my_version = 0;
 
@@ -1851,7 +1855,10 @@ static int update_rtpengines(int force_test)
 		my_version = crt_version->version;
 	}
 
-	child_versions[myrank] = my_version;
+	if (myrank < *child_versions_no)
+		child_versions[myrank] = my_version;
+	else
+		LM_BUG("rank overflow %d vs %d\n", myrank, *child_versions_no);
 
 	/*
 		close all sockets if any versions required
@@ -2232,6 +2239,12 @@ static int parse_flags(struct ng_flags_parse *ng_flags, struct sip_msg *msg,
 					continue;
 				} else if (str_eq(&key, "directional")) {
 					ng_flags->directional = 1;
+					bitem = bencode_str(bencode_item_buffer(ng_flags->flags), &key);
+					if (!bitem) {
+						err = "no more memory for list value";
+						goto error;
+					}
+					BCHECK(bencode_list_add(ng_flags->flags, bitem));
 					continue;
 				}
 				break;
@@ -2431,7 +2444,8 @@ static struct rtpe_node *get_rtpe_node(str *node, struct rtpe_set *set)
 	for (rnode = set->rn_first; rnode; rnode = rnode->rn_next)
 		if (node->len == rnode->rn_url.len &&
 				!memcmp(node->s, rnode->rn_url.s, node->len)) {
-			return rnode;
+			rnode->rn_disabled = rtpe_test(rnode, rnode->rn_disabled, 0);
+			return (rnode->rn_disabled?NULL:rnode);
 		}
 	return NULL;
 }
@@ -2478,21 +2492,15 @@ static bencode_item_t *rtpe_function_call(bencode_buffer_t *bencbuf, struct sip_
 		if (ng_flags.to_tag.len)
 			to_tag_exist = 1;
 	}
+	if (!flags_exist)
+		ng_flags.flags = bencode_list(bencbuf);
 	if (op == OP_OFFER || op == OP_ANSWER) {
-		if (!flags_exist)
-			ng_flags.flags = bencode_list(bencbuf);
 		ng_flags.direction = bencode_list(bencbuf);
 		ng_flags.replace = bencode_list(bencbuf);
 		ng_flags.rtcp_mux = bencode_list(bencbuf);
 
 		bencode_dictionary_add_str(ng_flags.dict, "sdp", body_in);
-	} else if (!flags_exist &&
-		(op == OP_BLOCK_DTMF || op == OP_UNBLOCK_DTMF ||
-		 op == OP_BLOCK_MEDIA || op == OP_UNBLOCK_MEDIA ||
-		 op == OP_START_FORWARD || op == OP_STOP_FORWARD)) {
-			ng_flags.flags = bencode_list(bencbuf);
 	} else if (op == OP_SUBSCRIBE_ANSWER) {
-		ng_flags.flags = bencode_list(bencbuf);
 		bencode_dictionary_add_str(ng_flags.dict, "sdp", body_in);
 	}
 
@@ -2950,9 +2958,12 @@ send_rtpe_command(struct rtpe_node *node, bencode_item_t *dict, int *outlen)
 		v[0].iov_base = gencookie();
 		v[0].iov_len = strlen(v[0].iov_base);
 		for (i = 0; i < rtpengine_retr; i++) {
-			if (rtpe_socks[node->idx] == -1 && !rtpengine_connect_node(node)) {
-				LM_ERR("cannot reconnect RTP engine socket!\n");
-				goto badproxy;
+			if (rtpe_socks[node->idx] == -1) {
+				if (!rtpengine_connect_node(node)) {
+					LM_ERR("cannot reconnect RTP engine socket!\n");
+					goto badproxy;
+				}
+				fds[0].fd = rtpe_socks[node->idx];
 			}
 			do {
 				len = writev(rtpe_socks[node->idx], v, vcnt);
@@ -4401,11 +4412,64 @@ static str *rtpengine_new_subs(str *tag)
 	return to_tag;
 }
 
+static void rtpengine_copy_streams(bencode_item_t *streams, struct rtp_relay_streams *ret)
+{
+	bencode_item_t *item, *medias;
+	str tmp = STR_NULL;
+	struct dlg_cell *dlg;
+	int leg = RTP_RELAY_CALLER, medianum, label, s;
+	if (!ret || !streams)
+		return;
+	ret->count = 0;
+	dlg = dlgb.get_dlg();
+	if (!dlg)
+		LM_WARN("could not fetch dialog - legs might not match\n");
+	s = 0;
+	for (item = streams->child; item; item = item->sibling) {
+		if (dlg) {
+			tmp.s = bencode_dictionary_get_string(item, "tag", &tmp.len);
+			if (!tmp.s)
+				LM_WARN("could not retrieve tag - placing to %s\n",
+						(leg == RTP_RELAY_CALLER?"caller":"callee"));
+			else if (!str_match(&tmp, &dlg->legs[DLG_CALLER_LEG].tag))
+				leg = RTP_RELAY_CALLEE;
+			else
+				leg = RTP_RELAY_CALLER;
+		} else if (leg == RTP_RELAY_CALLER) {
+			/* first try caller, then callee */
+			leg = RTP_RELAY_CALLEE;
+		}
+		medias = bencode_dictionary_get_expect(item, "medias", BENCODE_LIST);
+		if (!medias)
+			continue;
+		for (medias = medias->child; medias; medias = medias->sibling) {
+			s = ret->count;
+			if (s == RTP_COPY_MAX_STREAMS) {
+				LM_WARN("maximum amount of streams %d reached!\n",
+						RTP_COPY_MAX_STREAMS);
+				return;
+			}
+			medianum = bencode_dictionary_get_integer(item, "index", 0);
+			tmp.s = bencode_dictionary_get_string(medias, "label", &tmp.len);
+			if (str2sint(&tmp, &label) < 0) {
+				LM_WARN("invalid label %.*s - not integer - skipping\n",
+						tmp.len, tmp.s);
+				continue;
+			}
+			ret->streams[s].leg = leg;
+			ret->streams[s].label = label;
+			ret->streams[s].medianum = medianum;
+			ret->count++;
+		}
+	}
+}
+
 static int rtpengine_api_copy_offer(struct rtp_relay_session *sess,
 		struct rtp_relay_server *server, void **_ctx, str *flags,
-		unsigned int copy_flags, unsigned int streams, str *ret_body)
+		unsigned int copy_flags, unsigned int streams, str *ret_body,
+		struct rtp_relay_streams *ret_streams)
 {
-	str tmp, *to_tag;
+	str tmp;
 	bencode_item_t *ret;
 	ret = rtpengine_api_copy_op(sess, OP_SUBSCRIBE_REQUEST,
 			server, *_ctx, flags, copy_flags, NULL);
@@ -4413,10 +4477,12 @@ static int rtpengine_api_copy_offer(struct rtp_relay_session *sess,
 		return -1;
 	if (!bencode_dictionary_get_str_dup(ret, "sdp", ret_body))
 		LM_ERR("failed to extract sdp body from proxy reply\n");
+	if (ret_streams)
+		rtpengine_copy_streams(bencode_dictionary_get(ret, "tag-medias"), ret_streams);
 	if (!bencode_dictionary_get_str(ret, "to-tag", &tmp))
 		LM_ERR("failed to extract to-tag from proxy reply\n");
-	to_tag = rtpengine_new_subs(&tmp);
-	*_ctx = to_tag;
+	else
+		*_ctx = rtpengine_new_subs(&tmp);
 	bencode_buffer_free(bencode_item_buffer(ret));
 	return 0;
 }
@@ -4439,8 +4505,6 @@ static int rtpengine_api_copy_delete(struct rtp_relay_session *sess,
 	bencode_item_t *ret;
 	ret = rtpengine_api_copy_op(sess, OP_UNSUBSCRIBE,
 			server, subs, flags, 0, NULL);
-	if (subs)
-		shm_free(subs);
 	if (!ret)
 		return -1;
 	bencode_buffer_free(bencode_item_buffer(ret));
@@ -4467,6 +4531,14 @@ static int rtpengine_api_copy_deserialize(void **_ctx, bin_packet_t *packet)
 		return -1;
 	else
 		return 1;
+}
+
+static void rtpengine_api_copy_release(void **ctx)
+{
+	if (*ctx) {
+		shm_free(*ctx);
+		*ctx = NULL;
+	}
 }
 
 static inline void raise_rtpengine_status_event(struct rtpe_node *node)

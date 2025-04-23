@@ -94,7 +94,7 @@ static int srs_do_failover(struct src_sess *sess)
 		LM_BUG("failover without any destination!\n");
 		return -1;
 	}
-	srec_logic_destroy(sess);
+	srec_logic_destroy(sess, 1);
 
 	/* pop the first element */
 	node = list_entry(sess->srs.next, struct srs_node, list);
@@ -148,7 +148,7 @@ static void srec_dlg_end(struct dlg_cell *dlg, int type, struct dlg_cb_params *_
 		LM_ERR("Cannot end recording session for key %.*s\n",
 				req.b2b_key->len, req.b2b_key->s);
 	srec_rtp.copy_delete(ss->rtp, &mod_name, &ss->media);
-	srec_logic_destroy(ss);
+	srec_logic_destroy(ss, 0);
 }
 
 static void srec_dlg_sequential(struct dlg_cell *dlg, int type, struct dlg_cb_params *_params)
@@ -228,6 +228,30 @@ int srec_reply(struct src_sess *ss, int method, int code, str *body)
 	return srec_b2b.send_reply(&reply_data);
 }
 
+static int srec_get_body(struct src_sess *sess, str *body)
+{
+	unsigned int flags = RTP_COPY_MODE_SIPREC|RTP_COPY_LEG_BOTH;
+	struct rtp_relay_streams streams;
+	struct rtp_relay_stream *stream;
+	int s;
+
+	if (sess->flags & SIPREC_PAUSED)
+		flags |= RTP_COPY_MODE_DISABLE;
+
+	if (srec_rtp.copy_offer(sess->rtp, &mod_name,
+			&sess->media, flags, -1, body, &streams) < 0) {
+		LM_ERR("could not start recording!\n");
+		return -3;
+	}
+	for (s = 0; s < streams.count; s++) {
+		stream = &streams.streams[s];
+		srs_fill_sdp_stream(stream->label, stream->medianum,
+				NULL, sess, &sess->participants[stream->leg]);
+	}
+	return 0;
+}
+
+
 static int srec_b2b_req(struct sip_msg *msg, struct src_sess *ss)
 {
 	str body = str_init("");
@@ -244,8 +268,7 @@ static int srec_b2b_req(struct sip_msg *msg, struct src_sess *ss)
 			code = 488;
 			goto reply;
 		}
-		if (srec_rtp.copy_offer(ss->rtp, &mod_name, &ss->media,
-				RTP_COPY_MODE_SIPREC|RTP_COPY_LEG_BOTH, -1, &body) < 0) {
+		if (srec_get_body(ss, &body) < 0) {
 			LM_ERR("could not refresh recording!\n");
 			goto reply;
 		}
@@ -329,26 +352,14 @@ static int srec_b2b_notify(struct sip_msg *msg, str *key, int type,
 	}
 	ss->flags |= SIPREC_ONGOING;
 
-	if (ss->flags & SIPREC_PAUSED) {
-		ss->flags &= ~SIPREC_PAUSED;
-		//srs_stop_media(ss);
-
-	} else {
-		if (srs_handle_media(msg, ss) < 0) {
-			LM_ERR("cannot handle SRS media!\n");
-			goto no_recording;
-		}
+	if (srs_handle_media(msg, ss) < 0) {
+		LM_ERR("cannot handle SRS media!\n");
+		goto no_recording;
 	}
 
-	if (!(ss->flags & SIPREC_DLG_CBS)) {
-		if (srec_register_callbacks(ss) < 0) {
-			LM_ERR("cannot register callback for terminating session\n");
-			goto no_recording;
-		}
-
-		/* no need to keep ref on the dialog, since we rely on it from now on */
-		srec_dlg.dlg_unref(ss->dlg, 1);
-		/* also, the b2b ref moves on the dialog - so we avoid a ref-unref */
+	if (!(ss->flags & SIPREC_DLG_CBS) && srec_register_callbacks(ss) < 0) {
+		LM_ERR("cannot register callback for terminating session\n");
+		goto no_recording;
 	}
 
 	return 0;
@@ -366,14 +377,12 @@ no_recording:
 					req.b2b_key->len, req.b2b_key->s);
 	}
 	srec_rtp.copy_delete(ss->rtp, &mod_name, &ss->media);
-	srec_logic_destroy(ss);
+	srec_logic_destroy(ss, 0);
 
 	if (!(ss->flags & SIPREC_DLG_CBS)) {
 		/* if the dialog has already been engaged, then we need to keep the
 		 * reference until the end of the dialog, where it will be cleaned up */
 		srec_dlg.dlg_ctx_put_ptr(ss->dlg, srec_dlg_idx, NULL);
-		srec_dlg.dlg_unref(ss->dlg, 1);
-		ss->dlg = NULL;
 		srec_hlog(ss, SREC_UNREF, "no recording");
 		SIPREC_UNREF(ss);
 	}
@@ -486,6 +495,8 @@ static int srs_send_invite(struct src_sess *sess)
 		return -1;
 	}
 
+	sess->flags |= SIPREC_STARTED;
+
 	/* store the key in the param */
 	sess->b2b_key.s = shm_malloc(client->len);
 	if (!sess->b2b_key.s) {
@@ -501,9 +512,8 @@ static int srs_send_invite(struct src_sess *sess)
 }
 
 /* starts the recording to the srs */
-int src_start_recording(struct sip_msg *msg, struct src_sess *sess)
+static int src_start_recording(struct sip_msg *msg, struct src_sess *sess)
 {
-	unsigned int flags = RTP_COPY_MODE_SIPREC|RTP_COPY_LEG_BOTH;
 	union sockaddr_union tmp;
 	int ret;
 	str sdp;
@@ -517,11 +527,11 @@ int src_start_recording(struct sip_msg *msg, struct src_sess *sess)
 		}
 	}
 
-	if (srec_rtp.copy_offer(sess->rtp, &mod_name,
-			&sess->media, flags, -1, &sdp) < 0) {
+	if (srec_get_body(sess, &sdp) < 0) {
 		LM_ERR("could not start recording!\n");
 		return -3;
 	}
+
 	if (shm_str_dup(&sess->initial_sdp, &sdp) < 0) {
 		pkg_free(sdp.s);
 		srec_rtp.copy_delete(sess->rtp, &mod_name, &sess->media);
@@ -538,8 +548,6 @@ int src_start_recording(struct sip_msg *msg, struct src_sess *sess)
 		srec_rtp.copy_delete(sess->rtp, &mod_name, &sess->media);
 		return ret;
 	}
-
-	sess->flags |= SIPREC_STARTED;
 
 	return 1;
 }
@@ -587,16 +595,11 @@ static void srs_send_update_invite(struct src_sess *sess, str *body)
 static int src_update_recording(struct sip_msg *msg, struct src_sess *sess)
 {
 	str body, sdp;
-	unsigned int flags = RTP_COPY_MODE_SIPREC|RTP_COPY_LEG_BOTH;
 
 	if (msg == FAKED_REPLY)
 		return 0;
 
-	if (sess->flags & SIPREC_PAUSED)
-		flags |= RTP_COPY_MODE_DISABLE;
-
-	if (srec_rtp.copy_offer(sess->rtp, &mod_name,
-			&sess->media, flags, -1, &sdp) < 0) {
+	if (srec_get_body(sess, &sdp) < 0) {
 		LM_ERR("could not refresh recording!\n");
 		goto error;
 	}
@@ -635,14 +638,11 @@ void tm_start_recording(struct cell *t, int type, struct tmcb_params *ps)
 	if (!is_invite(t))
 		return;
 	ss = (struct src_sess *)*ps->param;
-	if (ps->code >= 300) {
-		/* unref so we can release the dialog */
-		srec_dlg.dlg_unref(ss->dlg, 1);
+	if (ps->code >= 300)
 		return;
-	}
 
-	/* engage only on successful calls */
 	SIPREC_LOCK(ss);
+	/* engage only on successful calls */
 	/* if session has been started, do not start it again */
 	if (ss->flags & SIPREC_STARTED)
 		LM_DBG("Session %p (%s) already started!\n", ss, ss->uuid);
@@ -651,12 +651,12 @@ void tm_start_recording(struct cell *t, int type, struct tmcb_params *ps)
 	SIPREC_UNLOCK(ss);
 }
 
-void srec_logic_destroy(struct src_sess *sess)
+void srec_logic_destroy(struct src_sess *sess, int keep_sdp)
 {
 	if (!sess->b2b_key.s)
 		return;
 
-	if (sess->initial_sdp.s) {
+	if (!keep_sdp && sess->initial_sdp.s) {
 		shm_free(sess->initial_sdp.s);
 		sess->initial_sdp.s = NULL;
 	}

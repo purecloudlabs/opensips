@@ -904,9 +904,10 @@ int _b2b_handle_reply(struct sip_msg *msg, b2bl_tuple_t *tuple,
 		/* Reply from new bridge entity */
 		if(statuscode >= 200 &&
 			entity == (tuple->bridge_entities[2]?tuple->bridge_entities[2]:tuple->bridge_entities[1]) &&
-			tuple->bridge_flags & B2BL_BR_FLAG_NOTIFY && tuple->bridge_initiator != 0)
+			tuple->bridge_initiator != 0)
 		{
-			send_bridge_notify(tuple->bridge_initiator, cur_route_ctx.hash_index, msg);
+			if (tuple->bridge_flags & B2BL_BR_FLAG_NOTIFY)
+				send_bridge_notify(tuple->bridge_initiator, cur_route_ctx.hash_index, msg);
 			if(statuscode == 200 || !(tuple->bridge_flags & B2BL_BR_FLAG_RETURN_AFTER_FAILURE))
 			{
 				if (!(tuple->bridge_flags & B2BL_BR_FLAG_DONT_DELETE_BRIDGE_INITIATOR)) {
@@ -1591,6 +1592,17 @@ int b2b_logic_notify_request(int src, struct sip_msg* msg, str* key, str* body, 
 
 			goto done;
 		}
+		if (entity->disconnected) {
+			/* if already disconnected, this is probably a cross BYE
+			 * that we no longer need to process, so we simply reply it */
+			memset(&rpl_data, 0, sizeof(b2b_rpl_data_t));
+			PREP_RPL_DATA(entity);
+			rpl_data.method =METHOD_BYE;
+			rpl_data.code =200;
+			rpl_data.text =&ok;
+			b2b_api.send_reply(&rpl_data);
+			goto done;
+		}
 
 		entity->disconnected = 1;
 		if(cbf && (tuple->cb.mask&B2B_BYE_CB))
@@ -2190,9 +2202,7 @@ int b2b_logic_notify(int src, struct sip_msg* msg, str* key, int type, str* b2bl
 	{
 		if(msg->first_line.u.request.method_value==METHOD_REFER &&
 			parse_refer_to_header(msg)==0 && msg->refer_to!=NULL &&
-			get_refer_to(msg)!=NULL && parse_uri(get_refer_to(msg)->uri.s,
-							get_refer_to(msg)->uri.len,
-							&(get_refer_to(msg)->parsed_uri))==0)
+			parse_to_body_uri( get_refer_to(msg) )==0 )
 		{
 			/* We have a Refer-To header */
 			if(get_refer_to(msg)->parsed_uri.headers.s &&

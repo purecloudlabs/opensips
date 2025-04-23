@@ -128,6 +128,9 @@ enum request_method {
                                       * one, not received */
 #define FL_HAS_ROUTE_LUMP    (1<<22) /* the message had Route headers added
                                       * as lumps */
+#define FL_USE_SIPTRACE_B2B  (1<<23) /* used by tracer to check if the b2b
+                                      * tracing was enabled */
+#define FL_ACK_WITH_BODY     (1<<24) /* ACK message has SDP body */
 
 /* define the # of unknown URI parameters to parse */
 #define URI_MAX_U_PARAMS 10
@@ -206,6 +209,9 @@ struct sip_uri {
 	str pn_prid_val;
 	str pn_param_val;
 	str pn_purr_val;
+	/* XXX - in the future when adding params as special links
+	 * in the list above, make sure to also update compare_uris() function
+	 * to explicitly compare these here */
 
 	/* unknown params */
 	str u_name[URI_MAX_U_PARAMS]; /* Unknown param names */
@@ -357,11 +363,18 @@ struct sip_msg {
 
 extern int via_cnt;
 
-int parse_msg(char* buf, unsigned int len, struct sip_msg* msg);
+#define parse_msg( _buf, _len, _msg) \
+	parse_msg_opt( _buf, _len, _msg, 1)
+
+int parse_msg_opt(char* buf, unsigned int len, struct sip_msg* msg,
+		int free_on_err);
 
 int parse_headers(struct sip_msg* msg, hdr_flags_t flags, int next);
 
 char* get_hdr_field(char* buf, char* end, struct hdr_field* hdr);
+
+/* add DEL lumps for all headers matching the given @hdr */
+int delete_headers(struct sip_msg *msg, struct hdr_field *hdr);
 
 void free_sip_msg(struct sip_msg* msg);
 
