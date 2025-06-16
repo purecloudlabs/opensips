@@ -1370,7 +1370,7 @@ static inline void log_expiry(int time_diff,int expire,
 				tcp_timeout_con_get;
 		} else
 			LM_WARN("threshold exceeded : %s took too long - %d us."
-					"Source : %.*s\n",func_info,time_diff,dbg_len,redact_pii(extra_dbg));
+					"Source : %.*s\n",func_info,time_diff,dbg_len,(strncmp(func_info, "msg", 3) == 0 ? extra_dbg : redact_pii(extra_dbg)));
 
 		if (memcmp(func_info,"msg",3) == 0) {
 			for (i=0;i<LONGEST_ACTION_SIZE;i++) {
