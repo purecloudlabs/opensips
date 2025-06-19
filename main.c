@@ -943,6 +943,11 @@ try_again:
 		goto error;
 	}
 
+	if (init_async_trace_prefix() != 0) {
+		LM_ERR("failed to init async log prefix\n");
+		goto error;
+	}
+
 	if (init_log_event_cons() < 0) {
 		LM_ERR("Failed to initialize log event consumer\n");
 		goto error;

@@ -349,7 +349,6 @@ inline static int io_watch_add(	io_wait_h* h, // lgtm [cpp/use-of-goto]
 								unsigned int timeout,
 								int flags)
 {
-
 	/* helper macros */
 #define fd_array_setup \
 	do{ \

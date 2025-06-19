@@ -32,9 +32,20 @@
 #include "sr_module.h"
 
 int async_status = ASYNC_NO_IO;
+int async_logger = -1;
+str async_logger_prefix = str_init("async");
 
 extern int return_code; /* from action.c, return code */
 
+int register_async_logger(void) {
+	async_logger = register_trace_logger(&async_logger_prefix);
+
+	return async_logger;
+}
+
+int log_async_trace(str* trace) {
+	append_trace_log(trace, async_logger);
+}
 
 /* start/resume functions used for script async ops */
 async_script_start_function  *async_script_start_f  = NULL;
@@ -49,8 +60,6 @@ typedef struct _async_launch_ctx {
 	struct script_route_ref *report_route;
 	str report_route_param;
 } async_launch_ctx;
-
-
 
 /************* Functions related to ASYNC via script functions ***************/
 
@@ -84,6 +93,7 @@ int register_async_fd(int fd, async_resume_fd *f, void *resume_param)
 
 	ctx->resume_f = f;
 	ctx->resume_param = resume_param;
+	ctx->trace_id = STR_EMPTY;
 
 	/* place the FD + resume function (as param) into reactor */
 	if (reactor_add_reader( fd, F_FD_ASYNC, RCT_PRIO_ASYNC, (void*)ctx)<0 ) {
@@ -102,6 +112,8 @@ int async_fd_resume(int fd, void *param)
 	int ret;
 
 	async_status = ASYNC_DONE; /* assume default status as done */
+
+	log_async_trace(&ctx->trace_id);
 
 	/* call the resume function in order to read and handle data */
 	ret = ((async_resume_fd*)ctx->resume_f)( fd, ctx->resume_param );
@@ -129,7 +141,7 @@ int async_fd_resume(int fd, void *param)
 			LM_ERR("failed to add async FD to reactor -> act in sync mode\n");
 			do {
 				async_status = ASYNC_DONE;
-				ret = ((async_resume_fd*)ctx->resume_f)(fd,ctx->resume_param);
+				ret = ((async_resume_fd*)ctx->resume_f)(fd, ctx->resume_param);
 				if (async_status == ASYNC_CHANGE_FD)
 					fd=ret;
 			} while(async_status==ASYNC_CONTINUE||async_status==ASYNC_CHANGE_FD);
@@ -177,6 +189,8 @@ int async_launch_resume(int fd, void *param)
 	struct sip_msg *req;
 	async_launch_ctx *ctx = (async_launch_ctx *)param;
 	int bk_rt;
+
+	log_async_trace(&ctx->async.trace_id);
 
 	LM_DBG("resume for a launch job\n");
 
@@ -265,6 +279,8 @@ run_route:
 	/* no need for the context anymore */
 	if (ctx->report_route)
 		shm_free(ctx->report_route);
+	if (ctx->async.trace_id.s != NULL)
+		shm_free(ctx->async.trace_id.s);
 	shm_free(ctx);
 	LM_DBG("done with a launch job\n");
 
@@ -275,7 +291,6 @@ restore:
 	return 0;
 }
 
-
 int async_script_launch(struct sip_msg *msg, struct action* a,
 								struct script_route_ref *report_route,
 								str *report_route_param, void **params)
@@ -283,6 +298,7 @@ int async_script_launch(struct sip_msg *msg, struct action* a,
 	struct sip_msg *req;
 	struct usr_avp *report_avps = NULL, **bak_avps = NULL;
 	async_launch_ctx *ctx;
+	const acmd_export_t *acmd_export;
 	int fd = -1;
 	int bk_rt;
 
@@ -302,9 +318,13 @@ int async_script_launch(struct sip_msg *msg, struct action* a,
 
 	memset(ctx,0,sizeof(async_launch_ctx));
 
-	async_status = ASYNC_NO_IO; /*assume defauly status "no IO done" */
+	acmd_export = a->elem[0].u.data_const;
 
-	return_code = ((const acmd_export_t*)(a->elem[0].u.data_const))->function(msg,
+	if (acmd_export->trace_id_func)
+		acmd_export->trace_id_func((async_ctx*)ctx);
+
+	async_status = ASYNC_NO_IO; /*assume defauly status "no IO done" */
+	return_code = acmd_export->function(msg,
 			(async_ctx*)ctx,
 			params[0], params[1], params[2],
 			params[3], params[4], params[5],
@@ -382,6 +402,8 @@ sync:
 report:
 	if (ctx->report_route)
 		shm_free(ctx->report_route);
+	if (ctx->async.trace_id.s != NULL)
+		shm_free(ctx->async.trace_id.s);
 	shm_free(ctx);
 	if (report_route==NULL)
 		return 1;

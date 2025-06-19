@@ -43,6 +43,7 @@ typedef  int (*cmd_function)(struct sip_msg*, void*, void*, void*, void*,
 			void*, void*, void *, void *);
 typedef  int (*acmd_function)(struct sip_msg*, async_ctx *ctx,
 			void*, void*, void*, void*, void*, void*, void *, void *);
+typedef int (*acmd_trace_id)(async_ctx *ctx);
 typedef  int (*fixup_function)(void** param);
 typedef  int (*free_fixup_function)(void** param);
 
@@ -69,6 +70,7 @@ struct acmd_export_ {
 	acmd_function function;     /* pointer to the corresponding function */
 	struct cmd_param
 		params[MAX_CMD_PARAMS+1]; /* array of parameters */
+	acmd_trace_id trace_id_func;
 };
 
 typedef struct cmd_export_  cmd_export_t;

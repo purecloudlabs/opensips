@@ -41,6 +41,8 @@ extern long connection_timeout_ms;
 extern int max_async_transfers;
 extern long curl_timeout;
 
+extern char *correlation_id_hdr;
+
 extern char *ssl_capath;
 extern int ssl_verifypeer;
 extern int ssl_verifyhost;
@@ -134,7 +136,7 @@ void rcl_release_url(char *url_host, int update_conn_ts);
 int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
                          char *url, str *req_body, str *req_ctype,
                          rest_async_param *async_parm, str *body, str *ctype,
-						 enum async_ret_code *out_fd);
+						 str *correlation_id, enum async_ret_code *out_fd);
 
 enum async_ret_code resume_async_http_req(int fd, struct sip_msg *msg, void *_param);
 enum async_ret_code time_out_async_http_req(int fd, struct sip_msg *msg, void *_param);

@@ -115,10 +115,10 @@ static const acmd_export_t acmds[] = {
 	{"cgrates_auth", (acmd_function)w_acgr_auth, {
 		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0},
 		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0},
-		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0}, {0,0,0}}},
+		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0}, {0,0,0}}, 0},
 	{"cgrates_cmd", (acmd_function)w_acgr_cmd, {
 		{CMD_PARAM_STR, 0, 0},
-		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0}, {0,0,0}}},
+		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0}, {0,0,0}}, 0},
 	{0,0,{{0,0,0}}}
 };
 

@@ -149,7 +149,7 @@ static const cmd_export_t cmds[] = {
 
 static const acmd_export_t acmds[] = {
 	pn_async_cmds,
-	{0,0,{{0,0,0}}}
+	{0,0,{{0,0,0}}, 0}
 };
 
 static const param_export_t mod_params[] = {

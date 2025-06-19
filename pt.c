@@ -269,6 +269,7 @@ static __attribute__((__noreturn__)) void child_startup_failed(void)
 static int internal_fork_child_setup(const struct internal_fork_params *ifpp)
 {
 	init_log_level();
+	init_async_trace_prefix();
 
 	tcp_connect_proc_to_tcp_main(process_no, 1);
 

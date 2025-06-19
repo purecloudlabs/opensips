@@ -68,8 +68,8 @@ static const acmd_export_t acmds[] = {
 		{CMD_PARAM_STR|CMD_PARAM_OPT,0,0},
 		{CMD_PARAM_VAR|CMD_PARAM_OPT, fixup_check_var_setf, 0},
 		{CMD_PARAM_VAR|CMD_PARAM_OPT, fixup_check_var_setf, 0},
-		{CMD_PARAM_VAR|CMD_PARAM_OPT, fixup_check_avp, 0}, {0,0,0}}},
-	{0,0,{{0,0,0}}}
+		{CMD_PARAM_VAR|CMD_PARAM_OPT, fixup_check_avp, 0}, {0,0,0}}, 0},
+	{0,0,{{0,0,0}}, 0}
 };
 
 static const cmd_export_t cmds[] = {

@@ -760,6 +760,8 @@ inline static int handle_io(struct fd_map* fm, int idx,int event_type)
 
 	pre_run_handle_script_reload(fm->app_flags);
 
+	clear_all_loggers();
+
 	switch(fm->type){
 		case F_TIMER_JOB:
 			handle_timer_job();
@@ -793,6 +795,7 @@ inline static int handle_io(struct fd_map* fm, int idx,int event_type)
 	post_run_handle_script_reload();
 
 	pt_become_idle();
+	clear_all_loggers();
 	return n;
 }
 

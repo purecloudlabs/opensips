@@ -104,11 +104,11 @@ static const acmd_export_t acmds[] = {
 #ifdef RADIUS_ASYNC_SUPPORT
 	{"radius_send_auth", (acmd_function) send_auth_func_async, {
 		{CMD_PARAM_STR, radius_hdl_fixup, 0},
-		{CMD_PARAM_STR,0,0}, {0,0,0}}},
+		{CMD_PARAM_STR,0,0}, {0,0,0}}, 0},
 	{"radius_send_acct", (acmd_function) send_acct_func_async, {
-		{CMD_PARAM_STR, radius_hdl_fixup, 0}, {0,0,0}}},
+		{CMD_PARAM_STR, radius_hdl_fixup, 0}, {0,0,0}}, 0},
 #endif
-	{0,0,{{0,0,0}}}
+	{0,0,{{0,0,0}}, 0}
 };
 
 static const cmd_export_t cmds[]= {

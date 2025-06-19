@@ -199,6 +199,8 @@ inline static int handle_io(struct fd_map* fm, int idx,int event_type)
 
 	pre_run_handle_script_reload(fm->app_flags);
 
+	clear_all_loggers();
+
 	switch(fm->type){
 		case F_TIMER_JOB:
 			handle_timer_job();
@@ -384,14 +386,17 @@ again:
 	post_run_handle_script_reload();
 
 	pt_become_idle();
+	clear_all_loggers();
 	return ret;
 con_error:
 	con->state=S_CONN_BAD;
 	tcpconn_release_error(con, 0, "Internal error");
 	pt_become_idle();
+	clear_all_loggers();
 	return ret;
 error:
 	pt_become_idle();
+	clear_all_loggers();
 	return -1;
 }
 

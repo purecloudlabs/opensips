@@ -140,6 +140,8 @@ struct sip_msg* tm_pv_context_reply(struct sip_msg* msg);
 int fr_timeout;
 int fr_inv_timeout;
 
+int tm_logger = -1;
+
 #define TM_CANCEL_BRANCH_ALL    (1<<0)
 #define TM_CANCEL_BRANCH_OTHERS (1<<1)
 
@@ -941,6 +943,13 @@ static int mod_init(void)
 	if (tm_init_cluster() < 0) {
 		LM_ERR("cannot initialize cluster support for transactions!\n");
 		LM_WARN("running without cluster support for transactions!\n");
+	}
+
+	str tm_name = str_init("branch");
+	tm_logger = register_trace_logger(&tm_name);
+
+	if (tm_logger < 0) {
+		LM_WARN("Did not register logger");
 	}
 
 	return 0;

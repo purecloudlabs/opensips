@@ -95,6 +95,8 @@ int t_resume_async(int fd, void *param, int was_timeout)
 		set_global_context(NULL);
 	}
 
+	log_async_trace(&ctx->async.trace_id);
+
 	/* prepare for resume route, by filling in a phony UAC structure to
 	 * trigger the inheritance of the branch specific values */
 	uac.br_flags = getb0flags( t->uas.request ) ;
@@ -197,6 +199,8 @@ route:
 	/* no need for the context anymore */
 	if (ctx->resume_route)
 		shm_free(ctx->resume_route);
+	if (ctx->async.trace_id.s != NULL)
+		shm_free(ctx->async.trace_id.s);
 	shm_free(ctx);
 
 	/* free also the processing ctx if still set
@@ -229,6 +233,7 @@ int t_handle_async(struct sip_msg *msg, struct action* a,
 										unsigned int timeout, void **params)
 {
 	async_tm_ctx *ctx = NULL;
+	const acmd_export_t *acmd_export;
 	struct cell *t;
 	int r;
 	int fd = 0;
@@ -271,8 +276,13 @@ int t_handle_async(struct sip_msg *msg, struct action* a,
 
 	memset(ctx,0,sizeof(async_tm_ctx));
 
-	async_status = ASYNC_NO_IO; /*assume default status "no IO done" */
-	return_code = ((const acmd_export_t*)(a->elem[0].u.data_const))->function(msg,
+	acmd_export = a->elem[0].u.data_const;
+
+	if (acmd_export->trace_id_func)
+		acmd_export->trace_id_func((async_ctx*)ctx);
+
+	async_status = ASYNC_NO_IO; /*assume defauly status "no IO done" */
+	return_code = acmd_export->function(msg,
 			(async_ctx*)ctx,
 			params[0], params[1], params[2],
 			params[3], params[4], params[5],
@@ -388,6 +398,8 @@ sync:
 	/* get rid of the context, useless at this point further */
 	if (ctx->resume_route)
 		shm_free(ctx->resume_route);
+	if (ctx->async.trace_id.s != NULL)
+		shm_free(ctx->async.trace_id.s);
 	shm_free(ctx);
 	/* run the resume route in sync mode */
 	run_resume_route( resume_route, msg, (route_type!=REQUEST_ROUTE)?0:1);
@@ -403,6 +415,8 @@ resume:
 	if (ctx) {
 		if (ctx->resume_route)
 			shm_free(ctx->resume_route);
+		if (ctx->async.trace_id.s != NULL)
+				shm_free(ctx->async.trace_id.s);
 		shm_free(ctx);
 	}
 	/* run the resume route */

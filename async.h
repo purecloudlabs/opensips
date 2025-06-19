@@ -31,6 +31,8 @@
 #include "route_struct.h"
 #include "parser/msg_parser.h"
 
+int register_async_logger(void);
+int log_async_trace(str* trace);
 
 /* The possible values of the status of async operations (as reported by
  * module functions, at start and resume)
@@ -61,6 +63,8 @@ typedef struct _async_ctx {
 	/* the maximum allowed time for the async op to complete, hinted by the
 	 *   more complex async implementation (seconds).  Default: 0 (no limit) */
 	unsigned int timeout_s;
+	/* the string representation of the trace id for logging */
+	str trace_id;
 } async_ctx;
 
 

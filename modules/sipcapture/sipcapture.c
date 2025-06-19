@@ -527,12 +527,12 @@ static const acmd_export_t acmds[] = {
 		{CMD_PARAM_STR | CMD_PARAM_OPT, sip_capture_async_fix_table, 0},
 		{CMD_PARAM_STR | CMD_PARAM_OPT, 0, 0},
 		{CMD_PARAM_STR | CMD_PARAM_OPT, 0, 0},
-		{CMD_PARAM_STR | CMD_PARAM_OPT, 0, 0}, {0, 0, 0}}},
+		{CMD_PARAM_STR | CMD_PARAM_OPT, 0, 0}, {0, 0, 0}}, 0},
 	{"report_capture", (acmd_function)w_report_capture_async, {
 		{CMD_PARAM_STR, 0, 0},
 		{CMD_PARAM_STR | CMD_PARAM_OPT, sip_capture_fix_table, 0},
-		{CMD_PARAM_INT | CMD_PARAM_OPT, 0, 0}, {0, 0, 0}}},
-	{0, 0, {{0, 0, 0}}}
+		{CMD_PARAM_INT | CMD_PARAM_OPT, 0, 0}, {0, 0, 0}}, 0},
+	{0, 0, {{0, 0, 0}}, 0}
 };
 
 static proc_export_t procs[] = {

@@ -68,7 +68,7 @@
 #ifdef __SUNPRO_C
 	#define DP_PREFIX
 #else
-	#define DP_PREFIX  "%s [%d] "
+	#define DP_PREFIX  "%s [%d] %s"
 #endif
 
 #define DP_ALERT_STR    "ALERT"
@@ -143,6 +143,7 @@ extern str log_cee_hostname;
  * must be called once for each OpenSIPS process
  */
 int init_log_level(void);
+int init_async_trace_prefix(void);
 
 /* must be called once, before the "pt" process table is freed */
 void cleanup_log_level(void);
@@ -167,6 +168,12 @@ int get_log_consumer_level_filter(str *name, int *level_filter);
 
 int parse_log_format(str *format);
 int dp_my_pid(void);
+
+int register_trace_logger(str *trace_prefix);
+int deregister_all_loggers(void);
+void clear_all_loggers(void);
+void append_trace_log(str *trace, int registered_logger);
+char* get_trace_log(void);
 
 void stderr_dprint_tmp(char *format, ...);
 
@@ -447,7 +454,7 @@ static inline char *dp_log_level_str(int log_level)
 					_stderr_prefix LOG_PREFIX _fmt, \
 					"%s" _syslog_prefix LOG_PREFIX _fmt, \
 					_fmt, \
-					dp_time(), dp_my_pid(), log_prefix, __DP_FUNC, ## args) \
+					dp_time(), dp_my_pid(), get_trace_log(), log_prefix, __DP_FUNC, ## args) \
 
 		#define LM_GEN(_lev, fmt, args...) \
 			do { \

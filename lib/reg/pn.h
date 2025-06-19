@@ -84,7 +84,7 @@ extern char *_pn_providers;
 #define pn_async_cmds \
 	{"pn_process_purr",  (acmd_function)pn_async_process_purr, { \
 	    {CMD_PARAM_STR|CMD_PARAM_STATIC, domain_fixup, 0}, \
-	    {0,0,0}}}
+	    {0,0,0}}, 0}
 
 #define pn_modparams \
 	{"pn_enable",           INT_PARAM, &pn_enable}, \

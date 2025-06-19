@@ -92,8 +92,8 @@ static const acmd_export_t acmds[] = {
 	{"wait_for_event",  (acmd_function)wait_for_event, {
 		{CMD_PARAM_STR, fix_event_name, 0},
 		{CMD_PARAM_VAR, fixup_check_avp, 0},
-		{CMD_PARAM_INT, 0 ,0}, {0,0,0}}},
-	{0,0,{{0,0,0}}}
+		{CMD_PARAM_INT, 0 ,0}, {0,0,0}}, 0},
+	{0,0,{{0,0,0}}, 0}
 };
 
 static const dep_export_t deps = {

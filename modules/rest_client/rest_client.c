@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <curl/curl.h>
+#include <uuid/uuid.h>
 
 #include "../../async.h"
 #include "../../sr_module.h"
@@ -53,6 +54,8 @@ int max_async_transfers = 100;
 long curl_timeout = 20;
 char *ssl_capath;
 unsigned int max_transfer_size = 10240; /* KB (10MB) */
+char *correlation_id_hdr = 0;
+int enable_async_tracing;
 
 /*
  * curl_multi_perform() may indicate a "try again" response even
@@ -77,6 +80,9 @@ int rest_proto_id;
 trace_proto_t tprot;
 char* rest_id_s = "rest";
 
+/* uuid buffer */
+#define UUID_STR_BUFSIZE 37
+
 /*
  * Module initialization and cleanup
  */
@@ -84,6 +90,7 @@ static int mod_init(void);
 static int child_init(int rank);
 static void mod_destroy(void);
 static int cfg_validate(void);
+static int async_trace_id(async_ctx *ctx);
 
 /*
  * Function headers
@@ -124,22 +131,25 @@ static const acmd_export_t acmds[] = {
 		{CMD_PARAM_STR,0,0},
 		{CMD_PARAM_VAR,0,0},
 		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0},
-		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}}},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}},
+		(acmd_trace_id)async_trace_id},
 	{"rest_post",(acmd_function)w_async_rest_post, {
 		{CMD_PARAM_STR,0,0},
 		{CMD_PARAM_STR,0,0},
 		{CMD_PARAM_STR|CMD_PARAM_OPT,0,0},
 		{CMD_PARAM_VAR,0,0},
 		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0},
-		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}}},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}},
+		(acmd_trace_id)async_trace_id},
 	{"rest_put",(acmd_function)w_async_rest_put, {
 		{CMD_PARAM_STR,0,0},
 		{CMD_PARAM_STR,0,0},
 		{CMD_PARAM_STR|CMD_PARAM_OPT,0,0},
 		{CMD_PARAM_VAR,0,0},
 		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0},
-		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}}},
-	{0,0,{{0,0,0}}}
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}},
+		(acmd_trace_id)async_trace_id},
+	{0,0,{{0,0,0}}, 0}
 };
 
 /*
@@ -206,6 +216,8 @@ static const param_export_t params[] = {
 	{ "enable_expect_100",	INT_PARAM, &enable_expect_100	},
 	{ "no_concurrent_connects",	INT_PARAM, &no_concurrent_connects	},
 	{ "curl_conn_lifetime",	INT_PARAM, &curl_conn_lifetime	},
+	{ "correlation_id_hdr",	STR_PARAM, &correlation_id_hdr	},
+	{ "enable_async_tracing", INT_PARAM, &enable_async_tracing	},
 	{ 0, 0, 0 }
 };
 
@@ -233,7 +245,7 @@ struct module_exports exports = {
 	NULL,             /* response function*/
 	mod_destroy,      /* module destroy/cleanup function */
 	child_init,       /* per-child init function */
-	cfg_validate      /* reload confirm function */
+	cfg_validate,     /* reload confirm function */
 };
 
 static int mod_init(void)
@@ -617,7 +629,7 @@ int async_rest_method(enum rest_client_method method, struct sip_msg *msg,
 		return lrc;
 
 	rc = start_async_http_req(msg, method, url, body, ctype,
-			param, &param->body, ctype_pv ? &param->ctype : NULL, &read_fd);
+			param, &param->body, ctype_pv ? &param->ctype : NULL, &ctx->trace_id, &read_fd);
 
 	/* error occurred; no transfer done */
 	if (read_fd == ASYNC_NO_IO) {
@@ -756,7 +768,7 @@ static int w_async_rest_put(struct sip_msg *msg, async_ctx *ctx,
 		ctype = *_ctype;
 
 	LM_DBG("async rest put '%.*s' %p %p %p\n",
-		url->len, url->s, body_pv, ctype_pv, code_pv);
+			url->len, url->s, body_pv, ctype_pv, code_pv);
 
 	rc = async_rest_method(REST_CLIENT_PUT, msg, url_nt.s, body, &ctype, ctx,
 						body_pv, ctype_pv, code_pv);
@@ -773,4 +785,34 @@ static int w_rest_append_hf(struct sip_msg *msg, str *hfv)
 static int w_rest_init_client_tls(struct sip_msg *msg, str *tls_client_dom)
 {
 	return rest_init_client_tls(msg, tls_client_dom);
+}
+
+static int async_trace_id(async_ctx *ctx) {
+	uuid_t tmp_uuid;
+	char* uuid_str;
+
+	if (!enable_async_tracing) {
+		LM_DBG("async tracing not enabled");
+		return 0;
+	}
+
+	if ((uuid_str = (char*) shm_malloc(sizeof(char*) * UUID_STR_BUFSIZE)) == NULL) {
+		LM_ERR("failed to allocate new uuid_str\n");
+		return -1;
+	}
+
+	uuid_generate(tmp_uuid);
+	uuid_unparse(tmp_uuid, uuid_str);
+	
+	if (ctx->trace_id.s != NULL) {
+		shm_free(ctx->trace_id.s);
+		ctx->trace_id.len = 0;
+	}
+
+	init_str(&ctx->trace_id, uuid_str);
+
+	LM_INFO("Setting async trace id [%.*s]\n", ctx->trace_id.len, ctx->trace_id.s);
+	log_async_trace(&ctx->trace_id);
+
+	return 0;
 }

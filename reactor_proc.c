@@ -74,6 +74,8 @@ inline static int handle_io(struct fd_map* fm, int idx,int event_type)
 
 	pre_run_handle_script_reload(fm->app_flags);
 
+	clear_all_loggers();
+
 	switch(fm->type){
 		case F_GEN_PROC:
 			n = ((struct reactor_proc_cb*)fm->data)->func(
@@ -104,6 +106,7 @@ inline static int handle_io(struct fd_map* fm, int idx,int event_type)
 	post_run_handle_script_reload();
 
 	pt_become_idle();
+	clear_all_loggers();
 	return n;
 }
 

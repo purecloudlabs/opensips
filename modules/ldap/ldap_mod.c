@@ -90,8 +90,8 @@ static dictionary* config_vals = NULL;
 
 static const acmd_export_t acmds[] = {
 	{"ldap_search", (acmd_function)w_ldap_search_async, {
-		{CMD_PARAM_STR, 0, 0}, {0,0,0}}},
-	{0,0,{{0,0,0}}}
+		{CMD_PARAM_STR, 0, 0}, {0,0,0}}, 0},
+	{0,0,{{0,0,0}}, 0}
 };
 
 static const cmd_export_t cmds[] = {

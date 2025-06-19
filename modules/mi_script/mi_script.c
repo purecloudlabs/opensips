@@ -82,8 +82,8 @@ static const acmd_export_t mod_acmds[] = {
 		{CMD_PARAM_VAR|CMD_PARAM_OPT, 0, 0},
 		{CMD_PARAM_VAR|CMD_PARAM_OPT, fixup_check_avp, 0},
 		{CMD_PARAM_VAR|CMD_PARAM_OPT, fixup_check_avp, 0},
-		{0,0,0}}},
-	{0,0,{{0,0,0}}}
+		{0,0,0}}, 0},
+	{0,0,{{0,0,0}}, 0}
 };
 
 struct module_exports exports = {

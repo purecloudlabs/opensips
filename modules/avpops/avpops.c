@@ -133,8 +133,8 @@ static const acmd_export_t acmds[] = {
 	{"avp_db_query", (acmd_function)w_async_dbquery_avps, {
 		{CMD_PARAM_STR, 0, 0},
 		{CMD_PARAM_STR|CMD_PARAM_OPT|CMD_PARAM_NO_EXPAND, fixup_pvname_list, fixup_free_pvname_list},
-		{CMD_PARAM_INT|CMD_PARAM_OPT, fixup_db_id_async, fixup_free_pkg}, {0, 0, 0}}},
-	{0, 0, {{0, 0, 0}}}
+		{CMD_PARAM_INT|CMD_PARAM_OPT, fixup_db_id_async, fixup_free_pkg}, {0, 0, 0}}, 0},
+	{0, 0, {{0, 0, 0}}, 0}
 };
 
 /*! \brief

@@ -216,11 +216,11 @@ static const cmd_export_t cmds[]={
 static const acmd_export_t acmds[] = {
 #ifdef HAVE_TIMER_FD
 	{"sleep", (acmd_function)async_sleep, {
-		{CMD_PARAM_INT, 0, 0}, {0,0,0}}},
+		{CMD_PARAM_INT, 0, 0}, {0,0,0}}, 0},
 	{"usleep", (acmd_function)async_usleep, {
-		{CMD_PARAM_INT, 0, 0}, {0,0,0}}},
+		{CMD_PARAM_INT, 0, 0}, {0,0,0}}, 0},
 #endif
-	{0,0,{{0,0,0}}}
+	{0,0,{{0,0,0}}, 0}
 };
 
 

@@ -29,6 +29,8 @@
 #include "log_interface.h"
 #include "globals.h"
 #include "pt.h"
+#include "reactor_defs.h"
+#include "async.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -37,6 +39,91 @@
 #if !defined(HOST_NAME_MAX)
 #define HOST_NAME_MAX 255
 #endif
+
+#define TRACE_LOG_MAX_LEN 512
+#define TRACE_LOG_PREFIX_MAX_LEN 16
+
+/* used for logging tracing attributes */
+#define MAX_REGISTERED_TRACERS 32
+#define TRACE_LOG_BUF_MAX_LEN 2048
+#define TRACE_LOG_PREFIX_MAX_LEN 16
+#define TRACE_LOG_MAX_LEN TRACE_LOG_BUF_MAX_LEN / MAX_REGISTERED_TRACERS
+
+static char trace_log_buffer[TRACE_LOG_BUF_MAX_LEN];
+static char *trace_buffers[MAX_REGISTERED_TRACERS];
+static int trace_buffer_start_copy[MAX_REGISTERED_TRACERS];
+static int trace_buffer_lens[MAX_REGISTERED_TRACERS];
+static int trace_logger_start = 0;
+
+int register_trace_logger(str *trace_prefix) {
+    if (trace_logger_start >= MAX_REGISTERED_TRACERS) {
+        return -3;
+    } else if (trace_prefix) {
+		int prefix_len;
+		trace_buffers[trace_logger_start] = pkg_malloc(sizeof(char) * TRACE_LOG_MAX_LEN);
+
+		if (trace_buffers[trace_logger_start] == NULL) {
+			return -1;
+		}
+
+		prefix_len = trace_prefix->len > TRACE_LOG_PREFIX_MAX_LEN ? TRACE_LOG_PREFIX_MAX_LEN : trace_prefix->len;
+		memcpy(trace_buffers[trace_logger_start], trace_prefix->s, prefix_len);
+		trace_buffers[trace_logger_start][prefix_len] = ':';
+		trace_buffers[trace_logger_start][prefix_len+1] = '[';
+		trace_buffer_start_copy[trace_logger_start] = prefix_len + 2;
+
+		return trace_logger_start++;
+	} else {
+		return -2;
+	}
+}
+
+int deregister_all_loggers(void) {
+    for (int i = 0; i < trace_logger_start; i++) {
+        if (trace_buffers[i]) {
+            pkg_free(trace_buffers[i]);
+        }
+    }
+
+	return 0;
+}
+
+void clear_all_loggers(void) {
+    memset(trace_buffer_lens, 0, sizeof(trace_buffer_lens));
+}
+
+void append_trace_log(str *trace, int registered_logger) {
+	if (trace && registered_logger < MAX_REGISTERED_TRACERS && registered_logger > -1) {
+		int trace_buffer_start = trace_buffer_start_copy[registered_logger];
+		int copy_len = trace->len < TRACE_LOG_MAX_LEN - trace_buffer_start ? trace->len : TRACE_LOG_MAX_LEN - trace_buffer_start;
+		int buffer_len = trace_buffer_start + copy_len;
+
+		memcpy(trace_buffers[registered_logger] + trace_buffer_start, trace->s, copy_len);
+		trace_buffers[registered_logger][buffer_len++] = ']';
+        trace_buffer_lens[registered_logger] = buffer_len;
+	}
+}
+
+void append_trace_log_char(char *trace, int registered_logger) {
+	str dest;
+	init_str(&dest, trace);
+	append_trace_log(&dest, registered_logger);
+}
+
+char* get_trace_log(void) {
+    int buffer_idx = 0;
+    for (int i = 0; i < trace_logger_start; i++) {
+        if (trace_buffers[i] && trace_buffer_lens[i] > 0) {
+            memcpy(trace_log_buffer + buffer_idx, trace_buffers[i], trace_buffer_lens[i]);
+            buffer_idx += trace_buffer_lens[i];
+            trace_log_buffer[buffer_idx++] = ' ';
+        }
+    }
+    
+    trace_log_buffer[buffer_idx] = '\0';
+    
+    return trace_log_buffer;
+}
 
 /* used internally by the log interface */
 typedef void (*log_print_pre_fmt_f)(log_print_f gen_print_func, int log_level,
@@ -928,6 +1015,11 @@ int init_log_level(void)
 	*log_level = *log_level_global;
 	*default_log_level = *log_level_global;
 
+	return 0;
+}
+
+int init_async_trace_prefix(void) {
+	register_async_logger();
 	return 0;
 }
 

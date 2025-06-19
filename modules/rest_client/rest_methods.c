@@ -44,6 +44,7 @@
 #define REST_CORRELATION_COOKIE "RESTCORR"
 
 static char print_buff[MAX_CONTENT_TYPE_LEN];
+static char correlation_header[MAX_HEADER_FIELD_LEN];
 
 /* additional HTTP headers for the next request */
 static struct curl_slist *header_list;
@@ -812,7 +813,7 @@ cleanup:
 int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
                          char *url, str *req_body, str *req_ctype,
                          rest_async_param *async_parm, str *body, str *ctype,
-						 enum async_ret_code *out_fd)
+						 str *correlation_id, enum async_ret_code *out_fd)
 {
 	CURL *handle;
 	CURLcode rc;
@@ -856,6 +857,11 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 
 	default:
 		LM_ERR("unsupported method: %d, defaulting to GET\n", method);
+	}
+
+	if (correlation_id_hdr != NULL && correlation_id->s != NULL) {
+		snprintf(correlation_header, MAX_HEADER_FIELD_LEN, "%s: %.*s", correlation_id_hdr, correlation_id->len, correlation_id->s);
+		header_list = curl_slist_append(header_list, correlation_header);
 	}
 
 	w_curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, write_func);
