@@ -141,7 +141,7 @@ static int setup_mcast_rcvr(int sock, union sockaddr_union* addr)
 int udp_init_listener(struct socket_info *si, int status_flags)
 {
 	union sockaddr_union* addr;
-	int optval;
+	int optval, buf_send_size;
 #ifdef USE_MCAST
 	unsigned char m_optval;
 #endif
@@ -170,6 +170,12 @@ int udp_init_listener(struct socket_info *si, int status_flags)
 				errno, strerror(errno));
 			goto error;
 		}
+	}
+
+	buf_send_size = 12582912;
+	if (setsockopt(si->socket, SOL_SOCKET, SO_SNDBUF, &buf_send_size, sizeof(buf_send_size)) ==-1){
+		LM_ERR("setsockopt: %s\n", strerror(errno));
+		goto error;
 	}
 
 	/* set sock opts? */
