@@ -1425,11 +1425,18 @@ static void dlg_onreq_out(struct cell* t, int type, struct tmcb_params *ps)
 	dlg_lock_dlg(dlg);
 
 	callee_leg = d_tmb.get_branch_index() + 1;
+	LM_DBG("pushing new leg %d/%d\n",
+				callee_leg, dlg->legs_no[DLG_LEGS_USED]);
 	if (ensure_leg_array(callee_leg + 1, dlg) != 0)
 		goto out_free;
 
 	/* store the caller SDP into each callee leg, useful for Re-INVITE pings */
 	leg = &dlg->legs[callee_leg];
+	if (callee_leg >= dlg->legs_no[DLG_LEGS_USED])
+		dlg->legs_no[DLG_LEGS_USED] = callee_leg + 1;
+	else
+		LM_BUG("wrongfully increasing callee_leg %d/%d\n",
+				callee_leg, dlg->legs_no[DLG_LEGS_USED]);
 
 	dlg_unlock_dlg(dlg);
 
@@ -1453,8 +1460,6 @@ static void dlg_onreq_out(struct cell* t, int type, struct tmcb_params *ps)
 			}
 		}
 	}
-
-	dlg->legs_no[DLG_LEGS_USED]++;
 
 out_free:
 	dlg_unlock_dlg(dlg);
@@ -2250,6 +2255,8 @@ after_unlock5:
 					req->msg_flags |= FL_USE_UAC_CSEQ;
 				}
 
+				if (dialog_repl_cluster)
+					replicate_dialog_cseq_updated(dlg, dst_leg);
 				dlg_unlock( d_table, d_entry );
 
 				LM_DBG("nonACK req [%d],NULL,%d)\n",
@@ -2289,6 +2296,8 @@ after_unlock5:
 				else {
 					LM_DBG("update_val=[%d]\n", update_val);
 				}
+				if (dialog_repl_cluster)
+					replicate_dialog_cseq_updated(dlg, dst_leg);
 				dlg_unlock( d_table, d_entry );
 
 				if (update_val && update_msg_cseq(req,0,update_val) != 0) {

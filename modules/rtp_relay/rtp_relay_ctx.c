@@ -1633,9 +1633,9 @@ static void rtp_relay_fill_dlg(struct rtp_relay_ctx *ctx, str *dlg_callid,
 		LM_ERR("could not store dialog callid in context\n");
 	if (callid && !ctx->callid.len &&  shm_str_sync(&ctx->callid, callid) < 0)
 		LM_ERR("could not store callid in context\n");
-	if (from_tag && !ctx->from_tag.s && shm_str_sync(&ctx->from_tag, from_tag) < 0)
+	if (from_tag && from_tag->len && !ctx->from_tag.s && shm_str_sync(&ctx->from_tag, from_tag) < 0)
 		LM_ERR("could not store from tag in context\n");
-	if (to_tag && !ctx->to_tag.s && shm_str_sync(&ctx->to_tag, to_tag) < 0)
+	if (to_tag && to_tag->len && !ctx->to_tag.s && shm_str_sync(&ctx->to_tag, to_tag) < 0)
 		LM_ERR("could not store to tag in context\n");
 }
 
@@ -1659,9 +1659,12 @@ static int rtp_relay_dlg_callbacks(struct dlg_cell *dlg,
 {
 	if (rtp_relay_dlg_ctx_idx == -1)
 		return 0;
+
+	if (!to_tag && dlg->legs_no[DLG_LEG_200OK] != 0)
+		to_tag = &dlg->legs[callee_idx(dlg)].tag;
+
 	rtp_relay_fill_dlg(ctx, &dlg->callid, dlg->h_id, dlg->h_entry,
-			NULL, &dlg->legs[DLG_CALLER_LEG].tag,
-			(to_tag?to_tag:&dlg->legs[callee_idx(dlg)].tag));
+			NULL, &dlg->legs[DLG_CALLER_LEG].tag, to_tag);
 
 	if (rtp_relay_dlg.register_dlgcb(dlg, DLGCB_MI_CONTEXT,
 			rtp_relay_dlg_mi, NULL, NULL) < 0)
@@ -1814,6 +1817,18 @@ static int rtp_relay_ctx_leg_reply(struct rtp_relay_ctx *ctx, struct sip_msg *ms
 		}
 	}
 	info.branch = sess->index;
+	if (msg->REPLY_STATUS >= 200 && msg->REPLY_STATUS < 300 && !ctx->to_tag.s) {
+		if (!msg->to && ((parse_headers(msg, HDR_TO_F, 0) == -1) || (!msg->to))) {
+			LM_ERR("To header field missing\n");
+			return -1;
+		}
+		if (get_to(msg)->tag_value.len &&
+				shm_str_sync(&ctx->to_tag, &get_to(msg)->tag_value) < 0) {
+			LM_ERR("could not store tag value\n");
+			return -1;
+		}
+	}
+
 	if (rtp_sess_late(sess))
 		ret = rtp_relay_offer(&info, ctx, sess, type, NULL);
 	else
