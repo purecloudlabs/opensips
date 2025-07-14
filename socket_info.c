@@ -150,6 +150,10 @@ struct socket_info_full* new_sock_info(struct socket_id *sid, str *orig_name)
 	si->proto=sid->proto;
 	si->flags=sid->flags;
 
+	if (sid->mark) {
+		si->mark = sid->mark;
+	}
+
 	/* advertised socket information */
 	/* Make sure the adv_sock_string is initialized, because if there is
 	 * no adv_sock_name, no other code will initialize it!

@@ -2551,7 +2551,8 @@ static int tcpconn_prepare_write(struct tcp_connection *tcpconn)
 		fd = tcp_sync_connect_fd(&tcpconn->rcv.bind_address->su,
 				&tcpconn->rcv.src_su, tcpconn->type, &tcpconn->profile,
 				tcpconn->rcv.bind_address->flags,
-				tcpconn->rcv.bind_address->tos);
+				tcpconn->rcv.bind_address->tos,
+				tcpconn->rcv.bind_address->mark);
 		if (fd < 0)
 			return -1;
 
