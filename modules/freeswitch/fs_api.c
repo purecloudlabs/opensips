@@ -29,6 +29,7 @@
 #include "../../forward.h"
 #include "../../ut.h"
 #include "../../lib/url.h"
+#include "../../status_report.h"
 
 #include "fs_api.h"
 #include "fs_ipc.h"
@@ -152,6 +153,8 @@ void evs_free(fs_evs *sock)
 	lock_destroy_rw(sock->lists_lk);
 
 	memset(sock, 0, sizeof *sock);
+
+	sock->invalid = 1; /* safety check against dangling fds in reactor */
 	shm_free(sock);
 }
 
@@ -584,7 +587,7 @@ void put_evs(fs_evs *sock)
 	 * possible, since the main process brutally murders the FS connection
 	 * manager before it gets a chance to gracefully EOF its TCP connections.
 	 */
-	if (is_main)
+	if (sr_get_core_status() == STATE_TERMINATING)
 		return;
 
 	lock_start_write(sockets_lock);

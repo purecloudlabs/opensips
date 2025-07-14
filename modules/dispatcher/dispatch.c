@@ -368,6 +368,11 @@ int add_dest2list(int id, str uri, struct socket_info *sock, str *comsock, int s
 		}
 	}
 
+	if (!lock_init(&dp->wlock)) {
+		LM_ERR("failed to init lock\n");
+		goto err;
+	}
+
 	/*
 	 * search the proper place based on priority
 	 * put them in reverse order, since they will be reindexed
@@ -571,8 +576,15 @@ ds_pvar_param_p ds_get_pvar_param(int id, str uri)
 	int len = ds_pattern_prefix.len + ds_pattern_infix.len + ds_pattern_suffix.len 
 				+ uri.len + str_id.len;
 
-	char buf[len]; /* XXX: check if this works for all compilers */
+	char *buf;
 	ds_pvar_param_p param;
+
+	param = shm_malloc(sizeof *param + len);
+	if (!param) {
+		LM_ERR("no more shm memory\n");
+		return NULL;
+	}
+	buf = param->buf;
 
 	if (ds_pattern_one>DS_PATTERN_NONE) {
 		name.len = 0;
@@ -597,12 +609,6 @@ ds_pvar_param_p ds_get_pvar_param(int id, str uri)
 		}
 		memcpy(name.s + name.len, ds_pattern_suffix.s, ds_pattern_suffix.len);
 		name.len += ds_pattern_suffix.len;
-	}
-
-	param = shm_malloc(sizeof(ds_pvar_param_t));
-	if (!param) {
-		LM_ERR("no more shm memory\n");
-		return NULL;
 	}
 
 	if (!pv_parse_spec(ds_pattern_one>DS_PATTERN_NONE ? &name : &ds_pattern_prefix,
@@ -642,6 +648,8 @@ int ds_pvar_algo(struct sip_msg *msg, ds_set_p set, ds_dest_p **sorted_set,
 	}
 
 	for (i = 0, cnt = 0; i < set->nr - (ds_use_default?1:0); i++) {
+		int locked = 0;
+
 		if ( !dst_is_active(set->dlist[i]) ) {
 			/* move to the end of the list */
 			sset[end_idx--] = &set->dlist[i];
@@ -656,15 +664,38 @@ int ds_pvar_algo(struct sip_msg *msg, ds_set_p set, ds_dest_p **sorted_set,
 					   set->dlist[i].uri.len, set->dlist[i].uri.s);
 				continue;
 			}
-			set->dlist[i].param = (void *)param;
+
+			/* concurrent access -- avoid SHM leak */
+			lock_get(&set->dlist[i].wlock);
+			if (set->dlist[i].param) {
+				shm_free(param);
+				param = (ds_pvar_param_p)set->dlist[i].param;
+			} else {
+				set->dlist[i].param = (void *)param;
+			}
+			lock_release(&set->dlist[i].wlock);
 		} else {
 			param = (ds_pvar_param_p)set->dlist[i].param;
 		}
+
+		/* until the underlying (stat *) struct is created, we cannot
+		 * perform READ/WRITE against this pv_spec_t concurrently */
+		if (!pv_has_dname(&param->pvar)) {
+			locked = 1;
+			lock_get(&set->dlist[i].wlock);
+		}
+
 		if (pv_get_spec_value(msg, &param->pvar, &val) < 0) {
+			if (locked)
+				lock_release(&set->dlist[i].wlock);
 			LM_ERR("cannot get spec value for spec %.*s\n",
 				   set->dlist[i].uri.len, set->dlist[i].uri.s);
 			continue;
 		}
+
+		if (locked)
+			lock_release(&set->dlist[i].wlock);
+
 		if (!(val.flags & PV_VAL_NULL)) {
 			if (!(val.flags & PV_VAL_INT)) {
 				/* last attempt to retrieve value */

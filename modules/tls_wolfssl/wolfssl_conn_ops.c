@@ -199,6 +199,14 @@ int _wolfssl_tls_conn_init(struct tcp_connection* c,
 		return -1;
 	}
 
+	/* we are no managing TLS 1.2 or 1.3 tickets server side
+	 * so in case a client will want to reconnect after an OpenSIPS
+	 * restart, it will provide a pre-shared ticket and this re-connection
+	 * will just fail, so take the lazy way out and disable tickets 
+	 * https://datatracker.ietf.org/doc/html/rfc8446#section-2.2 */
+	wolfSSL_NoTicketTLSv12(_WOLFSSL_READ_SSL(c->extra_data));
+	wolfSSL_no_ticket_TLSv13(_WOLFSSL_READ_SSL(c->extra_data));
+
 	/* put pointers to the tcp_connection and tls_domain structs
 	 * in the WOLFSSL struct as extra data */
 	if (!wolfSSL_set_ex_data(_WOLFSSL_READ_SSL(c->extra_data),
@@ -438,7 +446,12 @@ again:
 #endif
 				{
 					err_len=sizeof(err);
-					getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len);
+					if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {
+						LM_WARN("getsockopt error: fd=%d [server=%s:%d]: (%d) %s\n", fd,
+								ip_addr2a(&con->rcv.src_ip), con->rcv.src_port,
+								errno, strerror(errno));
+						goto failure;
+					}
 					if ((err==0) && (poll_err==0))
 						continue; /* retry ssl connect */
 					if (err!=EINPROGRESS && err!=EALREADY){

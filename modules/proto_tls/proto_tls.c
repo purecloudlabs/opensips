@@ -619,17 +619,20 @@ send_it:
 	send_sock->last_local_real_port = c->rcv.dst_port;
 	send_sock->last_remote_real_port = c->rcv.src_port;
 
-	tcp_conn_release(c, 0);
+	tcp_conn_release(c, (rlen<len)?1:0);
 	return rlen;
 con_release:
 	sh_log(c->hist, TCP_SEND2MAIN, "send 1, (%d)", c->refcnt);
+	/* close the fd if this process is not meant to own it */
+	if (c->proc_id != process_no)
+		close(fd);
 	tcp_conn_release(c, (rlen < 0)?0:1);
 	return rlen;
 }
 
 static int tls_read_req(struct tcp_connection* con, int* bytes_read)
 {
-	int ret;
+	int ret, rc = 0;
 	int bytes;
 	int total_bytes;
 	struct tcp_req* req;
@@ -650,13 +653,6 @@ static int tls_read_req(struct tcp_connection* con, int* bytes_read)
 
 	/* do this trick in order to trace whether if it's an error or not */
 	ret=tls_mgm_api.tls_fix_read_conn(con, con->fd, tls_handshake_tout, t_dst, 1);
-	if (ret < 0) {
-		LM_ERR("failed to do pre-tls handshake!\n");
-		return -1;
-	} else if (ret == 0) {
-		LM_DBG("SSL accept/connect still pending!\n");
-		return 0;
-	}
 
 	/* if there is pending tracing data on an accepted connection, flush it
 	 * As this is a read op, we look only for accepted conns, not to conflict
@@ -676,9 +672,12 @@ static int tls_read_req(struct tcp_connection* con, int* bytes_read)
 		con->proto_flags &= ~( F_TLS_TRACE_READY );
 	}
 
-	if ( ret != 1 ) {
-		LM_ERR("failed to do pre-tls reading\n");
+	if (ret < 0) {
+		LM_ERR("failed to do pre-tls handshake!\n");
 		goto error;
+	} else if (ret == 0) {
+		LM_DBG("SSL accept/connect still pending!\n");
+		return 0;
 	}
 
 	if(con->state!=S_CONN_OK)
@@ -733,7 +732,7 @@ again:
 	int max_chunks = tcp_attr_isset(con, TCP_ATTR_MAX_MSG_CHUNKS) ?
 			con->profile.attrs[TCP_ATTR_MAX_MSG_CHUNKS] : tls_max_msg_chunks;
 
-	switch (tcp_handle_req(req, con, max_chunks, 0) ) {
+	switch ((rc = tcp_handle_req(req, con, max_chunks, 0))) {
 		case 1:
 			goto again;
 		case -1:
@@ -743,8 +742,9 @@ again:
 	LM_DBG("tls_read_req end\n");
 done:
 	if (bytes_read) *bytes_read=total_bytes;
-	/* connection will be released */
-	return 0;
+
+	return rc == 2   ?  1  /* connection is already released! */
+	       /* 0,1? */:  0; /* connection will be released */
 error:
 	/* connection will be released as ERROR */
 	return -1;

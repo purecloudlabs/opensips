@@ -168,7 +168,7 @@ void src_free_session(struct src_sess *sess)
 		list_del(&node->list);
 		shm_free(node);
 	}
-	srec_logic_destroy(sess);
+	srec_logic_destroy(sess, 0);
 	if (sess->dlg)
 		srec_dlg.dlg_ctx_put_ptr(sess->dlg, srec_dlg_idx, NULL);
 	lock_destroy(&sess->lock);
@@ -399,18 +399,12 @@ void srec_loaded_callback(struct dlg_cell *dlg, int type,
 				goto error;
 			}
 			memcpy(&uuid, tmp.s, tmp.len);
-			if (srs_add_raw_sdp_stream(label, medianum, &uuid, sess,
+			if (srs_fill_sdp_stream(label, medianum, &uuid, sess,
 					&sess->participants[sess->participants_no - 1]) < 0) {
 				LM_ERR("cannot add new media stream!\n");
 				goto error;
 			}
 		}
-	}
-
-	/* restore b2b callbacks */
-	if (srec_restore_callback(sess) < 0) {
-		LM_ERR("cannot restore b2b callbacks!\n");
-		return;
 	}
 
 	/* all good: continue with dialog support! */
@@ -419,14 +413,23 @@ void srec_loaded_callback(struct dlg_cell *dlg, int type,
 	sess->dlg = dlg;
 	srec_dlg.dlg_ctx_put_ptr(dlg, srec_dlg_idx, sess);
 
+	/* restore b2b callbacks */
+	if (srec_restore_callback(sess) < 0) {
+		LM_ERR("cannot restore b2b callbacks!\n");
+		goto error_unref;
+	}
+
 	if (srec_register_callbacks(sess) < 0) {
 		LM_ERR("cannot register callback for terminating session\n");
-		srec_hlog(sess, SREC_UNREF, "error registering dlg callbacks");
-		SIPREC_UNREF(sess);
-		goto error;
+		goto error_unref;
 	}
 
 	return;
+error_unref:
+	srec_hlog(sess, SREC_UNREF, "error registering callbacks");
+	SIPREC_UNREF(sess);
+	return;
+
 error:
 	if (sess)
 		src_free_session(sess);

@@ -245,7 +245,6 @@ struct socket_info* grep_sock_info_ext(str* host, unsigned short port,
 	struct socket_info** list;
 	unsigned short c_proto;
 	struct ip_addr* ip6;
-	struct ip_addr* ip4;
 
 	h_len=host->len;
 	hname=host->s;

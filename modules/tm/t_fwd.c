@@ -848,10 +848,12 @@ int t_forward_nonack( struct cell *t, struct sip_msg* p_msg ,
 
 			/* successfully sent out -> run callbacks */
 			if ( has_tran_tmcbs( t, TMCB_REQUEST_BUILT) ) {
+				_tm_branch_index = i;
 				set_extra_tmcb_params( &t->uac[i].request.buffer,
 					&t->uac[i].request.dst);
 				run_trans_callbacks( TMCB_REQUEST_BUILT, t,
 					p_msg, 0, 0);
+				_tm_branch_index = 0;
 			}
 
 			do {
@@ -1074,6 +1076,7 @@ int t_inject_branch( struct cell *t, struct sip_msg *msg, int flags)
 	static struct sip_msg faked_req;
 	branch_bm_t cancel_bm = 0;
 	str reason = str_init(CANCEL_REASON_200);
+	struct cell *bk_t = NULL;
 	int rc;
 
 	/* does the transaction state still accept new branches ? */
@@ -1117,6 +1120,11 @@ int t_inject_branch( struct cell *t, struct sip_msg *msg, int flags)
 		}
 	}
 
+	/* t_forward_nonack() relies on T for various internal stuff, so be
+	 * we advertise the correct one */
+	bk_t = get_t();
+	set_t( t );
+
 	/* do we have to cancel the existing branches before injecting new ones? */
 	if (flags&TM_INJECT_FLAG_CANCEL) {
 		which_cancel( t, &cancel_bm );
@@ -1134,6 +1142,8 @@ int t_inject_branch( struct cell *t, struct sip_msg *msg, int flags)
 		cancel_uacs( t, cancel_bm );
 		set_cancel_extra_hdrs( NULL, 0);
 	}
+
+	set_t( bk_t );
 
 	/* cleanup the faked request */
 	free_faked_req( &faked_req, t);

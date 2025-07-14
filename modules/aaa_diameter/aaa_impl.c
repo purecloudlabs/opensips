@@ -240,11 +240,11 @@ static int dm_avps2json(void *root, cJSON *avps)
 			memset(&ar, 0, sizeof ar);
 			ar.avp_code = h->avp_code;
 			ar.avp_vendor = h->avp_vendor;
-			FD_CHECK_GT(fd_dict_search(fd_g_config->cnf_dict, DICT_AVP, AVP_BY_CODE_AND_VENDOR,
-					&ar, &obj, ENOENT));
+			__FD_CHECK_GT(fd_dict_search(fd_g_config->cnf_dict, DICT_AVP, AVP_BY_CODE_AND_VENDOR,
+					&ar, &obj, ENOENT), 0, skip);
 		} else {
-			FD_CHECK_GT(fd_dict_search(fd_g_config->cnf_dict, DICT_AVP, AVP_BY_CODE,
-					&h->avp_code, &obj, ENOENT));
+			__FD_CHECK_GT(fd_dict_search(fd_g_config->cnf_dict, DICT_AVP, AVP_BY_CODE,
+					&h->avp_code, &obj, ENOENT), 0, skip);
 		}
 		FD_CHECK_GT(fd_dict_getval(obj, &dm_avp));
 
@@ -329,6 +329,7 @@ static int dm_avps2json(void *root, cJSON *avps)
 		cJSON_AddItemToObject(item, dm_avp.avp_name, val);
 		cJSON_AddItemToArray(avps, item);
 
+skip:
 		FD_CHECK_GT(fd_msg_browse(it, MSG_BRW_NEXT, &it, NULL));
 		i++;
 	}
@@ -339,7 +340,7 @@ static int dm_avps2json(void *root, cJSON *avps)
 out:
 	cJSON_Delete(item);
 
-	LM_DBG("------------ END AVP iteration ----------------\n");
+	LM_DBG("------------ END AVP iteration (failure) ----------------\n");
 	return -1;
 }
 
@@ -660,12 +661,12 @@ static int dm_register_digest_avps(void)
 		FD_CHECK_dict_new(DICT_AVP, &data, UTF8String_type, NULL);
 	}
 
-	/* Digest-Qop */
+	/* Digest-QoP */
 	{
 		struct dict_avp_data data = {
 				110,				/* Code */
 				0, 					/* Vendor */
-				"Digest-Qop", 		/* Name */
+				"Digest-QoP", 		/* Name */
 				AVP_FLAG_VENDOR | AVP_FLAG_MANDATORY, 	/* Fixed flags */
 				AVP_FLAG_MANDATORY,		 	/* Fixed flag values */
 				AVP_TYPE_OCTETSTRING 		/* base type of data */
@@ -855,7 +856,7 @@ int dm_init_sip_application(void)
 			that identifies a SIP server.
 		*/
 		struct dict_avp_data data = {
-				369,				/* Code */
+				371,				/* Code */
 				0, 					/* Vendor */
 				"SIP-Server-URI", 	/* Name */
 				AVP_FLAG_VENDOR | AVP_FLAG_MANDATORY, 	/* Fixed flags */
@@ -1030,7 +1031,7 @@ int dm_init_sip_application(void)
 					    [ Digest-Algorithm ]
 					    [ Digest-CNonce ]
 					    [ Digest-Opaque ]
-					    [ Digest-Qop ]
+					    [ Digest-QoP ]
 					    [ Digest-Nonce-Count ]
 					    [ Digest-Method]
 					    [ Digest-Entity-Body-Hash ]
@@ -1055,7 +1056,7 @@ int dm_init_sip_application(void)
 			{ "Digest-Algorithm",	RULE_OPTIONAL, -1, 1 },
 			{ "Digest-CNonce",		RULE_OPTIONAL, -1, 1 },
 			{ "Digest-Opaque",		RULE_OPTIONAL, -1, 1 },
-			{ "Digest-Qop",			RULE_OPTIONAL, -1, 1 },
+			{ "Digest-QoP",			RULE_OPTIONAL, -1, 1 },
 			{ "Digest-Nonce-Count",	RULE_OPTIONAL, -1, 1 },
 			{ "Digest-Method",		RULE_OPTIONAL, -1, 1 },
 			{ "Digest-Entity-Body-Hash",	RULE_OPTIONAL, -1, 1 },

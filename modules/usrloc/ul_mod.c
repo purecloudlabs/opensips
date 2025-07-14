@@ -427,7 +427,7 @@ int init_cachedb(void)
 
 	cdbc = cdbf.init(&cdb_url);
 	if (!cdbc) {
-		LM_ERR("cannot connect to cachedb_url %.*s\n", cdb_url.len, cdb_url.s);
+		LM_ERR("cannot connect to cachedb_url %s\n", db_url_escape(&cdb_url));
 		return -1;
 	}
 
@@ -493,29 +493,44 @@ static int mi_child_init(void)
  */
 static void destroy(void)
 {
+	int do_sync = 0;
+
 	/* we need to sync DB in order to flush the cache */
 	if (have_sql_con() && ul_dbf.init) {
 		ul_dbh = ul_dbf.init(&db_url); /* Get a new database connection */
 		if (!ul_dbh) {
 			LM_ERR("failed to connect to database\n");
-	} else {
-			ul_unlock_locks();
-			if (sync_lock)
-				lock_start_read(sync_lock);
-			if (_synchronize_all_udomains() != 0) {
-				LM_ERR("flushing cache failed\n");
-			}
-			if (sync_lock) {
-				lock_stop_read(sync_lock);
-				lock_destroy_rw(sync_lock);
-				sync_lock = 0;
-			}
-			ul_dbf.close(ul_dbh);
+			do_sync = -10;
+		} else {
+			do_sync++;
 		}
 	}
 
+	if (have_cdb_con()) {
+		if (init_cachedb() < 0)
+			do_sync = -10;
+		else
+			do_sync++;
+	}
+
+	ul_unlock_locks();
+
+	if (sync_lock)
+		lock_start_read(sync_lock);
+	if (do_sync > 0 && _synchronize_all_udomains() != 0)
+		LM_ERR("flushing cache failed\n");
+	if (sync_lock) {
+		lock_stop_read(sync_lock);
+		lock_destroy_rw(sync_lock);
+		sync_lock = NULL;
+	}
+
+	if (ul_dbh)
+		ul_dbf.close(ul_dbh);
 	if (cdbc)
 		cdbf.destroy(cdbc);
+
+	ul_dbh = NULL;
 	cdbc = NULL;
 
 	free_all_udomains();
@@ -875,14 +890,14 @@ int ul_check_db(void)
 		cdb_url.len = strlen(cdb_url.s);
 
 		if (cachedb_bind_mod(&cdb_url, &cdbf) < 0) {
-			LM_ERR("cannot bind functions for cachedb_url %.*s\n",
-			       cdb_url.len, cdb_url.s);
+			LM_ERR("cannot bind functions for cachedb_url %s\n",
+			       db_url_escape(&cdb_url));
 			return -1;
 		}
 
 		if (!CACHEDB_CAPABILITY(&cdbf, CACHEDB_CAP_COL_ORIENTED)) {
-			LM_ERR("not enough capabilities for cachedb_url %.*s\n",
-			       cdb_url.len, cdb_url.s);
+			LM_ERR("not enough capabilities for cachedb_url %s\n",
+			       db_url_escape(&cdb_url));
 			return -1;
 		}
 	}
@@ -890,7 +905,7 @@ int ul_check_db(void)
 	/* use database if needed */
 	if (have_sql_con()) {
 		if (ZSTR(db_url)) {
-			LM_ERR("selected mode requires a db connection -> db_url \n");
+			LM_ERR("selected mode requires a db connection -> db_url\n");
 			return -1;
 		}
 

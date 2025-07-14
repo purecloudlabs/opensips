@@ -65,7 +65,18 @@ struct struct_hist_list *con_hist;
 
 enum tcp_worker_state { STATE_INACTIVE=0, STATE_ACTIVE, STATE_DRAINING};
 
-/* definition of a TCP worker */
+/* definition of a TCP worker - the array of these TCP workers is
+ * mainly intended to be used by the TCP main, to keep track of the
+ * workers, about their load and so. Nevertheless, since the addition
+ * of the process auto-scaling, other processes may need access to this
+ * data, thus it's relocation in SHM (versus initial PKG). For example,
+ * the attendant process is the one forking new TCP workers (scaling up),
+ * so it must be able to set the ENABLE state for the TCP worker (and being
+ * (seen by the TCP main proc). Similar, when a TCP worker shuts down, it has
+ * to mark itself as DISABLED and the TCP main must see that.
+ * Again, 99% this array is intended for TCP Main ops, it is not lock
+ * protected, so be very careful with any ops from other procs.
+ */
 struct tcp_worker {
 	pid_t pid;
 	int unix_sock;		/*!< Main-Worker comm, worker end */
@@ -725,8 +736,15 @@ end:
 		evi_free_params(list);
 }
 
+/* convenience macro to aid in shm_free() debugging */
+#define _tcpconn_rm(c, ne) \
+	do {\
+		__tcpconn_rm(c, ne);\
+		shm_free(c);\
+	} while (0)
+
 /*! \brief unsafe tcpconn_rm version (nolocks) */
-static void _tcpconn_rm(struct tcp_connection* c, int no_event)
+static void __tcpconn_rm(struct tcp_connection* c, int no_event)
 {
 	int r;
 
@@ -759,8 +777,9 @@ static void _tcpconn_rm(struct tcp_connection* c, int no_event)
 	c->hist = NULL;
 #endif
 
-	shm_free(c);
+	/* shm_free(c); -- freed by _tcpconn_rm() */
 }
+
 
 
 #if 0
@@ -872,8 +891,8 @@ static inline void tcpconn_ref(struct tcp_connection* c)
 
 
 static struct tcp_connection* tcpconn_new(int sock, union sockaddr_union* su,
-                    struct socket_info* si, struct tcp_conn_profile *prof,
-                    int state, int flags)
+				struct socket_info* si, const struct tcp_conn_profile *prof,
+				int state, int flags, int in_main_proc)
 {
 	struct tcp_connection *c;
 	union sockaddr_union local_su;
@@ -940,8 +959,8 @@ static struct tcp_connection* tcpconn_new(int sock, union sockaddr_union* su,
 			goto error;
 		}
 	}
-
-	tcp_connections_no++;
+	if(in_main_proc)
+		tcp_connections_no++;
 	return c;
 
 error:
@@ -968,7 +987,7 @@ struct tcp_connection* tcp_conn_create(int sock, union sockaddr_union* su,
 		tcp_con_get_profile(su, &si->su, si->proto, prof);
 
 	/* create the connection structure */
-	c = tcpconn_new(sock, su, si, prof, state, 0);
+	c = tcpconn_new(sock, su, si, prof, state, 0, !send2main);
 	if (c==NULL) {
 		LM_ERR("tcpconn_new failed\n");
 		return NULL;
@@ -1111,7 +1130,7 @@ static inline int handle_new_connect(struct socket_info* si)
 	}
 
 	/* add socket to list */
-	tcpconn=tcpconn_new(new_sock, &su, si, &prof, S_CONN_OK, F_CONN_ACCEPTED);
+	tcpconn=tcpconn_new(new_sock, &su, si, &prof, S_CONN_OK, F_CONN_ACCEPTED, 1);
 	if (tcpconn){
 		tcpconn->refcnt++; /* safe, not yet available to the
 							  outside world */
@@ -1204,8 +1223,8 @@ inline static int handle_tcpconn_ev(struct tcp_connection* tcpconn, int fd_i,
 				tcpconn->flags|=F_CONN_REMOVED;
 				tcp_trigger_report(tcpconn, TCP_REPORT_CLOSE,
 					"Async connect failed");
-				tcpconn_destroy(tcpconn);
 				sh_log(tcpconn->hist, TCP_UNREF, "tcpconn connect, (%d)", tcpconn->refcnt);
+				tcpconn_destroy(tcpconn);
 				return 0;
 			}
 
@@ -1490,6 +1509,7 @@ inline static int handle_worker(struct process_table* p, int fd_i)
 			tcpconn->s=fd;
 			/* add tcpconn to the list*/
 			tcpconn_add(tcpconn);
+			tcp_connections_no++;
 			reactor_add_reader( tcpconn->s, F_TCPCONN, RCT_PRIO_NET, tcpconn);
 			tcpconn->flags&=~F_CONN_REMOVED_READ;
 			break;
@@ -1503,6 +1523,7 @@ inline static int handle_worker(struct process_table* p, int fd_i)
 			tcpconn->s=fd;
 			/* add tcpconn to the list*/
 			tcpconn_add(tcpconn);
+			tcp_connections_no++;
 			/* FIXME - now we have lifetime==default_lifetime - should we
 			 * set a shorter one when waiting for a connect ??? */
 			/* only maintain the socket in the IO_WATCH_WRITE watcher
@@ -1762,7 +1783,7 @@ int tcp_init(void)
 		return 0;
 
 #ifdef DBG_TCPCON
-	con_hist = shl_init("TCP con", 10000, 1);
+	con_hist = shl_init("TCP con", 10000, 0);
 	if (!con_hist) {
 		LM_ERR("oom con hist\n");
 		goto error;
@@ -1783,10 +1804,10 @@ int tcp_init(void)
 		s_profile->max_procs : tcp_workers_no ;
 
 	/* init tcp workers array */
-	tcp_workers = (struct tcp_worker*)pkg_malloc
+	tcp_workers = (struct tcp_worker*)shm_malloc
 		( tcp_workers_max_no*sizeof(struct tcp_worker) );
 	if (tcp_workers==0) {
-		LM_CRIT("could not alloc tcp_workers array in pkg memory\n");
+		LM_CRIT("could not alloc tcp_workers array in shm memory\n");
 		goto error;
 	}
 	memset( tcp_workers, 0, tcp_workers_max_no*sizeof(struct tcp_worker));

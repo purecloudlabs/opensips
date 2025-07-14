@@ -29,17 +29,17 @@
 	<row>
 		<entry>2. </entry>
 		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
-		<entry align="center">275</entry>
-		<entry align="center">207</entry>
-		<entry align="center">5092</entry>
-		<entry align="center">1560</entry>
+		<entry align="center">288</entry>
+		<entry align="center">216</entry>
+		<entry align="center">5223</entry>
+		<entry align="center">1718</entry>
 	</row>
 	<row>
 		<entry>3. </entry>
 		<entry>Vlad Paiu (<ulink url="https://github.com/vladpaiu">@vladpaiu</ulink>)</entry>
-		<entry align="center">254</entry>
-		<entry align="center">145</entry>
-		<entry align="center">7206</entry>
+		<entry align="center">255</entry>
+		<entry align="center">146</entry>
+		<entry align="center">7208</entry>
 		<entry align="center">3027</entry>
 	</row>
 	<row>
@@ -53,10 +53,10 @@
 	<row>
 		<entry>5. </entry>
 		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
-		<entry align="center">175</entry>
-		<entry align="center">128</entry>
-		<entry align="center">2949</entry>
-		<entry align="center">1291</entry>
+		<entry align="center">179</entry>
+		<entry align="center">132</entry>
+		<entry align="center">2959</entry>
+		<entry align="center">1298</entry>
 	</row>
 	<row>
 		<entry>6. </entry>
@@ -101,7 +101,7 @@
 	</tbody>
 	</tgroup>
 	</table>
-<para><emphasis role='bold'>All remaining contributors</emphasis>: Anca Vamanu, Walter Doekes (<ulink url="https://github.com/wdoekes">@wdoekes</ulink>), Ionut Ionita (<ulink url="https://github.com/ionutrazvanionita">@ionutrazvanionita</ulink>), Ionel Cerghit (<ulink url="https://github.com/ionel-cerghit">@ionel-cerghit</ulink>), Andrei Dragus, Maksym Sobolyev (<ulink url="https://github.com/sobomax">@sobomax</ulink>), John Riordan, Hugues Mitonneau, Carsten Bock, Peter Lemenkov (<ulink url="https://github.com/lemenkov">@lemenkov</ulink>), Jerome Martin, Klaus Darilion, Jarrod Baumann (<ulink url="https://github.com/jarrodb">@jarrodb</ulink>), Nick Altmann (<ulink url="https://github.com/nikbyte">@nikbyte</ulink>), Zero King (<ulink url="https://github.com/l2dy">@l2dy</ulink>), Michel Bensoussan, Richard Revels, Elena-Ramona Modroiu, Tavis Paquette, Ryan Bullock, Andrei Datcu (<ulink url="https://github.com/andrei-datcu">@andrei-datcu</ulink>), Jeffrey Magder, Ron Winacott, Andy Pyles, Julián Moreno Patiño, Konstantin Bokarius, sergei lavrov, Alex Massover, Damien Sandras (<ulink url="https://github.com/dsandras">@dsandras</ulink>), Alex Hermann, Dusan Klinec (<ulink url="https://github.com/ph4r05">@ph4r05</ulink>), Norman Brandinger (<ulink url="https://github.com/NormB">@NormB</ulink>), UnixDev, Eliot Gable, Ryan Bullock (<ulink url="https://github.com/rrb3942">@rrb3942</ulink>), Edson Gellert Schubert.</para>
+<para><emphasis role='bold'>All remaining contributors</emphasis>: Anca Vamanu, Walter Doekes (<ulink url="https://github.com/wdoekes">@wdoekes</ulink>), Ionut Ionita (<ulink url="https://github.com/ionutrazvanionita">@ionutrazvanionita</ulink>), Ionel Cerghit (<ulink url="https://github.com/ionel-cerghit">@ionel-cerghit</ulink>), Andrei Dragus, Maksym Sobolyev (<ulink url="https://github.com/sobomax">@sobomax</ulink>), John Riordan, Hugues Mitonneau, Carsten Bock, Peter Lemenkov (<ulink url="https://github.com/lemenkov">@lemenkov</ulink>), Jerome Martin, Klaus Darilion, Jarrod Baumann (<ulink url="https://github.com/jarrodb">@jarrodb</ulink>), Nick Altmann (<ulink url="https://github.com/nikbyte">@nikbyte</ulink>), Zero King (<ulink url="https://github.com/l2dy">@l2dy</ulink>), Michel Bensoussan, Richard Revels, Elena-Ramona Modroiu, Tavis Paquette, Ryan Bullock, Andrei Datcu (<ulink url="https://github.com/andrei-datcu">@andrei-datcu</ulink>), Jeffrey Magder, Ron Winacott, Andy Pyles, Julián Moreno Patiño, Konstantin Bokarius, sergei lavrov, Alex Massover, Damien Sandras (<ulink url="https://github.com/dsandras">@dsandras</ulink>), Alex Hermann, Alexandra Titoc, Dusan Klinec (<ulink url="https://github.com/ph4r05">@ph4r05</ulink>), Norman Brandinger (<ulink url="https://github.com/NormB">@NormB</ulink>), UnixDev, Eliot Gable, Ryan Bullock (<ulink url="https://github.com/rrb3942">@rrb3942</ulink>), Edson Gellert Schubert.</para>
 	<para>
 	    <emphasis>(1) DevScore = author_commits + author_lines_added / (project_lines_added / project_commits) + author_lines_deleted / (project_lines_deleted / project_commits)</emphasis>
 	</para>
@@ -129,22 +129,22 @@
 	<row>
 		<entry>1. </entry>
 		<entry>Razvan Crainea (<ulink url="https://github.com/razvancrainea">@razvancrainea</ulink>)</entry>
-		<entry align="center">Aug 2010 - Jan 2024</entry>
+		<entry align="center">Aug 2010 - Feb 2025</entry>
 	</row>
 	<row>
 		<entry>2. </entry>
-		<entry>Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>)</entry>
-		<entry align="center">Apr 2006 - Dec 2023</entry>
+		<entry>Vlad Paiu (<ulink url="https://github.com/vladpaiu">@vladpaiu</ulink>)</entry>
+		<entry align="center">Oct 2010 - Sep 2024</entry>
 	</row>
 	<row>
 		<entry>3. </entry>
-		<entry>Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>)</entry>
-		<entry align="center">Aug 2012 - Nov 2023</entry>
+		<entry>Alexandra Titoc</entry>
+		<entry align="center">Sep 2024 - Sep 2024</entry>
 	</row>
 	<row>
 		<entry>4. </entry>
-		<entry>Vlad Paiu (<ulink url="https://github.com/vladpaiu">@vladpaiu</ulink>)</entry>
-		<entry align="center">Oct 2010 - Nov 2023</entry>
+		<entry>Bogdan-Andrei Iancu (<ulink url="https://github.com/bogdan-iancu">@bogdan-iancu</ulink>)</entry>
+		<entry align="center">Apr 2006 - Dec 2023</entry>
 	</row>
 	<row>
 		<entry>5. </entry>
@@ -179,7 +179,7 @@
 	</tbody>
 	</tgroup>
 	</table>
-<para><emphasis role='bold'>All remaining contributors</emphasis>: Walter Doekes (<ulink url="https://github.com/wdoekes">@wdoekes</ulink>), sergei lavrov, Zero King (<ulink url="https://github.com/l2dy">@l2dy</ulink>), Dan Pascu (<ulink url="https://github.com/danpascu">@danpascu</ulink>), Ionel Cerghit (<ulink url="https://github.com/ionel-cerghit">@ionel-cerghit</ulink>), Jarrod Baumann (<ulink url="https://github.com/jarrodb">@jarrodb</ulink>), Ionut Ionita (<ulink url="https://github.com/ionutrazvanionita">@ionutrazvanionita</ulink>), Julián Moreno Patiño, Dusan Klinec (<ulink url="https://github.com/ph4r05">@ph4r05</ulink>), Eseanu Marius Cristian (<ulink url="https://github.com/eseanucristian">@eseanucristian</ulink>), Andrei Datcu (<ulink url="https://github.com/andrei-datcu">@andrei-datcu</ulink>), Norman Brandinger (<ulink url="https://github.com/NormB">@NormB</ulink>), Damien Sandras (<ulink url="https://github.com/dsandras">@dsandras</ulink>), Ryan Bullock (<ulink url="https://github.com/rrb3942">@rrb3942</ulink>), Anca Vamanu, Alex Massover, Andrei Dragus, John Riordan, Hugues Mitonneau, Richard Revels, UnixDev, Alex Hermann, Henning Westerholt (<ulink url="https://github.com/henningw">@henningw</ulink>), Carsten Bock, Klaus Darilion, Daniel-Constantin Mierla (<ulink url="https://github.com/miconda">@miconda</ulink>), Konstantin Bokarius, Edson Gellert Schubert, Jerome Martin, Tavis Paquette, Michel Bensoussan, Eliot Gable, Andy Pyles, Elena-Ramona Modroiu, Jeffrey Magder, Ron Winacott.</para>
+<para><emphasis role='bold'>All remaining contributors</emphasis>: Walter Doekes (<ulink url="https://github.com/wdoekes">@wdoekes</ulink>), Liviu Chircu (<ulink url="https://github.com/liviuchircu">@liviuchircu</ulink>), sergei lavrov, Zero King (<ulink url="https://github.com/l2dy">@l2dy</ulink>), Dan Pascu (<ulink url="https://github.com/danpascu">@danpascu</ulink>), Ionel Cerghit (<ulink url="https://github.com/ionel-cerghit">@ionel-cerghit</ulink>), Jarrod Baumann (<ulink url="https://github.com/jarrodb">@jarrodb</ulink>), Ionut Ionita (<ulink url="https://github.com/ionutrazvanionita">@ionutrazvanionita</ulink>), Julián Moreno Patiño, Dusan Klinec (<ulink url="https://github.com/ph4r05">@ph4r05</ulink>), Eseanu Marius Cristian (<ulink url="https://github.com/eseanucristian">@eseanucristian</ulink>), Andrei Datcu (<ulink url="https://github.com/andrei-datcu">@andrei-datcu</ulink>), Norman Brandinger (<ulink url="https://github.com/NormB">@NormB</ulink>), Damien Sandras (<ulink url="https://github.com/dsandras">@dsandras</ulink>), Ryan Bullock (<ulink url="https://github.com/rrb3942">@rrb3942</ulink>), Anca Vamanu, Alex Massover, Andrei Dragus, John Riordan, Hugues Mitonneau, Richard Revels, UnixDev, Alex Hermann, Henning Westerholt (<ulink url="https://github.com/henningw">@henningw</ulink>), Carsten Bock, Klaus Darilion, Daniel-Constantin Mierla (<ulink url="https://github.com/miconda">@miconda</ulink>), Konstantin Bokarius, Edson Gellert Schubert, Jerome Martin, Tavis Paquette, Michel Bensoussan, Eliot Gable, Andy Pyles, Elena-Ramona Modroiu, Jeffrey Magder, Ron Winacott.</para>
 	<para>
 	    <emphasis>(1) including any documentation-related commits, excluding merge commits</emphasis>
 	</para>
