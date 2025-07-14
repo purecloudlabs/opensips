@@ -88,6 +88,7 @@ static int hep_async_max_postponed_chunks = 32;
 static int hep_max_msg_chunks = 32;
 static int hep_async_local_write_timeout = 10;
 static int hep_tls_handshake_timeout = 100;
+static int hep_tcp_conn_max_lifetime = 0;
 
 int hep_ctx_idx = 0;
 int hep_capture_id = 1;
@@ -142,6 +143,7 @@ static const param_export_t params[] = {
 	{ "homer5_delim",                    STR_PARAM, &homer5_delim.s                 },
 	{ "hep_max_retries",                 INT_PARAM, &hep_max_retries                },
 	{ "hep_retry_cooldown",              INT_PARAM, &hep_retry_cooldown             },
+	{ "hep_tcp_conn_max_lifetime",       INT_PARAM, &hep_tcp_conn_max_lifetime      },
 	{0, 0, 0}
 };
 
@@ -411,6 +413,13 @@ static int hep_tls_send(const struct socket_info* send_sock,
 	return hep_tcp_or_tls_send(send_sock, buf, len, to, id, 1, msg);
 }
 
+static int is_connection_max_lifetime_exceeded(struct tcp_connection* c) {
+	if (hep_tcp_conn_max_lifetime == 0 || c == NULL) return 0;
+	int conn_life = time(0) - c->first_seen;
+	if (conn_life >= hep_tcp_conn_max_lifetime) return 1;
+	return 0;
+}
+
 static int hep_tcp_or_tls_send(const struct socket_info* send_sock,
 		char* buf, unsigned int len, const union sockaddr_union* to,
 		unsigned int id, unsigned int is_tls, struct sip_msg *msg)
@@ -439,6 +448,8 @@ static int hep_tcp_or_tls_send(const struct socket_info* send_sock,
 		LM_ERR("failed to acquire connection\n");
 		return -1;
 	}
+
+	if (is_connection_max_lifetime_exceeded(c)) c->do_not_reuse = 1;
 
 	/* was connection found ?? */
 	if (c == 0) {
@@ -479,6 +490,8 @@ static int hep_tcp_or_tls_send(const struct socket_info* send_sock,
 			LM_ERR("connect failed\n");
 			return -1;
 		}
+		c->first_seen = time(0);
+		c->do_not_reuse = 0;
 		goto send_it;
 	}
 
@@ -520,6 +533,12 @@ send_it:
 	} else {
 		n = tcp_write_on_socket(c, -1, buf, len,
 			hep_send_timeout, hep_async_local_write_timeout);
+	}
+
+	if (c->do_not_reuse) {
+		c->lifetime = get_ticks() - 1;
+	} else {
+		tcp_conn_set_lifetime(c, tcp_con_lifetime);
 	}
 
 	LM_DBG("after write: c=%p n/len=%d/%d\n", c, n, len);
