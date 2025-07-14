@@ -59,6 +59,7 @@
 #include "resolve.h"
 #include "name_alias.h"
 #include "net/trans.h"
+#include "redact_pii.h"
 
 #ifdef __OS_linux
 #include <features.h>     /* for GLIBC version testing */
@@ -693,7 +694,7 @@ int fix_socket(struct socket_info_full *sif, int add_aliases)
 	/* get "official hostnames", all the aliases etc. */
 	he=resolvehost(si->name.s,0);
 	if (he==0){
-		LM_ERR("could not resolve %s\n", si->name.s);
+		LM_ERR("could not resolve %s\n", redact_pii(si->name.s));
 		goto error;
 	}
 	/* check if we got the official name */
@@ -955,7 +956,7 @@ int fix_socket_list(struct socket_info_full **list)
 		   ){
 			LM_WARN("removing entry %s:%s [%s]:%s\n",
 			    get_proto_name(si->proto), si->name.s,
-			    si->address_str.s, si->port_no_str.s);
+			    redact_pii(si->address_str.s), si->port_no_str.s);
 			l = sif;
 			sif=sif->next;
 			sock_listrm(list, l);

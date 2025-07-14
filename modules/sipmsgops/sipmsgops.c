@@ -54,6 +54,7 @@
 #include "../../mod_fix.h"
 #include "../../trim.h"
 #include "../../lib/cJSON.h"
+#include "../../redact_pii.h"
 
 #include "codecs.h"
 #include "list_hdr.h"
@@ -1366,7 +1367,7 @@ static int sip_validate_hdrs(struct sip_msg *msg)
 					/* check enforcements as per RFC3325 */
 					if (parse_uri( to->uri.s, to->uri.len, &uri)<0) {
 						LM_ERR("invalid uri [%.*s] in first [%.*s] value\n",
-							to->uri.len, to->uri.s,
+							to->uri.len, redact_pii(to->uri.s),
 							hf->name.len, hf->name.s);
 						goto failed;
 					}
@@ -1393,7 +1394,7 @@ static int sip_validate_hdrs(struct sip_msg *msg)
 						}
 						if (parse_uri( to->uri.s, to->uri.len, &uri2)<0) {
 							LM_ERR("invalid uri [%.*s] in second [%.*s] "
-								"value\n", to->uri.len, to->uri.s,
+								"value\n", to->uri.len, redact_pii(to->uri.s),
 								hf2->name.len, hf2->name.s);
 							goto failed;
 						}

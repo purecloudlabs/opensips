@@ -61,6 +61,7 @@
 #include "../../mod_fix.h"
 #include "../../data_lump_rpl.h"
 #include "../../mi/mi.h"
+#include "../../redact_pii.h"
 
 #include "stir_shaken.h"
 
@@ -813,7 +814,7 @@ static int get_orig_tn_from_msg(struct sip_msg *msg, str *orig_tn)
 
 	if (parse_uri(body->uri.s, body->uri.len, &parsed_uri) < 0) {
 		LM_ERR("Failed to parse %s URI: %.*s\n", msg->pai ? "PAI" : "From",
-		       body->uri.len, body->uri.s);
+		       body->uri.len, redact_pii(body->uri.s));
 		return -1;
 	}
 
@@ -844,7 +845,7 @@ static int get_dest_tn_from_msg(struct sip_msg *msg, str *dest_tn)
 	body = get_to(msg);
 
 	if (parse_uri(body->uri.s, body->uri.len, &parsed_uri) < 0) {
-		LM_ERR("Failed to parse To URI: %.*s\n", body->uri.len, body->uri.s);
+		LM_ERR("Failed to parse To URI: %.*s\n", body->uri.len, redact_pii(body->uri.s));
 		return -1;
 	}
 
