@@ -27,6 +27,7 @@
 #include "../../ut.h"
 #include "topo_hiding_logic.h"
 #include "th_no_dlg_logic.h"
+#include "../../redact_pii.h"
 
 extern int force_dialog;
 extern struct rr_binds rr_api;
@@ -1024,7 +1025,7 @@ int topo_callid_post_raw(str *data, struct sip_msg* foo)
 	msg.buf=data->s;
 	msg.len=data->len;
 	if (dlg_th_callid_pre_parse(&msg,1) < 0) {
-		LM_ERR("could not parse resulted sip message: %.*s\n", data->len, data->s);
+		LM_ERR("could not parse resulted sip message: %.*s\n", data->len, redact_pii(data->s));
 		goto done;
 	}
 

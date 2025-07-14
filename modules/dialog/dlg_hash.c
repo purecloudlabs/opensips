@@ -40,6 +40,7 @@
 #include "dlg_db_handler.h"
 #include "../../evi/evi_params.h"
 #include "../../evi/evi_modules.h"
+#include "../../redact_pii.h"
 
 #define MAX_LDG_LOCKS  2048
 #define MIN_LDG_LOCKS  2
@@ -425,7 +426,7 @@ static inline int translate_contact_ipport( str *ct, const struct socket_info *s
 
 	if (parse_uri( c->uri.s, c->uri.len, &puri)<0) {
 		LM_ERR("failed to parsed URI in contact <%.*s>\n",
-			c->uri.len, c->uri.s);
+			c->uri.len, redact_pii(c->uri.s));
 		goto error;
 	}
 	hostport.s = puri.host.s;
