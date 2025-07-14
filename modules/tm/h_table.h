@@ -163,6 +163,8 @@ typedef struct ua_client
 	str              path_vec;
 	/* the advertised address used for this branch */
 	str              adv_address;
+	/* the advertised via address used for this branch */
+	str              adv_address_via;
 	/* the advertised port used for this branch */
 	str              adv_port;
 	/* script flags, specific to this branch */
