@@ -54,11 +54,13 @@ static cachedb_con *cdbc = 0;
 static int blacklist_timeout=3600; /* seconds */
 static str cachedb_url = {0,0};
 static int min_ttl=0; /* seconds */
+static str allowlist = {0,0};
 
 static const param_export_t params[]={
 	{ "cachedb_url",                 STR_PARAM, &cachedb_url.s},
 	{ "blacklist_timeout",           INT_PARAM, &blacklist_timeout},
 	{ "min_ttl",                     INT_PARAM, &min_ttl},
+	{ "allowlist",                   STR_PARAM, &allowlist.s},
 	{0,0,0}
 };
 
@@ -96,6 +98,47 @@ struct module_exports exports= {
 	0                           /* reload confirm function */
 };
 
+#define DOMAIN_MAX_LENGTH 253
+#define ALLOWLIST_KEY_PREFIX "allowlist_"
+#define ALLOWLIST_MAX_KEY_LEN (DOMAIN_MAX_LENGTH + sizeof(ALLOWLIST_KEY_PREFIX) + 1)
+
+void create_allowlist_key(char* out_buf, str* out, const char* name) {
+	out->len = snprintf(out_buf, ALLOWLIST_MAX_KEY_LEN, "%s_%s", ALLOWLIST_KEY_PREFIX, name);
+	out->s = out_buf;
+}
+
+int init_allowlist(void) {
+	char *name;
+	str key, value;
+	char wkey[ALLOWLIST_MAX_KEY_LEN];
+
+	value.len = 0;
+	value.s = 0;
+
+	name = strtok(allowlist.s, ",");
+	while (name != NULL) {
+		create_allowlist_key(wkey, &key, name);
+		if (cdbf.set(cdbc, &key, &value, 0) < 0) return 0;
+		name = strtok(NULL, ",");
+	}
+
+	return 1;
+}
+
+int is_on_allowlist(const char* name) {
+	str key;
+	str res;
+	char wkey[ALLOWLIST_MAX_KEY_LEN];
+
+	if (!allowlist.s) return 1;
+
+	create_allowlist_key(wkey, &key, name);
+
+	if (cdbf.get(cdbc, &key, &res) < 0) return 0;
+	pkg_free(res.s);
+	return 1;
+}
+
 /**
  * init module function
  */
@@ -114,6 +157,7 @@ static int mod_init(void)
 	/* set pointers that resolver will use for caching */
 	dnscache_fetch_func=get_dnscache_value;
 	dnscache_put_func=put_dnscache_value;
+	dnscache_is_domain_allowed_func=is_on_allowlist;
 
 	return 0;
 }
@@ -135,6 +179,11 @@ static int child_init(int rank)
 	cdbc = cdbf.init(&cachedb_url);
 	if (!cdbc) {
 		LM_ERR("cannot connect to db_url %s\n", db_url_escape(&cachedb_url));
+		return -1;
+	}
+
+	if (allowlist.s && !init_allowlist()) {
+		LM_ERR("Failed to initialize dns_cache allowlist: %.*s", allowlist.len, allowlist.s);
 		return -1;
 	}
 
