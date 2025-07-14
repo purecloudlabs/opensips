@@ -1187,7 +1187,7 @@ static int th_no_dlg_encode_contact(struct sip_msg *msg, uint16_t flags, str rou
 		}
 	}
 
-    if (!(lump = insert_subst_lump_after(lump, SUBST_SND_ALL, 0))) {
+    if (!(lump = insert_subst_lump_after(lump, SUBST_SND_ALL_CONTACT, 0))) {
         LM_ERR("failed inserting SUBST_SND buf\n");
         goto error;
     }
@@ -1201,7 +1201,7 @@ static int th_no_dlg_encode_contact(struct sip_msg *msg, uint16_t flags, str rou
 error:
     // Need to add this lump in on error to stop the process from blocking
 	if (lump != NULL) {
-		if (!(lump = insert_subst_lump_after(lump, SUBST_SND_ALL, 0))) {
+		if (!(lump = insert_subst_lump_after(lump, SUBST_SND_ALL_CONTACT, 0))) {
 			LM_ERR("failed inserting SUBST_SND buf\n");
 		}
 	}
