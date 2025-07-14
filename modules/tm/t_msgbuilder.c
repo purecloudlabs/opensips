@@ -166,7 +166,9 @@ char *build_local(struct cell *Trans,unsigned int branch,
 	if (!t_calc_branch(Trans,  branch, branch_str.s, &branch_str.len ))
 		goto error;
 	set_hostport(&hp, (is_local(Trans))?0:req);
-	if (uac->adv_address.len)
+	if (uac->adv_address_via.len)
+		hp.host = &uac->adv_address_via;
+	else if (uac->adv_address.len)
 		hp.host = &uac->adv_address;
 	if (uac->adv_port.len)
 		hp.port = &uac->adv_port;
