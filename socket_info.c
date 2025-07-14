@@ -548,6 +548,7 @@ static int expand_interface(const struct socket_info *si, struct socket_info_ful
 	sid.adv_port = si->adv_port;
 	sid.adv_name = si->adv_name_str.s; /* it is NULL terminated */
 	sid.tag = si->tag.s; /* it is NULL terminated */
+	sid.subnet_mask = si->subnet_mask;
 #ifdef HAVE_IFADDRS
 	/* use the getifaddrs interface to get all the interfaces */
 	struct ifaddrs *addrs;
