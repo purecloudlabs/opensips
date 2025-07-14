@@ -62,6 +62,7 @@ struct socket_info {
 	unsigned short adv_port;    /* optimization for grep_sock_info() */
 	unsigned short workers;
 	unsigned short tos;
+	int mark;
 	struct scaling_profile *s_profile;
 	void *extra_data;
 	enum sip_protos internal_proto;
