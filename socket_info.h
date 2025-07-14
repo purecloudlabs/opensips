@@ -64,9 +64,12 @@ struct socket_info {
 	unsigned short workers;
 	unsigned short tos;
 	int mark;
+	unsigned short subnet_mask;
 	struct scaling_profile *s_profile;
 	void *extra_data;
 	enum sip_protos internal_proto;
+
+	struct net* subnet;
 
 	/* these are IP-level local/remote ports used during the last write op via
 	 * this sock (or a connection belonging to this sock). These values are 
@@ -156,6 +159,8 @@ void print_aliases();
 
 const struct socket_info* grep_sock_info_ext(str* host, unsigned short port,
 										unsigned short proto, int check_tag);
+
+struct socket_info_full* find_si_matching_subnet(str* host, unsigned short proto);
 
 const struct socket_info* parse_sock_info(str *spec);
 
