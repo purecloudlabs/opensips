@@ -43,6 +43,7 @@
 #include "../presence/hash.h"
 #include "../../action.h"
 #include "../../trim.h"
+#include "../../redact_pii.h"
 #include "dlg.h"
 #include "b2b_entities.h"
 #include "b2be_db.h"
@@ -764,7 +765,7 @@ int b2b_prescript_f(struct sip_msg *msg, void *uparam)
 		/* check if first route is local*/
 		if ( parse_uri(rt->nameaddr.uri.s,rt->nameaddr.uri.len,&puri)!=0 ) {
 			LM_ERR("Route uri is not valid <%.*s>\n",
-				rt->nameaddr.uri.len,rt->nameaddr.uri.s);
+				rt->nameaddr.uri.len,redact_pii(rt->nameaddr.uri.s));
 			return SCB_RUN_ALL;
 		}
 		if (check_self_strict( &puri.host, puri.port_no, puri.proto)!= 1 ) {
@@ -787,7 +788,7 @@ int b2b_prescript_f(struct sip_msg *msg, void *uparam)
 		if (rt) {
 			if ( parse_uri(rt->nameaddr.uri.s,rt->nameaddr.uri.len,&puri)!=0 ){
 				LM_ERR("Second route uri is not valid <%.*s>\n",
-					rt->nameaddr.uri.len,rt->nameaddr.uri.s);
+					rt->nameaddr.uri.len,redact_pii(rt->nameaddr.uri.s));
 				return SCB_RUN_ALL;
 			}
 			if (check_self_strict( &puri.host, puri.port_no, puri.proto)!= 1 ){
@@ -3929,7 +3930,9 @@ int b2b_apply_lumps(struct sip_msg* msg)
 	msg->id                 = tmp.id;
 	msg->rcv                = tmp.rcv;
 	msg->set_global_address = tmp.set_global_address;
+	msg->set_global_address_via = tmp.set_global_address_via;
 	msg->set_global_port    = tmp.set_global_port;
+	msg->set_global_port_contact = tmp.set_global_port_contact;
 	msg->flags              = tmp.flags;
 	msg->msg_flags          = tmp.msg_flags;
 	msg->hash_index         = tmp.hash_index;

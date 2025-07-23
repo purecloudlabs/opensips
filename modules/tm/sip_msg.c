@@ -549,9 +549,14 @@ struct sip_msg*  sip_msg_cloner( struct sip_msg *org_msg, int *sip_msg_len,
 		/* the global address */
 		if (org_msg->set_global_address.s)
 			len += ROUND4(org_msg->set_global_address.len);
+		if (org_msg->set_global_address_via.s)
+			len += ROUND4(org_msg->set_global_address_via.len);
 		/* the global port */
 		if (org_msg->set_global_port.s)
 			len += ROUND4(org_msg->set_global_port.len);
+		/* the contact global port */
+		if (org_msg->set_global_port_contact.s)
+			len += ROUND4(org_msg->set_global_port_contact.len);
 		break;
 	case 1: /* updatable and cloning now */
 	case 2: /* updatable, but no cloning now */
@@ -1046,10 +1051,20 @@ struct sip_msg*  sip_msg_cloner( struct sip_msg *org_msg, int *sip_msg_len,
 			memcpy(p, org_msg->set_global_address.s, org_msg->set_global_address.len);
 			p += ROUND4(org_msg->set_global_address.len);
 		}
+		if (org_msg->set_global_address_via.s) {
+			new_msg->set_global_address_via.s = p;
+			memcpy(p, org_msg->set_global_address_via.s, org_msg->set_global_address_via.len);
+			p += ROUND4(org_msg->set_global_address_via.len);
+		}
 		if (org_msg->set_global_port.s) {
 			new_msg->set_global_port.s = p;
 			memcpy(p, org_msg->set_global_port.s, org_msg->set_global_port.len);
 			p += ROUND4(org_msg->set_global_port.len);
+		}
+		if (org_msg->set_global_port_contact.s) {
+			new_msg->set_global_port_contact.s = p;
+			memcpy(p, org_msg->set_global_port_contact.s, org_msg->set_global_port_contact.len);
+			p += ROUND4(org_msg->set_global_port_contact.len);
 		}
 
 		/* clone data lump in the same chunk as sip_msg (not updatable) */
@@ -1075,8 +1090,12 @@ struct sip_msg*  sip_msg_cloner( struct sip_msg *org_msg, int *sip_msg_len,
 			new_msg->path_vec.s = (char*)shm_malloc_bulk( org_msg->path_vec.len );
 		if (org_msg->set_global_address.len)
 			new_msg->set_global_address.s = (char*)shm_malloc_bulk( org_msg->set_global_address.len );
+		if (org_msg->set_global_address_via.len)
+			new_msg->set_global_address_via.s = (char*)shm_malloc_bulk( org_msg->set_global_address_via.len );
 		if (org_msg->set_global_port.len)
 			new_msg->set_global_port.s = (char*)shm_malloc_bulk( org_msg->set_global_port.len );
+		if (org_msg->set_global_port_contact.len)
+			new_msg->set_global_port_contact.s = (char*)shm_malloc_bulk( org_msg->set_global_port_contact.len );
 		if (l1_len)
 			new_msg->add_rm = (struct lump*)shm_malloc_bulk(l1_len);
 		if (l2_len)
@@ -1089,7 +1108,9 @@ struct sip_msg*  sip_msg_cloner( struct sip_msg *org_msg, int *sip_msg_len,
 		  || (org_msg->dst_uri.len && new_msg->dst_uri.s==NULL)
 		  || (org_msg->path_vec.len && new_msg->path_vec.s==NULL)
 		  || (org_msg->set_global_address.len && new_msg->set_global_address.s==NULL)
+		  || (org_msg->set_global_address_via.len && new_msg->set_global_address_via.s==NULL)
 		  || (org_msg->set_global_port.len && new_msg->set_global_port.s==NULL)
+		  || (org_msg->set_global_port_contact.len && new_msg->set_global_port_contact.s==NULL)
 		  || (l1_len && new_msg->add_rm==NULL)
 		  || (l2_len && new_msg->body_lumps==NULL)
 		  || (l3_len && new_msg->reply_lump==NULL) ) {
@@ -1112,8 +1133,12 @@ struct sip_msg*  sip_msg_cloner( struct sip_msg *org_msg, int *sip_msg_len,
 			memcpy( new_msg->path_vec.s, org_msg->path_vec.s, org_msg->path_vec.len);
 		if (org_msg->set_global_address.len)
 			memcpy( new_msg->set_global_address.s, org_msg->set_global_address.s, org_msg->set_global_address.len);
+		if (org_msg->set_global_address_via.len)
+			memcpy( new_msg->set_global_address_via.s, org_msg->set_global_address_via.s, org_msg->set_global_address_via.len);
 		if (org_msg->set_global_port.len)
 			memcpy( new_msg->set_global_port.s, org_msg->set_global_port.s, org_msg->set_global_port.len);
+		if (org_msg->set_global_port_contact.len)
+			memcpy( new_msg->set_global_port_contact.s, org_msg->set_global_port_contact.s, org_msg->set_global_port_contact.len);
 		/* clone lumps */
 		p = (char*)new_msg->add_rm;
 		CLONE_LUMP_LIST( p, &(new_msg->add_rm), org_msg->add_rm);
@@ -1146,9 +1171,14 @@ struct sip_msg*  sip_msg_cloner( struct sip_msg *org_msg, int *sip_msg_len,
 		/* set_global_address to zero */
 		new_msg->set_global_address.s = 0;
 		new_msg->set_global_address.len = 0;
+		new_msg->set_global_address_via.s = 0;
+		new_msg->set_global_address_via.len = 0;
 		/* set_global_port to zero */
 		new_msg->set_global_port.s = 0;
 		new_msg->set_global_port.len = 0;
+		/* set_global_port_contact to zero */
+		new_msg->set_global_port_contact.s = 0;
+		new_msg->set_global_port_contact.len = 0;
 		/* set lumps to zero */
 		new_msg->add_rm = 0;
 		new_msg->body_lumps = 0;
@@ -1233,7 +1263,9 @@ int update_cloned_msg_from_msg(struct sip_msg *c_msg, struct sip_msg *msg)
 	REALLOC_CLONED_FIELD_unsafe( dst_uri, c_msg, msg, 1);
 	REALLOC_CLONED_FIELD_unsafe( path_vec, c_msg, msg, 2);
 	REALLOC_CLONED_FIELD_unsafe( set_global_address, c_msg, msg, 3);
-	REALLOC_CLONED_FIELD_unsafe( set_global_port, c_msg, msg, 4);
+	REALLOC_CLONED_FIELD_unsafe( set_global_address_via, c_msg, msg, 4);
+	REALLOC_CLONED_FIELD_unsafe( set_global_port, c_msg, msg, 5);
+	REALLOC_CLONED_FIELD_unsafe( set_global_port_contact, c_msg, msg, 6);
 
 	/*
 	 * lump reallocation (guaranteed to be equal or greater size).
@@ -1270,7 +1302,9 @@ int update_cloned_msg_from_msg(struct sip_msg *c_msg, struct sip_msg *msg)
 	COPY_CLONED_FIELD( dst_uri, c_msg, msg, 1);
 	COPY_CLONED_FIELD( path_vec, c_msg, msg, 2);
 	COPY_CLONED_FIELD( set_global_address, c_msg, msg, 3);
-	COPY_CLONED_FIELD( set_global_port, c_msg, msg, 4);
+	COPY_CLONED_FIELD( set_global_address_via, c_msg, msg, 4);
+	COPY_CLONED_FIELD( set_global_port, c_msg, msg, 5);
+	COPY_CLONED_FIELD( set_global_port_contact, c_msg, msg, 6);
 
 	/* re-build lumps */
 	if (l1_len) {

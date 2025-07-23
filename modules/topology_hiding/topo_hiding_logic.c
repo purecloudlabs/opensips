@@ -26,6 +26,8 @@
 
 #include "../../ut.h"
 #include "topo_hiding_logic.h"
+#include "../../redact_pii.h"
+#include "../../socket_info.h"
 
 extern int force_dialog;
 extern struct tm_binds tm_api;
@@ -147,7 +149,9 @@ int topology_hiding_match(struct sip_msg *msg)
 
 	r_uri = &msg->parsed_uri;
 
-	if (check_self(&r_uri->host,r_uri->port_no ? r_uri->port_no : SIP_PORT, 0) == 1 && msg->route == NULL) {
+	if ((find_si_matching_subnet(&r_uri->host, 0) != 0 || 
+		check_self(&r_uri->host,r_uri->port_no ? r_uri->port_no : SIP_PORT, 0) == 1) 
+		&& msg->route == NULL) {
 		/* Seems we are in the topo hiding case :
 		 * we are in the R-URI and there are no other route headers */
 		for (i=0;i<r_uri->u_params_no;i++)
@@ -613,7 +617,7 @@ static int topo_dlg_replace_contact(struct sip_msg* msg, struct dlg_cell* dlg,
 	/* make sure we do not free this string in case of a further error */
 	prefix = NULL;
 
-	if ((lump = insert_subst_lump_after(lump, SUBST_SND_ALL, 0)) == 0) {
+	if ((lump = insert_subst_lump_after(lump, SUBST_SND_ALL_CONTACT, 0)) == 0) {
 		LM_ERR("failed inserting SUBST_SND buf\n");
 		goto error;
 	}
@@ -1606,7 +1610,7 @@ int topo_callid_post_raw(str *data, struct sip_msg* foo)
 	msg.buf=data->s;
 	msg.len=data->len;
 	if (dlg_th_callid_pre_parse(&msg,1) < 0) {
-		LM_ERR("could not parse resulted sip message: %.*s\n", data->len, data->s);
+		LM_ERR("could not parse resulted sip message: %.*s\n", data->len, redact_pii(data->s));
 		goto done;
 	}
 
@@ -1929,7 +1933,7 @@ static int topo_no_dlg_encode_contact(struct sip_msg *msg,int flags, str *routes
 		goto error;
 	}
 
-	if (!(lump = insert_subst_lump_after(lump, SUBST_SND_ALL, 0))) {
+	if (!(lump = insert_subst_lump_after(lump, SUBST_SND_ALL_CONTACT, 0))) {
 		LM_ERR("failed inserting SUBST_SND buf\n");
 		goto error;
 	}

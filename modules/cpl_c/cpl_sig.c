@@ -21,6 +21,7 @@
 
 #include "../../action.h"
 #include "../../dset.h"
+#include "../../redact_pii.h"
 #include "../tm/tm_load.h"
 #include "loc_set.h"
 #include "cpl_sig.h"
@@ -82,7 +83,7 @@ int cpl_proxy_to_loc_set( struct sip_msg *msg, struct location **locs,
 		branch.q = Q_UNSPECIFIED;
 		branch.bflags = bflags;
 		if (append_msg_branch(&branch)==-1){
-			LM_ERR("failed when appending branch <%s>\n",(*locs)->addr.uri.s);
+			LM_ERR("failed when appending branch <%s>\n",redact_pii((*locs)->addr.uri.s));
 			goto error;
 		}
 		/* free the location and point to the next one */

@@ -142,6 +142,18 @@ static inline int pre_print_uac_request( struct cell *t, int branch,
 		memcpy( t->uac[branch].adv_address.s, request->set_global_address.s,
 			request->set_global_address.len+1);
 	}
+	if (request->set_global_address_via.len) {
+		t->uac[branch].adv_address_via.s = shm_realloc(t->uac[branch].adv_address_via.s,
+			request->set_global_address_via.len+1);
+		if (t->uac[branch].adv_address_via.s==NULL) {
+			LM_ERR("shm_realloc failed for storing the advertised via address "
+				"(len=%d)\n",request->set_global_address_via.len);
+			goto error;
+		}
+		t->uac[branch].adv_address_via.len = request->set_global_address_via.len;
+		memcpy( t->uac[branch].adv_address_via.s, request->set_global_address_via.s,
+			request->set_global_address_via.len+1);
+	}
 	if (request->set_global_port.len) {
 		t->uac[branch].adv_port.s = shm_realloc(t->uac[branch].adv_port.s,
 			request->set_global_port.len+1);
@@ -153,6 +165,18 @@ static inline int pre_print_uac_request( struct cell *t, int branch,
 		t->uac[branch].adv_port.len = request->set_global_port.len;
 		memcpy( t->uac[branch].adv_port.s, request->set_global_port.s,
 			request->set_global_port.len+1);
+	}
+	if (request->set_global_port_contact.len) {
+		t->uac[branch].adv_port_contact.s = shm_realloc(t->uac[branch].adv_port_contact.s,
+			request->set_global_port_contact.len+1);
+		if (t->uac[branch].adv_port_contact.s==NULL) {
+			LM_ERR("shm_realloc failed for storing the advertised contact port "
+				"(len=%d)\n",request->set_global_port_contact.len);
+			goto error;
+		}
+		t->uac[branch].adv_port_contact.len = request->set_global_port_contact.len;
+		memcpy( t->uac[branch].adv_port_contact.s, request->set_global_port_contact.s,
+			request->set_global_port_contact.len+1);
 	}
 
 

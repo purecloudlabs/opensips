@@ -43,6 +43,7 @@
 #include "../../net/proto_tcp/tcp_common_defs.h"
 #include "../../pt.h"
 #include "../../ut.h"
+#include "../../redact_pii.h"
 #include "../compression/compression_api.h"
 #include "../tls_mgm/api.h"
 #include "hep.h"
@@ -88,6 +89,7 @@ static int hep_async_local_connect_timeout = 100;
 static int hep_async_local_write_timeout = 10;
 static int hep_tls_handshake_timeout = 100;
 static int hep_tls_async_handshake_connect_timeout = 10;
+static int hep_tcp_conn_max_lifetime = 0;
 
 int hep_ctx_idx = 0;
 int hep_capture_id = 1;
@@ -144,6 +146,7 @@ static const param_export_t params[] = {
 	{ "homer5_delim",                    STR_PARAM, &homer5_delim.s                 },
 	{ "hep_max_retries",                 INT_PARAM, &hep_max_retries                },
 	{ "hep_retry_cooldown",              INT_PARAM, &hep_retry_cooldown             },
+	{ "hep_tcp_conn_max_lifetime",       INT_PARAM, &hep_tcp_conn_max_lifetime      },
 	{0, 0, 0}
 };
 
@@ -312,6 +315,7 @@ static int proto_hep_init_tcp(struct proto_info* pi)
 	pi->name               = "hep_tcp";
 	pi->default_port       = hep_port;
 	pi->tran.init_listener = tcp_init_listener;
+	pi->tran.bind_listener = tcp_bind_listener;
 
 	pi->tran.dst_attr      = tcp_conn_fcntl;
 
@@ -336,6 +340,7 @@ static int proto_hep_init_tls(struct proto_info* pi)
 	pi->name                = "hep_tls";
 	pi->default_port        = hep_port;
 	pi->tran.init_listener  = tcp_init_listener;
+	pi->tran.bind_listener  = tcp_bind_listener;
 
 	pi->tran.dst_attr       = tcp_conn_fcntl;
 
@@ -408,6 +413,13 @@ static int hep_tls_send(const struct socket_info* send_sock,
 	return hep_tcp_or_tls_send(send_sock, buf, len, to, id, 1);
 }
 
+static int is_connection_max_lifetime_exceeded(struct tcp_connection* c) {
+	if (hep_tcp_conn_max_lifetime == 0 || c == NULL) return 0;
+	int conn_life = time(0) - c->first_seen;
+	if (conn_life >= hep_tcp_conn_max_lifetime) return 1;
+	return 0;
+}
+
 static int hep_tcp_or_tls_send(const struct socket_info* send_sock,
 		char* buf, unsigned int len, const union sockaddr_union* to,
 		unsigned int id, unsigned int is_tls)
@@ -433,6 +445,8 @@ static int hep_tcp_or_tls_send(const struct socket_info* send_sock,
 		LM_ERR("failed to acquire connection\n");
 		return -1;
 	}
+
+	if (is_connection_max_lifetime_exceeded(c)) c->do_not_reuse = 1;
 
 	/* was connection found ?? */
 	if (c == 0) {
@@ -511,6 +525,8 @@ static int hep_tcp_or_tls_send(const struct socket_info* send_sock,
 			LM_ERR("connect failed\n");
 			return -1;
 		}
+		c->first_seen = time(0);
+		c->do_not_reuse = 0;
 		goto send_it;
 	}
 
@@ -559,7 +575,11 @@ send_it:
 			hep_send_timeout, hep_async_local_write_timeout);
 	}
 
-	tcp_conn_reset_lifetime(c);
+	if (c->do_not_reuse) {
+		c->lifetime = get_ticks() - 1;
+	} else {
+		tcp_conn_set_lifetime(c, tcp_con_lifetime);
+	}
 
 	LM_DBG("after write: c= %p n/len=%d/%d fd=%d\n", c, n, len, fd);
 	/* LM_DBG("buf=\n%.*s\n", (int)len, buf); */
@@ -958,8 +978,8 @@ again:
 	if (req->error != TCP_REQ_OK){
 		LM_ERR("bad request, state=%d, error=%d "
 			  "buf:\n%.*s\nparsed:\n%.*s\n", req->state, req->error,
-			  (int)(req->pos-req->buf), req->buf,
-			  (int)(req->parsed-req->start), req->start);
+			  (int)(req->pos-req->buf), redact_pii(req->buf),
+			  (int)(req->parsed-req->start), redact_pii(req->start));
 		LM_DBG("- received from: port %d\n", con->rcv.src_port);
 		print_ip("- received from: ip ", &con->rcv.src_ip, "\n");
 		goto error;

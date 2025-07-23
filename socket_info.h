@@ -36,6 +36,7 @@
 #include "globals.h"
 #include "net/trans.h"
 #include "ut.h"
+#include "redact_pii.h"
 
 struct last_real_ports {
 	unsigned short local;
@@ -62,9 +63,13 @@ struct socket_info {
 	unsigned short adv_port;    /* optimization for grep_sock_info() */
 	unsigned short workers;
 	unsigned short tos;
+	int mark;
+	unsigned short subnet_mask;
 	struct scaling_profile *s_profile;
 	void *extra_data;
 	enum sip_protos internal_proto;
+
+	struct net* subnet;
 
 	/* these are IP-level local/remote ports used during the last write op via
 	 * this sock (or a connection belonging to this sock). These values are 
@@ -154,6 +159,8 @@ void print_aliases();
 
 const struct socket_info* grep_sock_info_ext(str* host, unsigned short port,
 										unsigned short proto, int check_tag);
+
+struct socket_info_full* find_si_matching_subnet(str* host, unsigned short proto);
 
 const struct socket_info* parse_sock_info(str *spec);
 
@@ -372,16 +379,16 @@ inline static int parse_phostport(char* s, int slen, char** host, int* hlen,
 	}
 	return 0;
 error_brackets:
-	LM_ERR("too many brackets in %s\n", s);
+	LM_ERR("too many brackets in %s\n", redact_pii(s));
 	return -1;
 error_colons:
-	LM_ERR(" too many colons in %s\n", s);
+	LM_ERR(" too many colons in %s\n", redact_pii(s));
 	return -1;
 error_proto:
-	LM_ERR("bad protocol in %s\n", s);
+	LM_ERR("bad protocol in %s\n", redact_pii(s));
 	return -1;
 error_port:
-	LM_ERR("bad port number in %s\n", s);
+	LM_ERR("bad port number in %s\n", redact_pii(s));
 	return -1;
 }
 

@@ -57,6 +57,7 @@
 #include "parse_uri.h"
 #include "parse_content.h"
 #include "../msg_callbacks.h"
+#include "../redact_pii.h"
 
 #ifdef DEBUG_DMALLOC
 #include <mem/dmalloc.h>
@@ -853,7 +854,7 @@ int parse_msg_opt(char* buf, unsigned int len, struct sip_msg* msg,
 			LM_DBG(" method:  <%.*s>\n",fl->u.request.method.len,
 				ZSW(fl->u.request.method.s));
 			LM_DBG(" uri:     <%.*s>\n",fl->u.request.uri.len,
-				ZSW(fl->u.request.uri.s));
+				redact_pii(fl->u.request.uri.s));
 			LM_DBG(" version: <%.*s>\n",fl->u.request.version.len,
 				ZSW(fl->u.request.version.s));
 			flags=HDR_EOH_F;
@@ -936,7 +937,7 @@ parse_error:
 
 error:
 	/* more debugging, msg->orig is/should be null terminated*/
-	LM_ERR("message=<%.*s>\n", (int)len, ZSW(buf));
+	LM_ERR("message=<%.*s>\n", (int)len, redact_pii(buf));
 	return -1;
 }
 
@@ -964,8 +965,12 @@ void free_sip_msg(struct sip_msg* msg)
 		pkg_free(msg->new_uri.s);
 	if (msg->set_global_address.s)
 		pkg_free(msg->set_global_address.s);
+	if (msg->set_global_address_via.s)
+		pkg_free(msg->set_global_address_via.s);
 	if (msg->set_global_port.s)
 		pkg_free(msg->set_global_port.s);
+	if (msg->set_global_port_contact.s)
+		pkg_free(msg->set_global_port_contact.s);
 	if (msg->dst_uri.s)
 		pkg_free(msg->dst_uri.s);
 	if (msg->path_vec.s)
@@ -1101,7 +1106,7 @@ int set_dst_host_port(struct sip_msg *msg, str *host, str *port)
 		return -1;
 	}
 	if (parse_uri(tmp, len, &uri)<0) {
-		LM_ERR("bad uri <%.*s>, dropping packet\n", len, tmp);
+		LM_ERR("bad uri <%.*s>, dropping packet\n", len, redact_pii(tmp));
 		return -1;
 	}
 	new_uri=pkg_malloc(MAX_URI_SIZE);
@@ -1209,7 +1214,7 @@ int rewrite_ruri(struct sip_msg *msg, str *sval, int ival,
 		len=msg->first_line.u.request.uri.len;
 	}
 	if (parse_uri(tmp, len, &uri)<0){
-		LM_ERR("bad uri <%.*s>, dropping packet\n", len, tmp);
+		LM_ERR("bad uri <%.*s>, dropping packet\n", len, redact_pii(tmp));
 		return -1;
 	}
 

@@ -42,6 +42,8 @@
 #include "mod_fix.h"
 /* needed by tcpconn_add_alias() */
 #include "net/tcp_conn_defs.h"
+#include "net/net_tcp.h"
+#include "redact_pii.h"
 
 static int fixup_forward_dest(void** param);
 static int fixup_destination(void** param);
@@ -102,9 +104,11 @@ static int w_isdsturiset(struct sip_msg *msg);
 static int w_force_rport(struct sip_msg *msg);
 static int w_add_local_rport(struct sip_msg *msg);
 static int w_force_tcp_alias(struct sip_msg *msg, int *port);
-static int w_set_adv_address(struct sip_msg *msg, str *adv_addr);
+static int w_set_adv_address(struct sip_msg *msg, str *adv_addr, str *adv_addr_via);
 static int w_set_adv_port(struct sip_msg *msg, str *adv_port);
+static int w_set_adv_port_contact(struct sip_msg *msg, str *adv_port);
 static int w_f_send_sock(struct sip_msg *msg, struct socket_info *si);
+static int w_f_close_tcp_sock(struct sip_msg *msg, str *host, int *port);
 static int w_serialize_branches(struct sip_msg *msg, int *clear_prev,
 					int *keep_ord);
 static int w_next_branches(struct sip_msg *msg);
@@ -249,13 +253,22 @@ const cmd_export_t core_cmds[]={
 		{CMD_PARAM_INT|CMD_PARAM_OPT, 0, 0}, {0,0,0}},
 		ALL_ROUTES},
 	{"set_advertised_address", (cmd_function)w_set_adv_address, {
-		{CMD_PARAM_STR, 0, 0}, {0,0,0}},
+		{CMD_PARAM_STR, 0, 0},
+		{CMD_PARAM_STR|CMD_PARAM_OPT, 0, 0},
+		{0,0,0}},
 		ALL_ROUTES},
 	{"set_advertised_port", (cmd_function)w_set_adv_port, {
 		{CMD_PARAM_STR, 0, 0}, {0,0,0}},
 		ALL_ROUTES},
+	{"set_contact_advertised_port", (cmd_function)w_set_adv_port_contact, {
+		{CMD_PARAM_STR, 0, 0}, {0,0,0}},
+		ALL_ROUTES},
 	{"force_send_socket", (cmd_function)w_f_send_sock, {
 		{CMD_PARAM_STR, fixup_f_send_sock, 0}, {0,0,0}},
+		ALL_ROUTES},
+	{"force_close_tcp_socket", (cmd_function)w_f_close_tcp_sock, {
+		{CMD_PARAM_STR, 0, 0},
+		{CMD_PARAM_INT, 0, 0}, {0,0,0}},
 		ALL_ROUTES},
 	{"serialize_branches", (cmd_function)w_serialize_branches, {
 		{CMD_PARAM_INT, 0, 0},
@@ -533,7 +546,7 @@ static int fixup_f_send_sock(void** param)
 
 	he=resolvehost(host_nt.s,0);
 	if (he==0){
-		LM_ERR(" could not resolve %s\n", host_nt.s);
+		LM_ERR(" could not resolve %s\n", redact_pii(host_nt.s));
 		goto error;
 	}
 	hostent2ip_addr(&ip, he, 0);
@@ -1093,9 +1106,13 @@ static int w_force_tcp_alias(struct sip_msg *msg, int *port)
 	return 1;	
 }
 
-static int w_set_adv_address(struct sip_msg *msg, str *adv_addr)
+static int w_set_adv_address(struct sip_msg *msg, str *adv_addr, str *adv_addr_via)
 {
-	LM_DBG("setting adv address = [%.*s]\n", adv_addr->len, adv_addr->s);
+	if (adv_addr_via) {
+		LM_DBG("setting adv address = [%.*s]; via adv address = [%.*s]\n", adv_addr->len, adv_addr->s, adv_addr_via->len, adv_addr_via->s);
+	} else {
+		LM_DBG("setting adv address = [%.*s]\n", adv_addr->len, adv_addr->s);
+	}
 
 	/* duplicate the advertised address into private memory */
 	if (adv_addr->len > msg->set_global_address.len) {
@@ -1108,6 +1125,20 @@ static int w_set_adv_address(struct sip_msg *msg, str *adv_addr)
 	}
 	memcpy(msg->set_global_address.s, adv_addr->s, adv_addr->len);
 	msg->set_global_address.len = adv_addr->len;
+
+	if (adv_addr_via && adv_addr_via->len > 0) {
+		msg->set_global_address_via.s = pkg_realloc(msg->set_global_address_via.s, adv_addr_via->len);
+		if (!msg->set_global_address_via.s) {
+			LM_ERR("out of pkg mem\n");
+			return E_OUT_OF_MEM;
+		}
+
+		memcpy(msg->set_global_address_via.s, adv_addr_via->s, adv_addr_via->len);
+		msg->set_global_address_via.len = adv_addr_via->len;
+	} else {
+		msg->set_global_address_via.s = NULL;
+		msg->set_global_address_via.len = 0;
+	}
 
 	return 1;
 }
@@ -1131,12 +1162,62 @@ static int w_set_adv_port(struct sip_msg *msg, str *adv_port)
 	return 1;
 }
 
+static int w_set_adv_port_contact(struct sip_msg *msg, str *adv_port)
+{
+	LM_DBG("setting contact adv port '%.*s'\n", adv_port->len, adv_port->s);
+
+	/* duplicate the advertised port into private memory */
+	if (adv_port->len > msg->set_global_port_contact.len) {
+		msg->set_global_port_contact.s = pkg_realloc(msg->set_global_port_contact.s, adv_port->len);
+		if (!msg->set_global_port_contact.s) {
+			LM_ERR("out of pkg mem\n");
+			return E_OUT_OF_MEM;
+		}
+	}
+	memcpy(msg->set_global_port_contact.s, adv_port->s, adv_port->len);
+	msg->set_global_port_contact.len = adv_port->len;
+
+	return 1;
+}
+
 static int w_f_send_sock(struct sip_msg *msg, struct socket_info *si)
 {
 	msg->force_send_socket=(const struct socket_info *)si;
 
 	return 1;
 }
+
+static int w_f_close_tcp_sock(struct sip_msg *msg, str *host, int *port)
+{
+	int fd, n, i, closed_no = 0;
+	struct hostent *he;
+	struct ip_addr ip;
+	struct tcp_connection *c;
+
+	he = resolvehost(host->s, 0);
+	if (he == 0) {
+		LM_ERR("could not resolve host\n");
+		return E_BAD_ADDRESS;
+	}
+
+	for (i = 0; he->h_addr_list[i]; ++i) {
+		hostent2ip_addr(&ip, he, i);
+		n = tcp_conn_get(0, &ip, *port, PROTO_TCP, NULL, &c, &fd, NULL);
+		if (n < 0 || c == 0) continue;
+		shutdown(fd, SHUT_RDWR);
+		c->state = S_CONN_BAD;
+		tcp_conn_release(c, 0);
+		closed_no += 1;
+	}
+
+	if (closed_no == 0) {
+		LM_WARN("TCP connection not found\n");
+		return -1;
+	}
+	LM_DBG("TCP connection force closed\n");
+	return 1;
+}
+
 
 static int w_serialize_branches(struct sip_msg *msg, int *clear_prev,
 							int *keep_ord)

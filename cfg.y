@@ -181,9 +181,11 @@ struct listen_param {
 	enum si_flags flags;
 	int workers;
 	int tos;
+	int mark;
 	struct socket_id *socket;
 	char *tag;
 	char *auto_scaling_profile;
+	int subnet_mask;
 } p_tmp;
 static void fill_socket_id(struct listen_param *param, struct socket_id *s);
 
@@ -394,6 +396,7 @@ extern int cfg_parse_only_routes;
 %token MCAST_TTL
 %token TOS
 %token DISABLE_DNS_FAILOVER
+%token REDACT_PII_
 %token DISABLE_DNS_BLACKLIST
 %token DST_BLACKLIST
 %token DISABLE_STATELESS_FWD
@@ -457,9 +460,11 @@ extern int cfg_parse_only_routes;
 %token LBRACK
 %token RBRACK
 %token SLASH
+%token SUBNET_MASK
 %token AS
 %token USE_WORKERS
 %token SOCK_TOS
+%token MARK
 %token USE_AUTO_SCALING_PROFILE
 %token MAX
 %token MIN
@@ -749,6 +754,15 @@ socket_def_param: ANYCAST { IFOR();
 					}
 				| SOCK_TOS NUMBER { IFOR();
 					p_tmp.tos=$2;
+					}
+				| MARK NUMBER { IFOR();
+					p_tmp.mark = $2;
+					}
+				| SUBNET_MASK NUMBER { IFOR();
+					p_tmp.subnet_mask=$2;
+					if (p_tmp.subnet_mask < 1 || p_tmp.subnet_mask > 32) {
+						yyerror("subnet_mask not valid, must be between 0 and 128 for IPv4 and IPv6\n");YYABORT;
+					}
 					}
 				| AS listen_id_def { IFOR();
 					p_tmp.socket = $2;
@@ -1596,6 +1610,10 @@ assign_stm: LOGLEVEL EQUAL snumber { IFOR();
 										disable_dns_failover=$3;
 									}
 		| DISABLE_DNS_FAILOVER error { yyerror("boolean value expected"); }
+		| REDACT_PII_ EQUAL NUMBER { IFOR();
+										redact_pii_=$3;
+									}
+		| REDACT_PII_ error { yyerror("boolean value expected"); }				
 		| DISABLE_DNS_BLACKLIST EQUAL NUMBER { IFOR();
 										disable_dns_blacklist=$3;
 									}
@@ -2765,8 +2783,10 @@ static void fill_socket_id(struct listen_param *param, struct socket_id *s)
 	struct socket_id *socket;
 	while (s) {
 		s->flags |= param->flags;
+		s->subnet_mask = param->subnet_mask;
 		s->workers = param->workers;
 		s->tos = param->tos;
+		s->mark = param->mark;
 		s->auto_scaling_profile = param->auto_scaling_profile;
 		s->tag = param->tag;
 		if (param->socket) {

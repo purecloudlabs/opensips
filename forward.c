@@ -79,6 +79,7 @@
 #include "blacklists.h"
 #include "msg_callbacks.h"
 #include "md5utils.h"
+#include "redact_pii.h"
 
 
 
@@ -155,25 +156,14 @@ const struct socket_info* get_send_socket(struct sip_msg *msg,
 											msg->force_send_socket->port_no,
 											proto);
 		}
-		if (msg->force_send_socket && (msg->force_send_socket->socket!=-1))
+		if (msg->force_send_socket)
 			return msg->force_send_socket;
-		else{
-			if (msg->force_send_socket && msg->force_send_socket->socket==-1)
-				LM_WARN("not listening on the requested socket, no fork mode?\n");
-			else
-				LM_WARN("protocol/port mismatch\n");
-		}
+		else
+			LM_WARN("protocol/port mismatch\n");
 	};
 
-	if (mhomed && proto==PROTO_UDP){
-		send_sock=get_out_socket(to, proto);
-		if ((send_sock==0) || (send_sock->socket!=-1))
-			return send_sock; /* found or error*/
-		else if (send_sock->socket==-1){
-			LM_WARN("not listening on the requested socket, no fork mode?\n");
-			/* continue: try to use some socket */
-		}
-	}
+	if (mhomed && proto==PROTO_UDP)
+		return get_out_socket(to, proto);
 
 	send_sock=0;
 	/* check if we need to change the socket (different address families -
@@ -486,7 +476,7 @@ int forward_reply(struct sip_msg* msg)
 					msg->via1->port?msg->via1->port:SIP_PORT,
 					msg->via1->proto)!=1){
 			LM_ERR("host in first via!=me : %.*s:%d\n",
-				msg->via1->host.len, msg->via1->host.s,	msg->via1->port);
+				msg->via1->host.len, redact_pii(msg->via1->host.s), msg->via1->port);
 			/* send error msg back? */
 			goto error;
 		}

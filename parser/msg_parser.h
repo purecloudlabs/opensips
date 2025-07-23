@@ -345,7 +345,9 @@ struct sip_msg {
 	unsigned int msg_flags;
 
 	str set_global_address;
+	str set_global_address_via;
 	str set_global_port;
+	str set_global_port_contact;
 
 	/* used to store a particular time of the message - note that the time is
 	 * not stored when the message was received, but only the first time

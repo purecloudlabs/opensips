@@ -283,6 +283,7 @@ MCAST_LOOPBACK		"mcast_loopback"
 MCAST_TTL			"mcast_ttl"
 TOS					"tos"
 DISABLE_DNS_FAILOVER  "disable_dns_failover"
+REDACT_PII_ "redact_pii_"
 DISABLE_DNS_BLACKLIST "disable_dns_blacklist"
 DST_BLACKLIST		"dst_blacklist"
 MAX_WHILE_LOOPS "max_while_loops"
@@ -320,8 +321,10 @@ QUOTES		\"
 TICK		\'
 SLASH		"/"
 AS			{EAT_ABLE}("as"|"AS"){EAT_ABLE}
+SUBNET_MASK {EAT_ABLE}("subnet_mask"|"SUBNET_MASK"){EAT_ABLE}
 USE_WORKERS	{EAT_ABLE}("use_workers"|"USE_WORKERS"){EAT_ABLE}
 SOCK_TOS	{EAT_ABLE}("tos"|"TOS"){EAT_ABLE}
+MARK {EAT_ABLE}("mark"|"MARK"){EAT_ABLE}
 USE_AUTO_SCALING_PROFILE {EAT_ABLE}("use_auto_scaling_profile"|"USE_AUTO_SCALING_PROFILE"){EAT_ABLE}
 SCALE_UP_TO		{EAT_ABLE}("scale"|"SCALE"){EAT_ABLE}+("up"|"UP"){EAT_ABLE}+("to"|"TO"){EAT_ABLE}
 SCALE_DOWN_TO	{EAT_ABLE}("scale"|"SCALE"){EAT_ABLE}+("down"|"DOWN"){EAT_ABLE}+("to"|"TO"){EAT_ABLE}
@@ -528,6 +531,8 @@ SPACE		[ ]
 									return TOS; }
 <INITIAL>{DISABLE_DNS_FAILOVER}	{	count(); yylval.strval=yytext;
 									return DISABLE_DNS_FAILOVER; }
+<INITIAL>{REDACT_PII_}	{	count(); yylval.strval=yytext; 
+									return REDACT_PII_;}
 <INITIAL>{DISABLE_DNS_BLACKLIST}	{	count(); yylval.strval=yytext;
 									return DISABLE_DNS_BLACKLIST; }
 <INITIAL>{DST_BLACKLIST}	{	count(); yylval.strval=yytext;
@@ -602,8 +607,10 @@ SPACE		[ ]
 
 <INITIAL>{COMMA}		{ count(); return COMMA; }
 <INITIAL>{SEMICOLON}	{ count(); return SEMICOLON; }
+<INITIAL>{SUBNET_MASK}  { count(); return SUBNET_MASK; }
 <INITIAL>{USE_WORKERS}  { count(); return USE_WORKERS; }
 <INITIAL>{SOCK_TOS}	{ count(); return SOCK_TOS; }
+<INITIAL>{MARK} { count(); return MARK; }
 <INITIAL>{USE_AUTO_SCALING_PROFILE}  { count(); return USE_AUTO_SCALING_PROFILE; }
 <INITIAL>{COLON}	{ count(); return COLON; }
 <INITIAL>{RPAREN}	{ count(); return RPAREN; }
