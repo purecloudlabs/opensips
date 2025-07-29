@@ -415,9 +415,9 @@ static int init_transfer(CURL *handle, char *url, unsigned long timeout_s)
 	}
 
 	w_curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT,
-			timeout_s && timeout_s < connection_timeout ? timeout_s : connection_timeout);
+			timeout_s && timeout_s > connection_timeout ? timeout_s : connection_timeout);
 	w_curl_easy_setopt(handle, CURLOPT_TIMEOUT,
-			timeout_s && timeout_s < curl_timeout ? timeout_s : curl_timeout);
+			timeout_s && timeout_s > curl_timeout ? timeout_s : curl_timeout);
 
 	w_curl_easy_setopt(handle, CURLOPT_VERBOSE, 1);
 	w_curl_easy_setopt(handle, CURLOPT_STDERR, stdout);
@@ -891,7 +891,7 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 	multi_handle = multi_list->multi_handle;
 	curl_multi_add_handle(multi_handle, handle);
 
-	connect_timeout = (async_parm->timeout_s*1000) < connection_timeout_ms ?
+	connect_timeout = (async_parm->timeout_s*1000) > connection_timeout_ms ?
 			(async_parm->timeout_s*1000) : connection_timeout_ms;
 	timeout = connect_timeout;
 	busy_wait = connect_poll_interval;
@@ -974,7 +974,7 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 			for (fd = 0; fd <= max_fd; fd++) {
 				if (FD_ISSET(fd, &rset)) {
 					LM_DBG("ongoing transfer on fd %d\n", fd);
-					if (connect > 0 && req_sz > 0 && is_new_transfer(fd)) {
+					if (req_sz > 0 && is_new_transfer(fd)) {
 						LM_DBG(">>> add fd %d to ongoing transfers\n", fd);
 						add_transfer(fd);
 						goto success;
