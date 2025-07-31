@@ -109,3 +109,23 @@ size_t header_func(char *ptr, size_t size, size_t nmemb, void *userdata)
 	return len;
 }
 
+int timer_cb(CURLM *multi_handle, long timeout_ms, void *cbp)
+{
+	LM_DBG("multi_handle timer called %ld\n", timeout_ms);
+	long *p = (long*) cbp;
+
+	*p = timeout_ms;
+
+  	return 0;
+}
+
+int prereq_callback(void *cbp,
+                           char *conn_primary_ip,
+                           char *conn_local_ip,
+                           int conn_primary_port,
+                           int conn_local_port)
+{
+	enum curl_status *p = (enum curl_status*) cbp;
+	*p = CURL_REQUEST_SENT;
+	return 0;
+}

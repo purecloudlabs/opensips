@@ -25,6 +25,8 @@
 #ifndef _REST_CB_H_
 #define _REST_CB_H_
 
+#include <curl/curl.h>
+
 #include "rest_client.h"
 
 #include "../../str.h"
@@ -39,8 +41,14 @@
 #define MAX_CONTENT_TYPE_LEN     64
 #define MAX_HEADER_FIELD_LEN	 1024 /* arbitrary */
 
+enum curl_status {
+    CURL_NONE=0, CURL_CONNECTED=1, CURL_REQUEST_SENDING=2, CURL_REQUEST_SENT=4, CURL_FINISHED=8, CURL_TIMEOUT=16, CURL_ERROR=32
+};
+
 size_t write_func(char *ptr, size_t size, size_t nmemb, void *userdata);
 size_t header_func(char *ptr, size_t size, size_t nmemb, void *userdata);
+int timer_cb(CURLM *multi_handle, long timeout_ms, void *cbp);
+int prereq_callback(void *cbp,  char *conn_primary_ip,  char *conn_local_ip, int conn_primary_port, int conn_local_port);
 
 #endif /* _REST_CB_H_ */
 

@@ -1,6 +1,5 @@
-/**
- *
- * Copyright (C) 2020 OpenSIPS Foundation
+/*
+ * Copyright (C) 2025 OpenSIPS Solutions
  *
  * This file is part of opensips, a free SIP server.
  *
@@ -16,27 +15,21 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
- *
- * History
- * -------
- *  2020-01-xx  initial version (Callum Guy)
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef _REST_CLIENT_
-#define _REST_CLIENT_
+#ifndef _REST_SOCKET_H_
+#define _REST_SOCKET_H_
 
-enum tr_rest_subtype {
-	TR_REST_ESCAPE, TR_REST_UNESCAPE
-};
+#include <curl/curl.h>
+#include <curl/multi.h>
 
-typedef struct _preconnect_urls {
-	char *url;
-	unsigned int connections;
-	struct _preconnect_urls *next;
-} preconnect_urls;
+#include <sys/resource.h>
 
-extern int enable_expect_100;
-extern unsigned int max_transfer_size;
+int init_process_limits(rlim_t rlim_cur);
+int get_max_fd(int no_max_default);
+int start_multi_socket(CURLM *multi_handle);
+int run_multi_socket(CURLM *multi_handle);
+int setsocket_callback(CURLM *multi_handle);
 
-#endif /* _REST_CLIENT_ */
+#endif /* _REST_SOCKET_H_ */ 
