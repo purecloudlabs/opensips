@@ -39,6 +39,7 @@ extern long connection_timeout;
 extern long connect_poll_interval;
 extern long connection_timeout_ms;
 extern int max_async_transfers;
+extern int max_connections;
 extern long curl_timeout;
 
 extern char *ssl_capath;
@@ -47,7 +48,9 @@ extern int ssl_verifyhost;
 
 extern int curl_http_version;
 extern int no_concurrent_connects;
-extern int curl_conn_lifetime;
+extern int use_multi_socket_api;
+extern int share_connections;
+extern unsigned int curl_conn_lifetime;
 
 /* handle for use with synchronous reqs */
 extern CURL *sync_handle;
@@ -121,6 +124,7 @@ typedef struct rest_async_param_ {
 	pv_spec_p body_pv;
 	pv_spec_p ctype_pv;
 	pv_spec_p code_pv;
+	unsigned int timeout_s;
 } rest_async_param;
 
 int init_sync_handle(void);
@@ -139,9 +143,18 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 enum async_ret_code resume_async_http_req(int fd, struct sip_msg *msg, void *_param);
 enum async_ret_code time_out_async_http_req(int fd, struct sip_msg *msg, void *_param);
 
+// Temporary expose these
+int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
+                            char *url, str *req_body, str *req_ctype,
+                            rest_async_param *async_parm, str *body, str *ctype,
+						    enum async_ret_code *out_fd);
+
+enum async_ret_code resume_async_http_req_v2(int fd, struct sip_msg *msg, void *_param);
+enum async_ret_code time_out_async_http_req_v2(int fd, struct sip_msg *msg, void *_param);
 
 int rest_append_hf_method(struct sip_msg *msg, str *hfv);
 int rest_init_client_tls(struct sip_msg *msg, str *tls_client_dom);
+int connect_only(preconnect_urls *precon_urls, int total_cons);
 
 #endif /* _REST_METHODS_ */
 

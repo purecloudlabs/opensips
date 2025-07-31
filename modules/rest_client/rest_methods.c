@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <curl/curl.h>
+#include <curl/multi.h>
 
 #include "../../mem/shm_mem.h"
 #include "../../async.h"
@@ -40,6 +41,20 @@
 #include "rest_client.h"
 #include "rest_methods.h"
 #include "rest_cb.h"
+#include "rest_sockets.h"
+
+/*
+ * So the connections never timeout
+ * version 8.15 allows 0 to disable the check
+ * Need to use limits.h to get LONG_MAX otherwise
+ */
+
+#if (LIBCURL_VERSION_NUM >= 0x080f00)
+long socket_keep_alive = 0;
+#else
+#include <limits.h>
+long socket_keep_alive = LONG_MAX;
+#endif
 
 #define REST_CORRELATION_COOKIE "RESTCORR"
 
@@ -73,6 +88,8 @@ extern int rest_proto_id;
 extern trace_proto_t tprot;
 extern char *rest_id_s;
 
+static CURLSH *curl_share = NULL;
+
 /**
  * We cannot use the "parallel transfers" feature of libcurl's multi interface
  * because that would consume read events from some of its file descriptors that
@@ -92,7 +109,8 @@ static int multi_pool_sz;
 static map_t rcl_connections;
 static gen_hash_t *rcl_parallel_connects;
 int no_concurrent_connects;
-int curl_conn_lifetime;
+int use_multi_socket_api;
+unsigned int curl_conn_lifetime;
 
 static inline int rest_trace_enabled(void);
 static int trace_rest_message( rest_trace_param_t* tparam );
@@ -155,6 +173,15 @@ int rcl_init_internals(void)
 		rc = curl_easy_setopt(h, opt, value); \
 		if (rc != CURLE_OK) { \
 			LM_ERR("curl_easy_setopt(%d): (%s)\n", opt, curl_easy_strerror(rc)); \
+			goto cleanup; \
+		} \
+	} while (0)
+
+#define w_curl_multi_setopt(mh, opt, value) \
+	do { \
+		rc = curl_multi_setopt(mh, opt, value); \
+		if (rc != CURLE_OK) { \
+			LM_ERR("curl_multi_setopt(%d): (%s)\n", opt, curl_easy_strerror(rc)); \
 			goto cleanup; \
 		} \
 	} while (0)
@@ -399,7 +426,24 @@ static inline int get_easy_status(CURL *handle, CURLM *multi, CURLcode *code)
 	return -1;
 }
 
-static int init_transfer(CURL *handle, char *url)
+static CURLSH *get_curl_share(void) {
+	CURLSHcode src;
+
+	if (!curl_share) {
+		curl_share = curl_share_init();
+
+		src = curl_share_setopt(curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
+
+		if (src != CURLSHE_OK) {
+			LM_WARN("curl_share_setopt: %s\n", curl_share_strerror(src));
+			return NULL;
+		}
+	}
+
+	return curl_share;
+}
+
+static int init_transfer(CURL *handle, char *url, unsigned long timeout_s)
 {
 	CURLcode rc;
 
@@ -414,12 +458,16 @@ static int init_transfer(CURL *handle, char *url)
 		tls_dom = NULL;
 	}
 
-	w_curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, connection_timeout);
-	w_curl_easy_setopt(handle, CURLOPT_TIMEOUT, curl_timeout);
+	w_curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT,
+			timeout_s && timeout_s > connection_timeout ? timeout_s : connection_timeout);
+	w_curl_easy_setopt(handle, CURLOPT_TIMEOUT,
+			timeout_s && timeout_s > curl_timeout ? timeout_s : curl_timeout);
 
 	w_curl_easy_setopt(handle, CURLOPT_VERBOSE, 1);
-	w_curl_easy_setopt(handle, CURLOPT_STDERR, stdout);
 	w_curl_easy_setopt(handle, CURLOPT_FAILONERROR, 0);
+
+	if (is_printable(L_DBG))
+		w_curl_easy_setopt(handle, CURLOPT_STDERR, stderr);
 
 	if (ssl_capath)
 		w_curl_easy_setopt(handle, CURLOPT_CAPATH, ssl_capath);
@@ -433,6 +481,23 @@ static int init_transfer(CURL *handle, char *url)
 	return 0;
 
 cleanup:
+	return -1;
+}
+
+static int init_socket_keepalive(CURL *handle) {
+	CURLcode rc;
+
+	curl_share = get_curl_share();
+	w_curl_easy_setopt(handle, CURLOPT_SHARE, curl_share);
+	
+	w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPALIVE, 1L);
+	w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPIDLE, 5L);
+	w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPINTVL, 5L);
+	w_curl_easy_setopt(handle, CURLOPT_MAXAGE_CONN, socket_keep_alive);
+
+	return 0;
+cleanup:
+	LM_WARN("Error creating keep alive sockets\n");
 	return -1;
 }
 
@@ -579,7 +644,7 @@ int rcl_acquire_url(const char *url, char **url_host)
 		}
 
 		if (*connected_ts != 0 && (get_ticks() -
-		        (unsigned int)*(unsigned long *)(*connected_ts) < curl_conn_lifetime)) {
+		        (unsigned int)*(unsigned long *)connected_ts < curl_conn_lifetime)) {
 			new_connection = 0;
 		} else {
 			new_connection = 1;
@@ -702,7 +767,7 @@ int rest_sync_transfer(enum rest_client_method method, struct sip_msg *msg,
 	str st = STR_NULL, res_body = STR_NULL, tbody, ttype;
 
 	curl_easy_reset(sync_handle);
-	if (init_transfer(sync_handle, url) != 0) {
+	if (init_transfer(sync_handle, url, 0) != 0) {
 		LM_ERR("failed to init transfer to %s\n", url);
 		goto cleanup;
 	}
@@ -792,34 +857,17 @@ cleanup:
 	return RCL_INTERNAL_ERR;
 }
 
-/**
- * start_async_http_req - launch an async HTTP request
- *		- TCP connect phase is synchronous, due to libcurl limitations
- *		- TCP read phase is asynchronous, thanks to the libcurl multi interface
- *
- * @msg:		sip message struct
- * @method:		HTTP verb
- * @url:		HTTP URL to be queried
- * @req_body:	Body of the request (NULL if not needed)
- * @req_ctype:	Value for the "Content-Type: " header of the request (same as ^)
- * @async_parm: output param, will contain async handles
- * @body:	    reply body; gradually reallocated as data arrives
- * @ctype:	    will eventually hold the last "Content-Type" header of the reply
- * @out_fd:     the fd to poll on, or a negative error code
- *
- * @return: 1 on success, negative on failure
- */
-int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
-                         char *url, str *req_body, str *req_ctype,
-                         rest_async_param *async_parm, str *body, str *ctype,
-						 enum async_ret_code *out_fd)
+static int start_async_http_req_v1(struct sip_msg *msg, enum rest_client_method method,
+                            char *url, str *req_body, str *req_ctype,
+                            rest_async_param *async_parm, str *body, str *ctype,
+						    enum async_ret_code *out_fd)
 {
 	CURL *handle;
 	CURLcode rc;
 	CURLMcode mrc;
 	fd_set rset, wset, eset;
 	int max_fd, fd, http_rc, ret = RCL_INTERNAL_ERR;
-	long busy_wait, timeout;
+	long busy_wait, timeout, connect_timeout;
 	long retry_time;
 	OSS_CURLM *multi_list;
 	CURLM *multi_handle;
@@ -835,7 +883,7 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 		goto cleanup;
 	}
 
-	if (init_transfer(handle, url) != 0) {
+	if (init_transfer(handle, url, async_parm->timeout_s) != 0) {
 		LM_ERR("failed to init transfer to %s\n", url);
 		goto cleanup;
 	}
@@ -889,18 +937,27 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 	multi_handle = multi_list->multi_handle;
 	curl_multi_add_handle(multi_handle, handle);
 
-	timeout = connection_timeout_ms;
+	connect_timeout = (async_parm->timeout_s*1000) > connection_timeout_ms ?
+			(async_parm->timeout_s*1000) : connection_timeout_ms;
+	timeout = connect_timeout;
 	busy_wait = connect_poll_interval;
 
 	/* obtain a read fd in "connection_timeout" seconds at worst */
-	for (timeout = connection_timeout_ms; timeout > 0; timeout -= busy_wait) {
+	for (timeout = connect_timeout; timeout > 0; timeout -= busy_wait) {
+		double connect = -1;
+		long req_sz = -1;
+
 		mrc = curl_multi_perform(multi_handle, &running_handles);
 		if (mrc != CURLM_OK && mrc != CURLM_CALL_MULTI_PERFORM) {
 			LM_ERR("curl_multi_perform: %s\n", curl_multi_strerror(mrc));
 			goto error;
 		}
 
-		LM_DBG("perform code: %d, handles: %d\n", mrc, running_handles);
+		curl_easy_getinfo(handle, CURLINFO_CONNECT_TIME, &connect);
+		curl_easy_getinfo(handle, CURLINFO_REQUEST_SIZE, &req_sz);
+
+		LM_DBG("perform code: %d, handles: %d, connect: %.3lfs, reqsz: %ldB\n",
+		        mrc, running_handles, connect, req_sz);
 
 		/* transfer completed!  But how well? */
 		if (running_handles == 0) {
@@ -923,8 +980,8 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 
 			case CURLE_OPERATION_TIMEDOUT:
 				if (http_rc == 0) {
-					LM_ERR("connect timeout on %s (%lds)\n", url,
-							connection_timeout);
+					LM_ERR("connect timeout on %s (%ldms)\n", url,
+							connect_timeout);
 					ret = RCL_CONNECT_TIMEOUT;
 					goto error;
 				}
@@ -962,9 +1019,8 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 		if (max_fd != -1) {
 			for (fd = 0; fd <= max_fd; fd++) {
 				if (FD_ISSET(fd, &rset)) {
-
 					LM_DBG("ongoing transfer on fd %d\n", fd);
-					if (is_new_transfer(fd)) {
+					if (req_sz > 0 && is_new_transfer(fd)) {
 						LM_DBG(">>> add fd %d to ongoing transfers\n", fd);
 						add_transfer(fd);
 						goto success;
@@ -981,7 +1037,7 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 
 		LM_DBG("libcurl TCP connect: we should wait up to %ldms "
 		       "(timeout=%ldms, poll=%ldms)!\n", retry_time,
-		       connection_timeout_ms, connect_poll_interval);
+		       connect_timeout, connect_poll_interval);
 
 		/*
 			from curl_multi_timeout() docs:
@@ -1055,8 +1111,8 @@ static enum async_ret_code _resume_async_http_req(int fd, struct sip_msg *msg,
 	if (timed_out) {
 		char *url = NULL;
 		curl_easy_getinfo(param->handle, CURLINFO_EFFECTIVE_URL, &url);
-		LM_ERR("async %s timed out, URL: %s\n",
-		        rest_client_method_str(param->method), url);
+		LM_ERR("async %s timed out, URL: %s (timeout: %lds)\n",
+		        rest_client_method_str(param->method), url, param->timeout_s);
 		goto cleanup;
 	}
 
@@ -1069,10 +1125,12 @@ static enum async_ret_code _resume_async_http_req(int fd, struct sip_msg *msg,
 		LM_DBG("perform result: %d, running: %d (break: %d)\n", mrc, running,
 			mrc != CURLM_CALL_MULTI_PERFORM && (mrc != CURLM_OK || !running));
 
-		if (mrc == CURLM_OK && running) {
+		if (mrc == CURLM_OK) {
+			if (!running)
+				break;
+
 			async_status = ASYNC_CONTINUE;
 			return 1;
-
 		/* this rc has been removed since cURL 7.20.0 (Feb 2010), but it's not
 		 * yet marked as deprecated, so let's keep the do/while loop */
 		} else if (mrc != CURLM_CALL_MULTI_PERFORM) {
@@ -1209,18 +1267,154 @@ out:
 	return ret;
 }
 
-
-enum async_ret_code resume_async_http_req(int fd, struct sip_msg *msg, void *_param)
+static enum async_ret_code _resume_async_http_req_v2(int fd, struct sip_msg *msg,
+										rest_async_param *param, int timed_out)
 {
-	return _resume_async_http_req(fd, msg, (rest_async_param *)_param, 0);
+	CURLcode rc;
+	CURLMcode mrc;
+	int running = 0;
+	long http_rc = 0;
+	pv_value_t val;
+	int ret = RCL_INTERNAL_ERR, retr;
+	CURLM *multi_handle;
+
+	LM_DBG("resume async processing...\n");
+
+	multi_handle = param->multi_list->multi_handle;
+
+	if (timed_out) {
+		char *url = NULL;
+		curl_easy_getinfo(param->handle, CURLINFO_EFFECTIVE_URL, &url);
+		LM_ERR("async %s timed out, URL: %s (timeout: %lds)\n",
+		        rest_client_method_str(param->method), url, param->timeout_s);
+		goto cleanup;
+	}
+
+	retr = 0;
+	do {
+		/* When @enable_expect_100 is on, both the client body upload and the
+		 * server body download will be performed within this loop, blocking */
+
+		mrc = curl_multi_socket_action(multi_handle, fd, 0, &running);
+		LM_DBG("perform result: %d, running: %d (break: %d)\n", mrc, running,
+			mrc != CURLM_CALL_MULTI_PERFORM && (mrc != CURLM_OK || !running));
+
+		if (mrc == CURLM_OK) {
+			if (!running)
+				break;
+
+			async_status = ASYNC_CONTINUE;
+			return 1;
+		/* this rc has been removed since cURL 7.20.0 (Feb 2010), but it's not
+		 * yet marked as deprecated, so let's keep the do/while loop */
+		} else if (mrc != CURLM_CALL_MULTI_PERFORM) {
+			break;
+		}
+
+		usleep(_async_resume_retr_itv);
+		retr += _async_resume_retr_itv;
+	} while (retr < _async_resume_retr_timeout);
+
+	if (mrc != CURLM_OK) {
+		LM_ERR("curl_multi_perform: %s\n", curl_multi_strerror(mrc));
+		goto out;
+	}
+
+	if (!timed_out) {
+		if (running == 1) {
+			LM_DBG("transfer in progress...\n");
+			async_status = ASYNC_CONTINUE;
+			return 1;
+		}
+
+		if (running != 0) {
+			LM_BUG("non-zero running handles!! (%d)", running);
+			goto out;
+		}
+	}
+
+cleanup:
+	curl_slist_free_all(param->header_list);
+	rc = curl_easy_getinfo(param->handle, CURLINFO_RESPONSE_CODE, &http_rc);
+	if (rc != CURLE_OK) {
+		LM_ERR("curl_easy_getinfo: %d, %s\n", rc, curl_easy_strerror(rc));
+		http_rc = 0;
+	}
+
+	if (get_easy_status(param->handle, multi_handle, &rc) < 0)
+		LM_DBG("download finished, but an HTTP status is not available "
+		        "(timed_out: %d)\n", timed_out);
+
+	if (param->code_pv) {
+		val.flags = PV_VAL_INT|PV_TYPE_INT;
+		val.ri = (int)http_rc;
+		if (pv_set_value(msg, param->code_pv, 0, &val) != 0) {
+			LM_ERR("failed to set output code pv\n");
+			goto out;
+		}
+	}
+
+	switch (rc) {
+	case CURLE_OK:
+		ret = RCL_OK;
+		break;
+
+	case CURLE_COULDNT_CONNECT:
+		LM_ERR("connect refused\n");
+		ret = RCL_CONNECT_REFUSED;
+		goto out;
+
+	case CURLE_OPERATION_TIMEDOUT:
+		LM_ERR("connected, but transfer timed out (%lds)\n", curl_timeout);
+		ret = RCL_TRANSFER_TIMEOUT;
+		break;
+
+	default:
+		LM_ERR("curl_easy_perform error %d, %s\n",
+				rc, curl_easy_strerror(rc));
+		goto out;
+	}
+
+	val.flags = PV_VAL_STR;
+	val.rs = param->body;
+	if (pv_set_value(msg, param->body_pv, 0, &val) != 0) {
+		LM_ERR("failed to set output body pv\n");
+		goto out;
+	}
+
+	if (param->ctype_pv) {
+		val.rs = param->ctype;
+		if (pv_set_value(msg, param->ctype_pv, 0, &val) != 0) {
+			LM_ERR("failed to set output ctype pv\n");
+			goto out;
+		}
+	}
+
+	LM_DBG("HTTP response code: %ld\n", http_rc);
+
+out:
+	mrc = curl_multi_remove_handle(multi_handle, param->handle);
+	if (mrc != CURLM_OK) {
+		LM_ERR("curl_multi_remove_handle: %s\n", curl_multi_strerror(mrc));
+		ret = RCL_INTERNAL_ERR;
+	}
+	put_multi(param->multi_list);
+
+	pkg_free(param->body.s);
+	if (param->ctype_pv && param->ctype.s)
+		pkg_free(param->ctype.s);
+	curl_easy_cleanup(param->handle);
+	if ( param->tparam ) {
+		pkg_free( param->tparam );
+	}
+	pkg_free(param);
+
+	if (timed_out)
+		ret = RCL_TRANSFER_TIMEOUT;
+
+	/* default async status is ASYNC_DONE */
+	return ret;
 }
-
-
-enum async_ret_code time_out_async_http_req(int fd, struct sip_msg *msg, void *_param)
-{
-	return _resume_async_http_req(fd, msg, (rest_async_param *)_param, 1);
-}
-
 
 /**
  * rest_append_hf - add a custom HTTP header before a rest call
@@ -1367,4 +1561,318 @@ static int trace_rest_message( rest_trace_param_t* tparam )
 	}
 
 	return 0;
+}
+
+int connect_only(preconnect_urls *precon_urls, int total_cons) {
+	CURLcode rc;
+	CURLMcode mrc;
+	CURL *handle;
+	CURLM *multi_handle;
+	OSS_CURLM *multi_list;
+	CURL **list;
+	struct CURLMsg *m;
+	preconnect_urls *start, *next;
+	char *url;
+	long busy_wait, timer;
+	int msgq, num_of_connections, exit_code = 0;
+
+	curl_share = get_curl_share();
+
+	if (!curl_share) {
+		goto cleanup;
+	}
+
+	multi_list = get_multi();
+	if (!multi_list) {
+		goto cleanup;
+	}
+
+	multi_handle = multi_list->multi_handle;
+
+	start = precon_urls;
+
+	while (start != NULL) {
+		num_of_connections = start->connections;
+		url = start->url;
+
+		LM_DBG("connect to %s, num of connects %d\n", url, num_of_connections);
+
+		for (int i = 0; i < num_of_connections; i++) {
+			handle = curl_easy_init();
+			curl_multi_add_handle(multi_handle, handle);
+
+			if (init_transfer(handle, url, 0) != 0) {
+				exit_code = -1;
+				goto cleanup;
+			}
+
+			if (init_socket_keepalive(handle) != 0) {
+				exit_code = -1;
+				goto cleanup;
+			}
+
+			w_curl_easy_setopt(handle, CURLOPT_NOBODY, 1L); 
+			w_curl_easy_setopt(handle, CURLOPT_SHARE, curl_share);
+		}
+
+		start = start->next;
+	}
+
+	busy_wait = connect_poll_interval;
+
+	if (setsocket_callback(multi_handle) != 0) {
+		goto cleanup;
+	}
+
+	w_curl_multi_setopt(multi_handle, CURLMOPT_MAX_HOST_CONNECTIONS, (long) num_of_connections);
+	w_curl_multi_setopt(multi_handle, CURLMOPT_MAXCONNECTS, (long) num_of_connections);
+
+	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERFUNCTION, timer_cb);
+  	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERDATA, &timer);
+
+	if ((running_handles = start_multi_socket(multi_handle)) < 0) {
+		exit_code = -1;
+		goto cleanup;
+	}
+
+	LM_DBG("Creating warm pool connection, running handles %d\n", running_handles);
+
+	do {
+		running_handles = run_multi_socket(multi_handle);
+
+		if (timer < 0) {
+			break;
+		} 
+	
+		usleep(1000UL * busy_wait);
+		LM_DBG("Creating warm pool connection, running handles %d\n", running_handles);
+	} while (running_handles != 0);
+
+cleanup:
+	do {
+		m = curl_multi_info_read(multi_handle, &msgq);
+		if (m && m->msg == CURLMSG_DONE) {
+			mrc = curl_multi_remove_handle(multi_handle, m->easy_handle);
+			if (mrc != CURLM_OK) {
+				LM_ERR("curl_multi_remove_handle: %s\n", curl_multi_strerror(mrc));
+			}
+			curl_easy_cleanup(m->easy_handle);
+		}
+	} while (m);
+
+	start = precon_urls;
+
+	while (start != NULL) {
+		next = start->next;
+
+		pkg_free(start->url);
+		pkg_free(start);
+
+		start = next;
+	}
+
+	put_multi(multi_list);
+
+	return exit_code;
+}
+
+int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
+                            char *url, str *req_body, str *req_ctype,
+                            rest_async_param *async_parm, str *body, str *ctype,
+						    enum async_ret_code *out_fd)
+{
+	CURL *handle;
+	CURLcode rc;
+	CURLMcode mrc;
+	OSS_CURLM *multi_list;
+	CURLM *multi_handle;
+	long busy_wait, timeout, connect_timeout, retry_time, timer;
+	enum curl_status status = CURL_NONE;
+
+	handle = curl_easy_init();
+
+	if (!handle) {
+		LM_ERR("Init curl handle failed!\n");
+		goto cleanup;
+	}
+
+	if (init_transfer(handle, url, async_parm->timeout_s) != 0) {
+		LM_ERR("failed to init transfer to %s\n", url);
+		goto cleanup;
+	}
+
+	switch (method) {
+	case REST_CLIENT_POST:
+		set_post_opts(handle, req_ctype, req_body);
+		break;
+
+	case REST_CLIENT_GET:
+		if (header_list)
+			w_curl_easy_setopt(handle, CURLOPT_HTTPHEADER, header_list);
+		break;
+
+	case REST_CLIENT_PUT:
+		set_put_opts(handle, req_ctype, req_body);
+		break;
+
+	default:
+		LM_ERR("unsupported method: %d, defaulting to GET\n", method);
+	}
+
+	w_curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, write_func);
+	w_curl_easy_setopt(handle, CURLOPT_WRITEDATA, body);
+
+	if (share_connections) {
+		// If the share cannot be created then log warn but keep going
+		init_socket_keepalive(handle);
+	}
+
+	if (ctype) {
+		w_curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, header_func);
+		w_curl_easy_setopt(handle, CURLOPT_HEADERDATA, ctype);
+	}
+
+	if (rest_trace_enabled()) {
+		async_parm->tparam = pkg_malloc(sizeof(rest_trace_param_t));
+		if (!async_parm->tparam) {
+			LM_ERR("oom\n");
+			goto cleanup;
+		}
+
+		init_rest_trace(handle, msg, async_parm->tparam);
+	}
+
+	multi_list = get_multi();
+	if (!multi_list) {
+		LM_WARN("failed to get a multi handle, doing a blocking transfer\n");
+		rc = rest_easy_perform(handle, url, NULL);
+		clean_header_list;
+		async_parm->handle = handle;
+		*out_fd = ASYNC_SYNC;
+		return rc;
+	}
+
+	multi_handle = multi_list->multi_handle;
+	curl_multi_add_handle(multi_handle, handle);
+
+	if (setsocket_callback(multi_handle) != 0) {
+		goto cleanup;
+	}
+
+	w_curl_multi_setopt(multi_handle, CURLMOPT_MAXCONNECTS, (long) max_connections);
+
+	w_curl_easy_setopt(handle, CURLOPT_PREREQFUNCTION, prereq_callback);
+    w_curl_easy_setopt(handle, CURLOPT_PREREQDATA, &status);
+
+	connect_timeout = (async_parm->timeout_s*1000) > connection_timeout_ms ?
+			(async_parm->timeout_s*1000) : connection_timeout_ms;
+	timeout = connect_timeout;
+	busy_wait = connect_poll_interval;
+
+	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERFUNCTION, timer_cb);
+  	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERDATA, &timer);
+
+	if ((running_handles = start_multi_socket(multi_handle)) < 0) {
+		goto cleanup;
+	}
+
+	do {
+		running_handles = run_multi_socket(multi_handle);
+
+		if (status == CURL_REQUEST_SENT) {
+			goto success;
+		}
+
+		if (timer < 0) {
+			break;
+		}
+	
+		usleep(1000UL * busy_wait);
+		LM_DBG("Connecting or sending, running handles %d\n", running_handles);
+	} while (running_handles != 0);
+
+	LM_ERR("connect timeout on %s (%lds)\n", url, connection_timeout);
+	goto error;
+
+success:
+	async_parm->header_list = header_list;
+	async_parm->handle = handle;
+	async_parm->multi_list = multi_list;
+	header_list = NULL;
+	*out_fd = get_max_fd(ASYNC_SYNC); // Running only one socket at a time so it's always the max
+	return RCL_OK;
+
+error:
+	mrc = curl_multi_remove_handle(multi_handle, handle);
+	if (mrc != CURLM_OK) {
+		LM_ERR("curl_multi_remove_handle: %s\n", curl_multi_strerror(mrc));
+	}
+	put_multi(multi_list);
+
+	curl_easy_cleanup(handle);
+
+cleanup:
+	clean_header_list;
+	if (tls_dom) {
+		tls_api.release_domain(tls_dom);
+		tls_dom = NULL;
+	}
+	if (rest_trace_enabled() && async_parm->tparam)
+		pkg_free(async_parm->tparam);
+
+	*out_fd = ASYNC_NO_IO;
+	return RCL_INTERNAL_ERR;
+}
+
+/**
+ * start_async_http_req - launch an async HTTP request
+ *		- TCP connect phase is synchronous, due to libcurl limitations
+ *		- TCP read phase is asynchronous, thanks to the libcurl multi interface
+ *
+ * @msg:		sip message struct
+ * @method:		HTTP verb
+ * @url:		HTTP URL to be queried
+ * @req_body:	Body of the request (NULL if not needed)
+ * @req_ctype:	Value for the "Content-Type: " header of the request (same as ^)
+ * @async_parm: in/out param, will contain async handles
+ * @body:	    reply body; gradually reallocated as data arrives
+ * @ctype:	    will eventually hold the last "Content-Type" header of the reply
+ * @out_fd:     the fd to poll on, or a negative error code
+ *
+ * @return: 1 on success, negative on failure
+ */
+int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
+                         char *url, str *req_body, str *req_ctype,
+                         rest_async_param *async_parm, str *body, str *ctype,
+						 enum async_ret_code *out_fd)
+{
+	if (!use_multi_socket_api) {
+		return start_async_http_req_v1(msg, method, url, req_body, req_ctype, async_parm, body, ctype, out_fd);
+	} else {
+		return start_async_http_req_v2(msg, method, url, req_body, req_ctype, async_parm, body, ctype, out_fd);
+	}
+}
+
+enum async_ret_code resume_async_http_req(int fd, struct sip_msg *msg, void *_param) {
+	if (!use_multi_socket_api) {
+		return _resume_async_http_req(fd, msg, (rest_async_param *)_param, 0);
+	} else {
+		return _resume_async_http_req_v2(fd, msg, (rest_async_param *)_param, 0);
+	}
+}
+
+enum async_ret_code time_out_async_http_req(int fd, struct sip_msg *msg, void *_param) {
+	if (!use_multi_socket_api) {
+		return _resume_async_http_req(fd, msg, (rest_async_param *)_param, 1);
+	} else {
+		return _resume_async_http_req_v2(fd, msg, (rest_async_param *)_param, 1);
+	}
+}
+
+enum async_ret_code resume_async_http_req_v2(int fd, struct sip_msg *msg, void *_param) {
+	return _resume_async_http_req_v2(fd, msg, (rest_async_param *)_param, 0);
+}
+
+enum async_ret_code time_out_async_http_req_v2(int fd, struct sip_msg *msg, void *_param) {
+	return _resume_async_http_req_v2(fd, msg, (rest_async_param *)_param, 1);
 }
