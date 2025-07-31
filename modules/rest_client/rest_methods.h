@@ -39,6 +39,7 @@ extern long connection_timeout;
 extern long connect_poll_interval;
 extern long connection_timeout_ms;
 extern int max_async_transfers;
+extern int max_host_connection;
 extern long curl_timeout;
 
 extern char *ssl_capath;

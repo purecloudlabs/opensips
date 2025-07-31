@@ -109,3 +109,52 @@ size_t header_func(char *ptr, size_t size, size_t nmemb, void *userdata)
 	return len;
 }
 
+int sock_cb(CURL *e, curl_socket_t s, int what, void *cbp, void *sockp)
+{
+	LM_DBG("sock_cb called %d\n", what);
+	internal_curl_sock *p = (internal_curl_sock*) cbp;
+
+	if(what == CURL_POLL_REMOVE) {
+		/* remove the socket from our collection */
+	}
+	if(what & CURL_POLL_IN) {
+		/* wait for read on this socket */
+		p->sock = s;
+		p->status |= CURL_REQUEST_SENDING;
+	}
+	if(what & CURL_POLL_OUT) {
+		p->sock = s;
+		p->status |= CURL_CONNECTED;
+	}
+
+  	return 0;
+}
+
+int timerfunc(CURLM *multi_handle, long timeout_ms, void *cbp)
+{
+	LM_DBG("timerfunc called %d\n", timeout_ms);
+	internal_curl_sock *p = (internal_curl_sock*) cbp;
+
+	if (timeout_ms == 0) {
+		p->timer += 20;
+	} else if (timeout_ms == -1) {
+		p->status |= CURL_FINISHED;
+	} else if (timeout_ms - p->timer <= 0) {
+		LM_DBG("timeout %d", timeout_ms - p->timer);
+		p->status |= CURL_TIMEOUT;
+	}
+
+  	return 0;
+}
+
+int prereq_callback(void *cbp,
+                           char *conn_primary_ip,
+                           char *conn_local_ip,
+                           int conn_primary_port,
+                           int conn_local_port)
+{
+	LM_DBG("prereq_callback called\n");
+	internal_curl_sock *p = (internal_curl_sock*) cbp;
+	p->status |= CURL_REQUEST_SENT;
+	return CURL_PREREQFUNC_OK;
+}

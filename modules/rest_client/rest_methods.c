@@ -370,11 +370,16 @@ static OSS_CURLM *get_multi(void)
 	multi_list = list_entry(multi_pool.next, OSS_CURLM, list);
 	list_del(multi_pool.next);
 
+	multi_pool_sz--;
+	LM_DBG("multi pool size is now %d\n", multi_pool_sz);
+
 	return multi_list;
 }
 
 static inline void put_multi(OSS_CURLM *multi_list)
 {
+	multi_pool_sz++;
+	LM_DBG("multi pool size is now %d\n", multi_pool_sz);
 	list_add(&multi_list->list, &multi_pool);
 }
 
@@ -420,7 +425,7 @@ static int init_transfer(CURL *handle, char *url, unsigned long timeout_s)
 			timeout_s && timeout_s > curl_timeout ? timeout_s : curl_timeout);
 
 	w_curl_easy_setopt(handle, CURLOPT_VERBOSE, 1);
-	w_curl_easy_setopt(handle, CURLOPT_STDERR, stdout);
+	w_curl_easy_setopt(handle, CURLOPT_STDERR, stderr);
 	w_curl_easy_setopt(handle, CURLOPT_FAILONERROR, 0);
 
 	if (ssl_capath)
@@ -794,6 +799,30 @@ cleanup:
 	return RCL_INTERNAL_ERR;
 }
 
+// static int http_state_machine(CURLM *multi_handle, enum curl_status status, int fd)
+// {
+// 	// start_fd = (internal.status == CURL_CONNECTING) ? internal.sock : CURL_SOCKET_TIMEOUT;
+// 	CURLMcode mrc;
+// 	mrc = curl_multi_socket_action(multi_handle, fd, 0, &running_handles);
+// 	if (mrc != CURLM_OK) {
+// 		LM_ERR("curl_multi_socket_action: %s\n", curl_multi_strerror(mrc));
+// 		return CURL_ERROR;
+// 	}
+
+// 	// LM_DBG("internal status %d", internal.status);
+
+// 	if (internal.status != CURL_CONNECTED) {
+// 		if (internal.timer == 0) {
+// 			preconnect_timer += busy_wait;
+// 			usleep(1000UL * busy_wait);
+// 		}
+
+// 		if (internal.timer - preconnect_timer > 0) {
+// 			usleep(1000UL * busy_wait);
+// 		}
+// 	}
+// }
+
 /**
  * start_async_http_req - launch an async HTTP request
  *		- TCP connect phase is synchronous, due to libcurl limitations
@@ -891,126 +920,41 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 	multi_handle = multi_list->multi_handle;
 	curl_multi_add_handle(multi_handle, handle);
 
+	internal_curl_sock internal = {CURL_SOCKET_TIMEOUT, NONE, 0};
+
+	curl_multi_setopt(multi_handle, CURLMOPT_MAX_HOST_CONNECTIONS, (long) max_host_connection);
+	curl_multi_setopt(multi_handle, CURLMOPT_MAXCONNECTS, (long) max_async_transfers);
+	curl_multi_setopt(multi_handle, CURLMOPT_SOCKETFUNCTION, sock_cb);
+ 	curl_multi_setopt(multi_handle, CURLMOPT_SOCKETDATA, &internal);
+
+	curl_multi_setopt(multi_handle, CURLMOPT_TIMERFUNCTION, timerfunc);
+  	curl_multi_setopt(multi_handle, CURLMOPT_TIMERDATA, &internal);
+
+	w_curl_easy_setopt(handle, CURLOPT_PREREQFUNCTION, prereq_callback);
+    w_curl_easy_setopt(handle, CURLOPT_PREREQDATA, &internal);
+
 	connect_timeout = (async_parm->timeout_s*1000) > connection_timeout_ms ?
 			(async_parm->timeout_s*1000) : connection_timeout_ms;
 	timeout = connect_timeout;
 	busy_wait = connect_poll_interval;
 
-	/* obtain a read fd in "connection_timeout" seconds at worst */
-	for (timeout = connect_timeout; timeout > 0; timeout -= busy_wait) {
-		double connect = -1;
-		long req_sz = -1;
-
-		mrc = curl_multi_perform(multi_handle, &running_handles);
-		if (mrc != CURLM_OK && mrc != CURLM_CALL_MULTI_PERFORM) {
-			LM_ERR("curl_multi_perform: %s\n", curl_multi_strerror(mrc));
-			goto error;
-		}
-
-		curl_easy_getinfo(handle, CURLINFO_CONNECT_TIME, &connect);
-		curl_easy_getinfo(handle, CURLINFO_REQUEST_SIZE, &req_sz);
-
-		LM_DBG("perform code: %d, handles: %d, connect: %.3lfs, reqsz: %ldB\n",
-		        mrc, running_handles, connect, req_sz);
-
-		/* transfer completed!  But how well? */
-		if (running_handles == 0) {
-			curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &http_rc);
-			if (get_easy_status(handle, multi_handle, &rc) < 0) {
-				LM_ERR("transfer is done, but no results found!\n");
-				goto error;
-			}
-
-			LM_DBG("transfer status: %d, %s\n", rc, curl_easy_strerror(rc));
-
-			switch (rc) {
-			case CURLE_OK:
-				break;
-
-			case CURLE_COULDNT_CONNECT:
-				LM_ERR("connect refused for %s\n", url);
-				ret = RCL_CONNECT_REFUSED;
-				goto error;
-
-			case CURLE_OPERATION_TIMEDOUT:
-				if (http_rc == 0) {
-					LM_ERR("connect timeout on %s (%ldms)\n", url,
-							connect_timeout);
-					ret = RCL_CONNECT_TIMEOUT;
-					goto error;
-				}
-
-				LM_ERR("connected, but transfer timed out for %s\n", url);
-				ret = RCL_TRANSFER_TIMEOUT;
-				goto error;
-
-			default:
-				LM_ERR("curl_easy_perform error %d, %s\n",
-						rc, curl_easy_strerror(rc));
-				goto error;
-			}
-
-			LM_DBG("done, no need for async!\n");
-
-			clean_header_list;
-			async_parm->handle = handle;
-			mrc = curl_multi_remove_handle(multi_handle, handle);
-			if (mrc != CURLM_OK)
-				LM_ERR("curl_multi_remove_handle: %s\n",
-						curl_multi_strerror(mrc));
-			put_multi(multi_list);
-			*out_fd = ASYNC_SYNC;
-			return RCL_OK;
-		}
-
-		FD_ZERO(&rset);
-		mrc = curl_multi_fdset(multi_handle, &rset, &wset, &eset, &max_fd);
+	do {
+		mrc = curl_multi_socket_action(multi_handle, internal.sock, 0, &running_handles);
 		if (mrc != CURLM_OK) {
-			LM_ERR("curl_multi_fdset: %s\n", curl_multi_strerror(mrc));
+			LM_ERR("curl_multi_socket_action: %s\n", curl_multi_strerror(mrc));
 			goto error;
 		}
 
-		if (max_fd != -1) {
-			for (fd = 0; fd <= max_fd; fd++) {
-				if (FD_ISSET(fd, &rset)) {
-					LM_DBG("ongoing transfer on fd %d\n", fd);
-					if (req_sz > 0 && is_new_transfer(fd)) {
-						LM_DBG(">>> add fd %d to ongoing transfers\n", fd);
-						add_transfer(fd);
-						goto success;
-					}
-				}
-			}
+		LM_DBG("internal status %d socket %d\n", internal.status, internal.sock);
+
+		if (internal.status & CURL_REQUEST_SENT) {
+			fd = internal.sock;
+			goto success;
 		}
 
-		mrc = curl_multi_timeout(multi_handle, &retry_time);
-		if (mrc != CURLM_OK) {
-			LM_ERR("curl_multi_timeout: %s\n", curl_multi_strerror(mrc));
-			goto error;
-		}
+		usleep(1000UL * busy_wait);
+	} while (!(internal.status & CURL_REQUEST_SENT || internal.status & CURL_TIMEOUT));
 
-		LM_DBG("libcurl TCP connect: we should wait up to %ldms "
-		       "(timeout=%ldms, poll=%ldms)!\n", retry_time,
-		       connect_timeout, connect_poll_interval);
-
-		/*
-			from curl_multi_timeout() docs:
-				retry_time = -1, no timeout set
-				retry_time =  0, proceed immediately
-				retry_time >  0, wait at most retry_time
-		*/
-		if (retry_time != -1 && retry_time < connect_poll_interval) {
-			busy_wait = retry_time < timeout ? retry_time : timeout;
-		} else {
-			busy_wait = connect_poll_interval < timeout ? connect_poll_interval : timeout;
-		}
-
-		if (busy_wait > 0) {
-			/* libcurl seems to be stuck in internal operations (TCP connect?) */
-			LM_DBG("busy waiting %ldms ...\n", busy_wait);
-			usleep(1000UL * busy_wait);
-		}
-	}
 
 	LM_ERR("connect timeout on %s (%lds)\n", url, connection_timeout);
 	ret = RCL_CONNECT_TIMEOUT;
@@ -1070,12 +1014,17 @@ static enum async_ret_code _resume_async_http_req(int fd, struct sip_msg *msg,
 		goto cleanup;
 	}
 
+	internal_curl_sock internal = {fd, CURL_REQUEST_SENT, multi_handle};
+
+	curl_multi_setopt(multi_handle, CURLMOPT_SOCKETFUNCTION, sock_cb);
+ 	curl_multi_setopt(multi_handle, CURLMOPT_SOCKETDATA, &internal);
+
 	retr = 0;
 	do {
 		/* When @enable_expect_100 is on, both the client body upload and the
 		 * server body download will be performed within this loop, blocking */
 
-		mrc = curl_multi_perform(multi_handle, &running);
+		mrc = curl_multi_socket_action(multi_handle, fd, 0, &running_handles);
 		LM_DBG("perform result: %d, running: %d (break: %d)\n", mrc, running,
 			mrc != CURLM_CALL_MULTI_PERFORM && (mrc != CURLM_OK || !running));
 
@@ -1113,33 +1062,8 @@ static enum async_ret_code _resume_async_http_req(int fd, struct sip_msg *msg,
 		}
 	}
 
-	FD_ZERO(&rset);
-	mrc = curl_multi_fdset(multi_handle, &rset, &wset, &eset, &max_fd);
-	if (mrc != CURLM_OK) {
-		LM_ERR("curl_multi_fdset: %s\n", curl_multi_strerror(mrc));
-		goto out;
-	}
-
-	if (max_fd == -1) {
-		if (FD_ISSET(fd, &rset)) {
-			LM_BUG("fd %d is still in rset!", fd);
-			goto out;
-		}
-
-	} else if (!timed_out && FD_ISSET(fd, &rset)) {
-		LM_DBG("fd %d still transferring...\n", fd);
-		async_status = ASYNC_CONTINUE;
-		return 1;
-	}
-
 cleanup:
 	curl_slist_free_all(param->header_list);
-
-	if (del_transfer(fd) != 0) {
-		LM_BUG("failed to delete fd %d", fd);
-		goto out;
-	}
-
 	rc = curl_easy_getinfo(param->handle, CURLINFO_RESPONSE_CODE, &http_rc);
 	if (rc != CURLE_OK) {
 		LM_ERR("curl_easy_getinfo: %d, %s\n", rc, curl_easy_strerror(rc));

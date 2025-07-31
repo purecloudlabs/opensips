@@ -50,6 +50,7 @@ long connection_timeout = 20; /* s */
 long connect_poll_interval = 20; /* ms */
 long connection_timeout_ms;
 int max_async_transfers = 100;
+int max_host_connection = 10;
 long curl_timeout = 20;
 char *ssl_capath;
 unsigned int max_transfer_size = 10240; /* KB (10MB) */
@@ -197,6 +198,7 @@ static const param_export_t params[] = {
 	{ "connection_timeout",	INT_PARAM, &connection_timeout	},
 	{ "connect_poll_interval", INT_PARAM, &connect_poll_interval },
 	{ "max_async_transfers", INT_PARAM, &max_async_transfers },
+	{ "max_host_connection", INT_PARAM, &max_host_connection},
 	{ "max_transfer_size",	INT_PARAM, &max_transfer_size	},
 	{ "curl_timeout",		INT_PARAM, &curl_timeout		},
 	{ "ssl_capath",			STR_PARAM, &ssl_capath			},
