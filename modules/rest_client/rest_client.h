@@ -30,6 +30,12 @@ enum tr_rest_subtype {
 	TR_REST_ESCAPE, TR_REST_UNESCAPE
 };
 
+typedef struct _preconnect_urls {
+	char *url;
+	long connections;
+	struct _preconnect_urls *next;
+} preconnect_urls;
+
 extern int enable_expect_100;
 extern unsigned int max_transfer_size;
 

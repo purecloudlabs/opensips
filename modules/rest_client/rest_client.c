@@ -73,6 +73,9 @@ int enable_expect_100;
 
 struct tls_mgm_binds tls_api;
 
+static preconnect_urls *precon_urls = 0;
+static int total_cons = 0;
+
 /* trace parameters for this module */
 int rest_proto_id;
 trace_proto_t tprot;
@@ -191,6 +194,72 @@ static const trans_export_t trans[] = {
 	{{0,0},0,0}
 };
 
+static int warm_pool_urls(modparam_t type, void *val) {
+	int num_conns;
+	char *mod_param, *delim, *host;
+	size_t delim_index, string_end;
+	preconnect_urls *tmp;
+	str num_conns_s;
+
+	mod_param = (char*) val;
+
+	if ((delim = strchr(mod_param, ',')) == NULL) {
+        goto error;
+	}
+
+	delim_index = (size_t)(delim - mod_param);
+	if (delim_index == 0) {
+		goto error;
+	}
+	
+	host = (char*) pkg_malloc(delim_index + 1);
+	if (host == NULL) {
+		goto error;
+	}
+
+	strncpy(host, mod_param, delim_index);
+	host[delim_index + 1] = '\0';
+	
+	string_end = strlen(mod_param + delim_index + 1);
+	if (string_end == 0) {
+		goto error;
+	}
+
+	num_conns_s.s = mod_param + delim_index + 1;
+	num_conns_s.len = string_end;
+	if (str2int(&num_conns_s, &num_conns) != 0) {
+		goto error;
+	}
+    
+	tmp = (preconnect_urls*) pkg_malloc(sizeof(preconnect_urls));
+	if (tmp == NULL) {
+		goto error;
+	}
+
+	tmp->url = host;
+	tmp->connections = (long) num_conns;
+	tmp->next = 0;
+
+	if (precon_urls == NULL) {
+		tmp->next = precon_urls;
+	}
+
+	precon_urls = tmp;
+	total_cons += num_conns;
+
+	return 0;
+error:
+	if (host != NULL) {
+		pkg_free(host);
+	}
+
+	if (tmp != NULL) {
+		pkg_free(tmp);
+	}
+
+	return -1;
+}
+
 /*
  * Exported parameters
  */
@@ -208,6 +277,8 @@ static const param_export_t params[] = {
 	{ "enable_expect_100",	INT_PARAM, &enable_expect_100	},
 	{ "no_concurrent_connects",	INT_PARAM, &no_concurrent_connects	},
 	{ "curl_conn_lifetime",	INT_PARAM, &curl_conn_lifetime	},
+	{ "warm_pool_urls",		STR_PARAM|USE_FUNC_PARAM,
+		(void*)&warm_pool_urls },
 	{ 0, 0, 0 }
 };
 
@@ -277,6 +348,10 @@ static int mod_init(void)
 	if (curl_global_init(CURL_GLOBAL_ALL) != CURLE_OK) {
 		LM_ERR("could not initialize curl!\n");
 		return -1;
+	}
+
+	if (precon_urls != NULL && !connect_only(precon_urls, total_cons)) {
+		LM_WARN("Could not create warm pool");
 	}
 
 	LM_INFO("Module initialized!\n");
