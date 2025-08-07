@@ -240,7 +240,7 @@ static int warm_pool_urls(modparam_t type, void *val) {
 	tmp->connections = (long) num_conns;
 	tmp->next = 0;
 
-	if (precon_urls == NULL) {
+	if (precon_urls != NULL) {
 		tmp->next = precon_urls;
 	}
 
@@ -350,10 +350,6 @@ static int mod_init(void)
 		return -1;
 	}
 
-	if (precon_urls != NULL && !connect_only(precon_urls, total_cons)) {
-		LM_WARN("Could not create warm pool");
-	}
-
 	LM_INFO("Module initialized!\n");
 
 	return 0;
@@ -381,6 +377,13 @@ static int child_init(int rank)
 	if (init_sync_handle() != 0) {
 		LM_ERR("failed to init sync handle\n");
 		return -1;
+	}
+
+	LM_DBG("Process no %d - type %d\n", getpid(), pt[getpid()].type);
+
+	// TODO modparam to specify which processes to preconnect
+	if (pt[getpid()].type != TYPE_TIMER && connect_only(precon_urls, total_cons) != 0) {
+		LM_WARN("Could not create warm pool\n");
 	}
 
 	return 0;
