@@ -69,6 +69,12 @@ extern int _async_resume_retr_itv;
 /* trace parameters for this module */
 #define MAX_HOST_LENGTH 128
 
+/* file descriptor limits */
+#define WORD_SIZE_BITS 64
+#define WORD_SIZE_BYTES 16
+#define BYTE_LEN 8
+extern struct rlimit lim;
+
 #define REST_TRACE_API_MODULE "proto_hep"
 extern int rest_proto_id;
 extern trace_proto_t tprot;
@@ -95,7 +101,7 @@ static gen_hash_t *rcl_parallel_connects;
 int no_concurrent_connects;
 unsigned int curl_conn_lifetime;
 
-CURLSH *shobject;
+CURLSH *curl_share = NULL;
 
 static inline int rest_trace_enabled(void);
 static int trace_rest_message( rest_trace_param_t* tparam );
@@ -456,20 +462,20 @@ cleanup:
 }
 
 static inline void add_sock(unsigned char *socks, int s) {
-    socks[s / 8] |= (1 << (s % 8));
+    socks[s / BYTE_LEN] |= (1 << (s % BYTE_LEN));
 }
 
 static inline void remove_sock(unsigned char *socks, int s) {
-    socks[s / 8] &= ~(1 << (s % 8));
+    socks[s / BYTE_LEN] &= ~(1 << (s % BYTE_LEN));
 }
 
 static inline int has_sock(unsigned char *socks, int s) {
-    return socks[s / 8] & (1 << (s % 8));
+    return socks[s / BYTE_LEN] & (1 << (s % BYTE_LEN));
 }
 
 typedef struct _file_descriptors {
-	unsigned char tracked_socks[10000]; // TODO Make this dynamic so it can be utilised based on how many connections, it will crash over a certain limit
-	int size;
+	unsigned char *tracked_socks;
+	int max_fd;
 } file_descriptors;
 
 static int sock_connect(CURL *e, curl_socket_t s, int event, void *cbp, void *sockp)
@@ -480,12 +486,12 @@ static int sock_connect(CURL *e, curl_socket_t s, int event, void *cbp, void *so
 	if (event != CURL_POLL_REMOVE) {
 		if (!has_sock(fds->tracked_socks, s)) {
 			add_sock(fds->tracked_socks, s);
-			fds->size -= 1;
+			fds->max_fd = s;
 		}
 	} else if (event == CURL_POLL_REMOVE) {
 		if (!has_sock(fds->tracked_socks, s)) {
 			remove_sock(fds->tracked_socks, s);
-			fds->size -= 1;
+			// fds->max_fd -= s;
 		}
 	}
 
@@ -504,11 +510,11 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 	long busy_wait;
 	int num_of_connections, exit_code = 0;
 	file_descriptors fds;
-	fds.size = 0;
+	fds.max_fd = 0;
+	fds.tracked_socks = (unsigned char*) pkg_malloc(lim.rlim_cur / 8);
 
-	shobject = curl_share_init();
-	
-	curl_share_setopt(shobject, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
+	curl_share = curl_share_init();
+	curl_share_setopt(curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
 
 	multi_list = get_multi();
 	if (!multi_list) {
@@ -539,7 +545,7 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 			w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPIDLE, 5L);
 			w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPINTVL, 5L);
 			w_curl_easy_setopt(handle, CURLOPT_MAXAGE_CONN, 900L);
-			w_curl_easy_setopt(handle, CURLOPT_SHARE, shobject);
+			w_curl_easy_setopt(handle, CURLOPT_SHARE, curl_share);
 		}
 
 		start = start->next;
@@ -564,18 +570,33 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 	LM_DBG("Creating warm pool connection, running handles %d\n", running_handles);
 
 	do {
-		for(int i = 0; i < 1000; i++) {
-			if (!has_sock(fds.tracked_socks, i)) {
+		// for(int i = 0; i < 1000; i++) {
+		int max_fd = fds.max_fd;
+		uint64_t *socket_chunks = (uint64_t*) fds.tracked_socks;
+		int total_chunks = (lim.rlim_cur / 8) / sizeof(uint64_t);
+		// for (int i = 0; i < lim.rlim_cur / WORD_SIZE_BYTES || i <= max_fd; i += WORD_SIZE_BITS) {
+		for (int i = 0; i < total_chunks; i++) {
+			if (i * sizeof(uint64_t) > max_fd ) {
+				break;
+			}
+
+			uint64_t sockets = socket_chunks[i];
+			if (sockets == 0) {
 				continue;
 			}
 
-			LM_DBG("Adding socket %d to pool, status %d\n", i, fds.tracked_socks[i]);
+			while (sockets) {
+				int curl_s = (i * WORD_SIZE_BITS) + __builtin_ctzll(sockets);
+				LM_DBG("Adding socket %d to pool, status %d\n", i, curl_s);
 			
-			mrc = curl_multi_socket_action(multi_handle, i, 0, &running_handles);
-			if (mrc != CURLM_OK) {
-				LM_ERR("curl_multi_socket_action: %s\n", curl_multi_strerror(mrc));
-				exit_code = -1;
-				goto cleanup;
+				mrc = curl_multi_socket_action(multi_handle, curl_s, 0, &running_handles);
+				if (mrc != CURLM_OK) {
+					LM_ERR("curl_multi_socket_action: %s\n", curl_multi_strerror(mrc));
+					exit_code = -1;
+					goto cleanup;
+				}
+
+				sockets &= sockets - 1;
 			}
 		}
 
@@ -1043,7 +1064,10 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 	w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPALIVE, 1L);
 	w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPIDLE, 5L);
 	w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPINTVL, 5L);
-	w_curl_easy_setopt(handle, CURLOPT_SHARE, shobject);
+
+	if (curl_share) {
+		w_curl_easy_setopt(handle, CURLOPT_SHARE, curl_share);
+	}
 
 	if (ctype) {
 		w_curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, header_func);

@@ -81,6 +81,9 @@ int rest_proto_id;
 trace_proto_t tprot;
 char* rest_id_s = "rest";
 
+/* file descriptor limits */
+struct rlimit lim;
+
 /*
  * Module initialization and cleanup
  */
@@ -371,6 +374,16 @@ static int cfg_validate(void)
 	return 1;
 }
 
+static int get_fd_limit(void) {
+	if (getrlimit(RLIMIT_NOFILE, &lim) < 0) {
+		LM_ERR("cannot get the maximum number of file descriptors: %s\n",
+			strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
 
 static int child_init(int rank)
 {
@@ -379,11 +392,14 @@ static int child_init(int rank)
 		return -1;
 	}
 
-	LM_DBG("Process no %d - type %d\n", getpid(), pt[getpid()].type);
+	if (get_fd_limit() != 0) {
+		LM_WARN("Could not get file descriptor limits\n");
+	}
 
-	// TODO modparam to specify which processes to preconnect
-	if (pt[getpid()].type != TYPE_TIMER && connect_only(precon_urls, total_cons) != 0) {
-		LM_WARN("Could not create warm pool\n");
+	if (pt[getpid()].type != TYPE_TIMER ) {
+		if (connect_only(precon_urls, total_cons) != 0) {
+			LM_WARN("Could not create warm pool\n");
+		}	
 	}
 
 	return 0;

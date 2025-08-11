@@ -26,6 +26,8 @@
 #ifndef _REST_CLIENT_
 #define _REST_CLIENT_
 
+#include <sys/resource.h>
+
 enum tr_rest_subtype {
 	TR_REST_ESCAPE, TR_REST_UNESCAPE
 };
@@ -38,5 +40,6 @@ typedef struct _preconnect_urls {
 
 extern int enable_expect_100;
 extern unsigned int max_transfer_size;
+extern struct rlimit lim;
 
 #endif /* _REST_CLIENT_ */
