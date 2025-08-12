@@ -101,8 +101,6 @@ static gen_hash_t *rcl_parallel_connects;
 int no_concurrent_connects;
 unsigned int curl_conn_lifetime;
 
-CURLSH *curl_share = NULL;
-
 static inline int rest_trace_enabled(void);
 static int trace_rest_message( rest_trace_param_t* tparam );
 
@@ -461,6 +459,30 @@ cleanup:
 	return -1;
 }
 
+typedef struct _file_descriptors {
+	unsigned char *tracked_socks;
+	int max_fd;
+} file_descriptors;
+
+static CURLSH *curl_share = NULL;
+static file_descriptors fds;
+size_t aligned_bitset_len;
+int total_chunks;
+
+int init_process_limits(void) {
+	aligned_bitset_len = (((lim.rlim_cur + WORD_SIZE_BITS - 1) / WORD_SIZE_BITS) * WORD_SIZE_BITS) / WORD_SIZE_BITS;
+
+	fds.tracked_socks = (unsigned char*) pkg_malloc(aligned_bitset_len);
+	fds.max_fd = 0;
+	total_chunks = aligned_bitset_len / sizeof(uint64_t);
+
+	if (fds.tracked_socks == NULL) {
+		return -1;
+	}
+
+	return 0;
+}
+
 static inline void add_sock(unsigned char *socks, int s) {
     socks[s / BYTE_LEN] |= (1 << (s % BYTE_LEN));
 }
@@ -473,48 +495,102 @@ static inline int has_sock(unsigned char *socks, int s) {
     return socks[s / BYTE_LEN] & (1 << (s % BYTE_LEN));
 }
 
-typedef struct _file_descriptors {
-	unsigned char *tracked_socks;
-	int max_fd;
-} file_descriptors;
-
-static int sock_connect(CURL *e, curl_socket_t s, int event, void *cbp, void *sockp)
+static int socket_action_cb(CURL *e, curl_socket_t s, int event, void *cbp, void *sockp)
 {
-	LM_DBG("sock_connect called for socket %d status %d\n", s, event);
+	LM_DBG("called for socket %d status %d\n", s, event);
 	file_descriptors *fds = (file_descriptors*) cbp;
 
 	if (event != CURL_POLL_REMOVE) {
-		if (!has_sock(fds->tracked_socks, s)) {
-			add_sock(fds->tracked_socks, s);
+		add_sock(fds->tracked_socks, s);
+
+		if (s > fds->max_fd) {
 			fds->max_fd = s;
 		}
 	} else if (event == CURL_POLL_REMOVE) {
-		if (!has_sock(fds->tracked_socks, s)) {
+		if (has_sock(fds->tracked_socks, s)) {
 			remove_sock(fds->tracked_socks, s);
-			// fds->max_fd -= s;
 		}
 	}
 
   	return 0;
 }
 
+static int timer_cb(CURLM *multi_handle, long timeout_ms, void *cbp)
+{
+	LM_DBG("multi_handle timer called %d\n", timeout_ms);
+	long *p = (long*) cbp;
+
+	*p = timeout_ms;
+
+  	return 0;
+}
+
+static int start_multi_socket(CURLM *multi_handle) {
+	CURLMcode mrc;
+	int running;
+
+	memset(fds.tracked_socks, 0, aligned_bitset_len);
+	fds.max_fd = 0;
+	mrc = curl_multi_socket_action(multi_handle, CURL_SOCKET_TIMEOUT, 0, &running);
+
+	if (mrc != CURLM_OK) {
+		LM_ERR("curl_multi_socket_action: %s\n", curl_multi_strerror(mrc));
+		return -1;
+	}
+
+	return running;
+}
+
+static int run_multi_socket(CURLM *multi_handle) {
+	CURLMcode mrc;
+	int max_chunk_to_check, running;
+	uint64_t sockets;
+	uint64_t *socket_bitmask;
+
+	max_chunk_to_check = (fds.max_fd + WORD_SIZE_BITS) / WORD_SIZE_BITS;
+	
+	socket_bitmask = (uint64_t*) fds.tracked_socks;
+
+	for (int i = 0; i < max_chunk_to_check; i++) {
+		sockets = socket_bitmask[i];
+		
+		while (sockets) {
+			int curl_s = (i * WORD_SIZE_BITS) + __builtin_ctzll(sockets);
+			LM_DBG("Action on socket %d\n", curl_s);
+		
+			mrc = curl_multi_socket_action(multi_handle, curl_s, 0, &running);
+			if (mrc != CURLM_OK) {
+				LM_ERR("curl_multi_socket_action: %s\n", curl_multi_strerror(mrc));
+				return -1;
+			}
+
+			sockets &= sockets - 1;
+		}
+	}
+
+	return running;
+}
+
 int connect_only(preconnect_urls *precon_urls, int total_cons) {
 	CURLcode rc;
 	CURLMcode mrc;
+	CURLSHcode src;
 	CURL *handle;
 	CURLM *multi_handle;
 	OSS_CURLM *multi_list;
 	CURL **list;
 	preconnect_urls *start, *next;
 	char *url;
-	long busy_wait;
+	long busy_wait, timer;
 	int num_of_connections, exit_code = 0;
-	file_descriptors fds;
-	fds.max_fd = 0;
-	fds.tracked_socks = (unsigned char*) pkg_malloc(lim.rlim_cur / 8);
 
 	curl_share = curl_share_init();
-	curl_share_setopt(curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
+	src = curl_share_setopt(curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
+
+	if (src != CURLSHE_OK) {
+		LM_ERR("curl_share_setopt: %s\n", curl_share_strerror(mrc));
+		goto cleanup;
+	}
 
 	multi_list = get_multi();
 	if (!multi_list) {
@@ -555,14 +631,14 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 
 	w_curl_multi_setopt(multi_handle, CURLMOPT_MAX_HOST_CONNECTIONS, (long) num_of_connections);
 	w_curl_multi_setopt(multi_handle, CURLMOPT_MAXCONNECTS, (long) num_of_connections);
-	w_curl_multi_setopt(multi_handle, CURLMOPT_SOCKETFUNCTION, sock_connect);
+
+	w_curl_multi_setopt(multi_handle, CURLMOPT_SOCKETFUNCTION, socket_action_cb);
 	w_curl_multi_setopt(multi_handle, CURLMOPT_SOCKETDATA, &fds);
 
+	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERFUNCTION, timer_cb);
+  	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERDATA, &timer);
 
-	// TODO refactor this multi socket action stuff to be generic between the connect and the start_async_http
-	mrc = curl_multi_socket_action(multi_handle, CURL_SOCKET_TIMEOUT, 0, &running_handles);
-	if (mrc != CURLM_OK) {
-		LM_ERR("curl_multi_socket_action: %s\n", curl_multi_strerror(mrc));
+	if ((running_handles = start_multi_socket(multi_handle)) < 0) {
 		exit_code = -1;
 		goto cleanup;
 	}
@@ -570,40 +646,15 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 	LM_DBG("Creating warm pool connection, running handles %d\n", running_handles);
 
 	do {
-		// for(int i = 0; i < 1000; i++) {
-		int max_fd = fds.max_fd;
-		uint64_t *socket_chunks = (uint64_t*) fds.tracked_socks;
-		int total_chunks = (lim.rlim_cur / 8) / sizeof(uint64_t);
-		// for (int i = 0; i < lim.rlim_cur / WORD_SIZE_BYTES || i <= max_fd; i += WORD_SIZE_BITS) {
-		for (int i = 0; i < total_chunks; i++) {
-			if (i * sizeof(uint64_t) > max_fd ) {
-				break;
-			}
+		running_handles = run_multi_socket(multi_handle);
 
-			uint64_t sockets = socket_chunks[i];
-			if (sockets == 0) {
-				continue;
-			}
-
-			while (sockets) {
-				int curl_s = (i * WORD_SIZE_BITS) + __builtin_ctzll(sockets);
-				LM_DBG("Adding socket %d to pool, status %d\n", i, curl_s);
-			
-				mrc = curl_multi_socket_action(multi_handle, curl_s, 0, &running_handles);
-				if (mrc != CURLM_OK) {
-					LM_ERR("curl_multi_socket_action: %s\n", curl_multi_strerror(mrc));
-					exit_code = -1;
-					goto cleanup;
-				}
-
-				sockets &= sockets - 1;
-			}
-		}
-
+		if (timer < 0) {
+			break;
+		} 
+	
 		usleep(1000UL * busy_wait);
 		LM_DBG("Creating warm pool connection, running handles %d\n", running_handles);
-	} while (running_handles != 0); // TODO this can block indefinitely, need to set the timer like we do for the start_async
-
+	} while (running_handles != 0);
 cleanup:
 	list = curl_multi_get_handles(multi_handle);
  
@@ -1015,18 +1066,10 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 	CURL *handle;
 	CURLcode rc;
 	CURLMcode mrc;
-	fd_set rset, wset, eset;
-	int max_fd, fd, http_rc, ret = RCL_INTERNAL_ERR;
-	long busy_wait, timeout, connect_timeout;
-	long retry_time;
 	OSS_CURLM *multi_list;
 	CURLM *multi_handle;
-	internal_curl_sock internal = {CURL_SOCKET_TIMEOUT, NONE, 0};
-
-	if (transfers == FD_SETSIZE) {
-		LM_ERR("too many ongoing transfers: %d\n", FD_SETSIZE);
-		goto cleanup;
-	}
+	long busy_wait, timeout, connect_timeout, retry_time, timer;
+	enum curl_status status = CURL_NONE;
 
 	handle = curl_easy_init();
 	
@@ -1099,39 +1142,41 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 
 	w_curl_multi_setopt(multi_handle, CURLMOPT_MAX_HOST_CONNECTIONS, (long) max_host_connection);
 	w_curl_multi_setopt(multi_handle, CURLMOPT_MAXCONNECTS, (long) max_async_transfers);
-	w_curl_multi_setopt(multi_handle, CURLMOPT_SOCKETFUNCTION, sock_cb);
- 	w_curl_multi_setopt(multi_handle, CURLMOPT_SOCKETDATA, &internal);
-
-	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERFUNCTION, timerfunc);
-  	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERDATA, &internal);
 
 	w_curl_easy_setopt(handle, CURLOPT_PREREQFUNCTION, prereq_callback);
-    w_curl_easy_setopt(handle, CURLOPT_PREREQDATA, &internal);
+    w_curl_easy_setopt(handle, CURLOPT_PREREQDATA, &status);
 
 	connect_timeout = (async_parm->timeout_s*1000) > connection_timeout_ms ?
 			(async_parm->timeout_s*1000) : connection_timeout_ms;
 	timeout = connect_timeout;
 	busy_wait = connect_poll_interval;
 
+	w_curl_multi_setopt(multi_handle, CURLMOPT_SOCKETFUNCTION, socket_action_cb);
+	w_curl_multi_setopt(multi_handle, CURLMOPT_SOCKETDATA, &fds);
+
+	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERFUNCTION, timer_cb);
+  	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERDATA, &timer);
+
+	if ((running_handles = start_multi_socket(multi_handle)) < 0) {
+		goto cleanup;
+	}
+
 	do {
-		mrc = curl_multi_socket_action(multi_handle, internal.sock, 0, &running_handles);
-		if (mrc != CURLM_OK) {
-			LM_ERR("curl_multi_socket_action: %s\n", curl_multi_strerror(mrc));
-			goto error;
-		}
+		running_handles = run_multi_socket(multi_handle);
 
-		LM_DBG("internal status %d socket %d\n", internal.status, internal.sock);
-
-		if (internal.status & CURL_REQUEST_SENT) {
-			fd = internal.sock;
+		if (status == CURL_REQUEST_SENT) {
 			goto success;
 		}
 
+		if (timer < 0) {
+			break;
+		}
+	
 		usleep(1000UL * busy_wait);
-	} while (!(internal.status & CURL_REQUEST_SENT || internal.status & CURL_TIMEOUT));
+		LM_DBG("Connecting or sending, running handles %d\n", running_handles);
+	} while (running_handles != 0);
 
 	LM_ERR("connect timeout on %s (%lds)\n", url, connection_timeout);
-	ret = RCL_CONNECT_TIMEOUT;
 	goto error;
 
 success:
@@ -1139,7 +1184,7 @@ success:
 	async_parm->handle = handle;
 	async_parm->multi_list = multi_list;
 	header_list = NULL;
-	*out_fd = fd;
+	*out_fd = fds.max_fd; // Running only one socket at a time so it's always the max
 	return RCL_OK;
 
 error:
@@ -1161,7 +1206,7 @@ cleanup:
 		pkg_free(async_parm->tparam);
 
 	*out_fd = ASYNC_NO_IO;
-	return ret;
+	return RCL_INTERNAL_ERR;
 }
 
 static enum async_ret_code _resume_async_http_req(int fd, struct sip_msg *msg,

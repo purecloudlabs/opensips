@@ -394,12 +394,24 @@ static int child_init(int rank)
 
 	if (get_fd_limit() != 0) {
 		LM_WARN("Could not get file descriptor limits\n");
+		return 0;
 	}
 
-	if (pt[getpid()].type != TYPE_TIMER ) {
-		if (connect_only(precon_urls, total_cons) != 0) {
-			LM_WARN("Could not create warm pool\n");
-		}	
+	if (init_process_limits() != 0) {
+		LM_WARN("Could not set file descriptor limits\n");
+		return 0;
+	}
+
+	if (pt[getpid()].type == TYPE_TIMER ) {
+		return 0;
+	}
+
+	if (precon_urls == NULL) {
+		return 0;
+	}
+
+	if (connect_only(precon_urls, total_cons) != 0) {
+		LM_WARN("Could not create warm pool\n");
 	}
 
 	return 0;

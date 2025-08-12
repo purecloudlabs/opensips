@@ -43,7 +43,7 @@
 #define INTIAL_CURL_SOCK ((internal_curl_sock){-1, 0, NULL})
 
 enum curl_status {
-    NONE=0, CURL_CONNECTED=1, CURL_REQUEST_SENDING=2, CURL_REQUEST_SENT=4, CURL_FINISHED=8, CURL_TIMEOUT=16, CURL_ERROR=32
+    CURL_NONE=0, CURL_CONNECTED=1, CURL_REQUEST_SENDING=2, CURL_REQUEST_SENT=4, CURL_FINISHED=8, CURL_TIMEOUT=16, CURL_ERROR=32
 };
 
 typedef struct _internal_curl_sock {
@@ -54,8 +54,6 @@ typedef struct _internal_curl_sock {
 
 size_t write_func(char *ptr, size_t size, size_t nmemb, void *userdata);
 size_t header_func(char *ptr, size_t size, size_t nmemb, void *userdata);
-int sock_cb(CURL *e, curl_socket_t s, int what, void *cbp, void *sockp);
-int timerfunc(CURLM *multi, long timeout_ms, void *cbp);
 int prereq_callback(void *cbp,  char *conn_primary_ip,  char *conn_local_ip, int conn_primary_port, int conn_local_port);
 
 #endif /* _REST_CB_H_ */
