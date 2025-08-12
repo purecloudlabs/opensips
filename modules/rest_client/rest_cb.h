@@ -46,12 +46,6 @@ enum curl_status {
     CURL_NONE=0, CURL_CONNECTED=1, CURL_REQUEST_SENDING=2, CURL_REQUEST_SENT=4, CURL_FINISHED=8, CURL_TIMEOUT=16, CURL_ERROR=32
 };
 
-typedef struct _internal_curl_sock {
-  curl_socket_t sock;
-  enum curl_status status;
-  long timer;
-} internal_curl_sock;
-
 size_t write_func(char *ptr, size_t size, size_t nmemb, void *userdata);
 size_t header_func(char *ptr, size_t size, size_t nmemb, void *userdata);
 int prereq_callback(void *cbp,  char *conn_primary_ip,  char *conn_local_ip, int conn_primary_port, int conn_local_port);

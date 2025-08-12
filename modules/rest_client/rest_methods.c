@@ -555,7 +555,7 @@ static int run_multi_socket(CURLM *multi_handle) {
 		sockets = socket_bitmask[i];
 		
 		while (sockets) {
-			int curl_s = (i * WORD_SIZE_BITS) + __builtin_ctzll(sockets);
+			int curl_s = (i * WORD_SIZE_BITS) + __builtin_ctzll(sockets); // TODO need to ifdef clang way of doing this
 			LM_DBG("Action on socket %d\n", curl_s);
 		
 			mrc = curl_multi_socket_action(multi_handle, curl_s, 0, &running);
@@ -616,7 +616,8 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 				goto cleanup;
 			}
 
-			w_curl_easy_setopt(handle, CURLOPT_NOBODY, 1L);
+			// TODO Need to expose these settings for connect and async req
+			w_curl_easy_setopt(handle, CURLOPT_NOBODY, 1L); 
 			w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPALIVE, 1L);
 			w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPIDLE, 5L);
 			w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPINTVL, 5L);
@@ -629,6 +630,7 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 
 	busy_wait = connect_poll_interval;
 
+	// TODO Need to expose these settings for connect and async req
 	w_curl_multi_setopt(multi_handle, CURLMOPT_MAX_HOST_CONNECTIONS, (long) num_of_connections);
 	w_curl_multi_setopt(multi_handle, CURLMOPT_MAXCONNECTS, (long) num_of_connections);
 
