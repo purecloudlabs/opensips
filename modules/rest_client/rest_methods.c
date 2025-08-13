@@ -461,7 +461,7 @@ cleanup:
 
 typedef struct _file_descriptors {
 	unsigned char *tracked_socks;
-	int max_fd;
+	int max_fd_index;
 } file_descriptors;
 
 static CURLSH *curl_share = NULL;
@@ -473,7 +473,7 @@ int init_process_limits(void) {
 	aligned_bitset_len = (((lim.rlim_cur + WORD_SIZE_BITS - 1) / WORD_SIZE_BITS) * WORD_SIZE_BITS) / WORD_SIZE_BITS;
 
 	fds.tracked_socks = (unsigned char*) pkg_malloc(aligned_bitset_len);
-	fds.max_fd = 0;
+	fds.max_fd_index = 0;
 	total_chunks = aligned_bitset_len / sizeof(uint64_t);
 
 	if (fds.tracked_socks == NULL) {
@@ -483,16 +483,50 @@ int init_process_limits(void) {
 	return 0;
 }
 
-static inline void add_sock(unsigned char *socks, int s) {
-    socks[s / BYTE_LEN] |= (1 << (s % BYTE_LEN));
+static inline int get_max_fd(file_descriptors *fds) {
+	uint64_t *socket_bitmask;
+	uint64_t sockets;
+	int max_index;
+
+	socket_bitmask = (uint64_t*) fds->tracked_socks;
+	sockets = socket_bitmask[fds->max_fd_index -1];
+
+	max_index = (fds->max_fd_index * (WORD_SIZE_BITS)) - 1;
+	
+    return max_index - __builtin_clzll(sockets);
 }
 
-static inline void remove_sock(unsigned char *socks, int s) {
-    socks[s / BYTE_LEN] &= ~(1 << (s % BYTE_LEN));
+/*
+ * Adds the socket to a bitmask and calculates index of that socket in the bitmask
+ * eg. s = 63 then index is 1 and if s = 65 then index is 2, in increments of 64 bits
+ * The index is the max index to check when actioning on the sockets
+ */
+static inline void add_sock(file_descriptors *fds, int s) {
+	int sock_index = (s >> 6) + 1;
+
+	if (sock_index > fds->max_fd_index) {
+		fds->max_fd_index = sock_index;
+	}
+
+    fds->tracked_socks[s / BYTE_LEN] |= (1 << (s % BYTE_LEN));
 }
 
-static inline int has_sock(unsigned char *socks, int s) {
-    return socks[s / BYTE_LEN] & (1 << (s % BYTE_LEN));
+/*
+ * Removes the socket from the bitmask and then checks the max bitmask for any setbits
+ * If no bits are set then the max index is decremented regardless if the socket removed was in that chunk
+ */
+static inline void remove_sock(file_descriptors *fds, int s) {
+	uint64_t sockets;
+	uint64_t *socket_bitmask;
+
+	fds->tracked_socks[s / BYTE_LEN] &= ~(1 << (s % BYTE_LEN));
+
+    socket_bitmask = (uint64_t*) fds->tracked_socks;
+    sockets = socket_bitmask[fds->max_fd_index -1];
+
+	if (!sockets) {
+		fds->max_fd_index--;
+	}
 }
 
 static int socket_action_cb(CURL *e, curl_socket_t s, int event, void *cbp, void *sockp)
@@ -501,15 +535,9 @@ static int socket_action_cb(CURL *e, curl_socket_t s, int event, void *cbp, void
 	file_descriptors *fds = (file_descriptors*) cbp;
 
 	if (event != CURL_POLL_REMOVE) {
-		add_sock(fds->tracked_socks, s);
-
-		if (s > fds->max_fd) {
-			fds->max_fd = s;
-		}
+		add_sock(fds, s);
 	} else if (event == CURL_POLL_REMOVE) {
-		if (has_sock(fds->tracked_socks, s)) {
-			remove_sock(fds->tracked_socks, s);
-		}
+		remove_sock(fds, s);
 	}
 
   	return 0;
@@ -530,7 +558,7 @@ static int start_multi_socket(CURLM *multi_handle) {
 	int running;
 
 	memset(fds.tracked_socks, 0, aligned_bitset_len);
-	fds.max_fd = 0;
+	fds.max_fd_index = 0;
 	mrc = curl_multi_socket_action(multi_handle, CURL_SOCKET_TIMEOUT, 0, &running);
 
 	if (mrc != CURLM_OK) {
@@ -543,19 +571,25 @@ static int start_multi_socket(CURLM *multi_handle) {
 
 static int run_multi_socket(CURLM *multi_handle) {
 	CURLMcode mrc;
-	int max_chunk_to_check, running;
+	int running;
 	uint64_t sockets;
 	uint64_t *socket_bitmask;
-
-	max_chunk_to_check = (fds.max_fd + WORD_SIZE_BITS) / WORD_SIZE_BITS;
 	
 	socket_bitmask = (uint64_t*) fds.tracked_socks;
 
-	for (int i = 0; i < max_chunk_to_check; i++) {
+	if (fds.max_fd_index > 0) {
+		sockets = socket_bitmask[fds.max_fd_index - 1];
+    
+    	if (!sockets) {
+    		fds.max_fd_index--;
+    	}   
+	}
+
+	for (int i = 0; i < fds.max_fd_index; i++) {
 		sockets = socket_bitmask[i];
 		
 		while (sockets) {
-			int curl_s = (i * WORD_SIZE_BITS) + __builtin_ctzll(sockets); // TODO need to ifdef clang way of doing this
+			int curl_s = (i * WORD_SIZE_BITS) + __builtin_ctzll(sockets);
 			LM_DBG("Action on socket %d\n", curl_s);
 		
 			mrc = curl_multi_socket_action(multi_handle, curl_s, 0, &running);
@@ -1186,7 +1220,7 @@ success:
 	async_parm->handle = handle;
 	async_parm->multi_list = multi_list;
 	header_list = NULL;
-	*out_fd = fds.max_fd; // Running only one socket at a time so it's always the max
+	*out_fd = get_max_fd(&fds); // Running only one socket at a time so it's always the max
 	return RCL_OK;
 
 error:
