@@ -109,3 +109,13 @@ size_t header_func(char *ptr, size_t size, size_t nmemb, void *userdata)
 	return len;
 }
 
+int prereq_callback(void *cbp,
+                           char *conn_primary_ip,
+                           char *conn_local_ip,
+                           int conn_primary_port,
+                           int conn_local_port)
+{
+	enum curl_status *p = (enum curl_status*) cbp;
+	*p = CURL_REQUEST_SENT;
+	return CURL_PREREQFUNC_OK;
+}

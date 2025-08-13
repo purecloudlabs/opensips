@@ -39,6 +39,7 @@ extern long connection_timeout;
 extern long connect_poll_interval;
 extern long connection_timeout_ms;
 extern int max_async_transfers;
+extern int max_host_connection;
 extern long curl_timeout;
 
 extern char *ssl_capath;
@@ -143,6 +144,8 @@ enum async_ret_code time_out_async_http_req(int fd, struct sip_msg *msg, void *_
 
 int rest_append_hf_method(struct sip_msg *msg, str *hfv);
 int rest_init_client_tls(struct sip_msg *msg, str *tls_client_dom);
+int connect_only(preconnect_urls *precon_urls, int total_cons);
+int init_process_limits(void);
 
 #endif /* _REST_METHODS_ */
 

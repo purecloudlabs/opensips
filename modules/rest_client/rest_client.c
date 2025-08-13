@@ -50,6 +50,7 @@ long connection_timeout = 20; /* s */
 long connect_poll_interval = 20; /* ms */
 long connection_timeout_ms;
 int max_async_transfers = 100;
+int max_host_connection = 10;
 long curl_timeout = 20;
 char *ssl_capath;
 unsigned int max_transfer_size = 10240; /* KB (10MB) */
@@ -72,10 +73,16 @@ int enable_expect_100;
 
 struct tls_mgm_binds tls_api;
 
+static preconnect_urls *precon_urls = 0;
+static int total_cons = 0;
+
 /* trace parameters for this module */
 int rest_proto_id;
 trace_proto_t tprot;
 char* rest_id_s = "rest";
+
+/* file descriptor limits */
+struct rlimit lim;
 
 /*
  * Module initialization and cleanup
@@ -190,6 +197,72 @@ static const trans_export_t trans[] = {
 	{{0,0},0,0}
 };
 
+static int warm_pool_urls(modparam_t type, void *val) {
+	int num_conns;
+	char *mod_param, *delim, *host;
+	size_t delim_index, string_end;
+	preconnect_urls *tmp;
+	str num_conns_s;
+
+	mod_param = (char*) val;
+
+	if ((delim = strchr(mod_param, ',')) == NULL) {
+        goto error;
+	}
+
+	delim_index = (size_t)(delim - mod_param);
+	if (delim_index == 0) {
+		goto error;
+	}
+	
+	host = (char*) pkg_malloc(delim_index + 1);
+	if (host == NULL) {
+		goto error;
+	}
+
+	strncpy(host, mod_param, delim_index);
+	host[delim_index + 1] = '\0';
+	
+	string_end = strlen(mod_param + delim_index + 1);
+	if (string_end == 0) {
+		goto error;
+	}
+
+	num_conns_s.s = mod_param + delim_index + 1;
+	num_conns_s.len = string_end;
+	if (str2int(&num_conns_s, &num_conns) != 0) {
+		goto error;
+	}
+    
+	tmp = (preconnect_urls*) pkg_malloc(sizeof(preconnect_urls));
+	if (tmp == NULL) {
+		goto error;
+	}
+
+	tmp->url = host;
+	tmp->connections = (long) num_conns;
+	tmp->next = 0;
+
+	if (precon_urls != NULL) {
+		tmp->next = precon_urls;
+	}
+
+	precon_urls = tmp;
+	total_cons += num_conns;
+
+	return 0;
+error:
+	if (host != NULL) {
+		pkg_free(host);
+	}
+
+	if (tmp != NULL) {
+		pkg_free(tmp);
+	}
+
+	return -1;
+}
+
 /*
  * Exported parameters
  */
@@ -197,6 +270,7 @@ static const param_export_t params[] = {
 	{ "connection_timeout",	INT_PARAM, &connection_timeout	},
 	{ "connect_poll_interval", INT_PARAM, &connect_poll_interval },
 	{ "max_async_transfers", INT_PARAM, &max_async_transfers },
+	{ "max_host_connection", INT_PARAM, &max_host_connection},
 	{ "max_transfer_size",	INT_PARAM, &max_transfer_size	},
 	{ "curl_timeout",		INT_PARAM, &curl_timeout		},
 	{ "ssl_capath",			STR_PARAM, &ssl_capath			},
@@ -206,6 +280,8 @@ static const param_export_t params[] = {
 	{ "enable_expect_100",	INT_PARAM, &enable_expect_100	},
 	{ "no_concurrent_connects",	INT_PARAM, &no_concurrent_connects	},
 	{ "curl_conn_lifetime",	INT_PARAM, &curl_conn_lifetime	},
+	{ "warm_pool_urls",		STR_PARAM|USE_FUNC_PARAM,
+		(void*)&warm_pool_urls },
 	{ 0, 0, 0 }
 };
 
@@ -298,12 +374,44 @@ static int cfg_validate(void)
 	return 1;
 }
 
+static int get_fd_limit(void) {
+	if (getrlimit(RLIMIT_NOFILE, &lim) < 0) {
+		LM_ERR("cannot get the maximum number of file descriptors: %s\n",
+			strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
 
 static int child_init(int rank)
 {
 	if (init_sync_handle() != 0) {
 		LM_ERR("failed to init sync handle\n");
 		return -1;
+	}
+
+	if (get_fd_limit() != 0) {
+		LM_WARN("Could not get file descriptor limits\n");
+		return 0;
+	}
+
+	if (init_process_limits() != 0) {
+		LM_WARN("Could not set file descriptor limits\n");
+		return 0;
+	}
+
+	if (pt[getpid()].type == TYPE_TIMER ) {
+		return 0;
+	}
+
+	if (precon_urls == NULL) {
+		return 0;
+	}
+
+	if (connect_only(precon_urls, total_cons) != 0) {
+		LM_WARN("Could not create warm pool\n");
 	}
 
 	return 0;
