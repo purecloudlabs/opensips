@@ -486,14 +486,25 @@ int init_process_limits(void) {
 static inline int get_max_fd(file_descriptors *fds) {
 	uint64_t *socket_bitmask;
 	uint64_t sockets;
-	int max_index;
+	int start_index, bitmask_index;
+
+	bitmask_index = fds->max_fd_index -1;
+
+	if (bitmask_index < 0) {
+		return -2;
+	}
 
 	socket_bitmask = (uint64_t*) fds->tracked_socks;
-	sockets = socket_bitmask[fds->max_fd_index -1];
+	sockets = socket_bitmask[bitmask_index];
 
-	max_index = (fds->max_fd_index * (WORD_SIZE_BITS)) - 1;
+	if (!sockets) {
+		fds->max_fd_index--;
+		return -1;
+	}
+
+	start_index = (fds->max_fd_index * (WORD_SIZE_BITS)) - 1;
 	
-    return max_index - __builtin_clzll(sockets);
+    return start_index - __builtin_clzll(sockets);
 }
 
 /*
@@ -518,14 +529,19 @@ static inline void add_sock(file_descriptors *fds, int s) {
 static inline void remove_sock(file_descriptors *fds, int s) {
 	uint64_t sockets;
 	uint64_t *socket_bitmask;
+	int bitmask_index;
 
 	fds->tracked_socks[s / BYTE_LEN] &= ~(1 << (s % BYTE_LEN));
 
+	bitmask_index = fds->max_fd_index -1;
     socket_bitmask = (uint64_t*) fds->tracked_socks;
-    sockets = socket_bitmask[fds->max_fd_index -1];
 
-	if (!sockets) {
-		fds->max_fd_index--;
+	if (bitmask_index > 0) {
+		memcpy(&sockets, socket_bitmask + fds->max_fd_index - 1, sizeof(sockets));
+
+		if (!sockets) {
+			fds->max_fd_index--;
+		}
 	}
 }
 
@@ -578,7 +594,7 @@ static int run_multi_socket(CURLM *multi_handle) {
 	socket_bitmask = (uint64_t*) fds.tracked_socks;
 
 	if (fds.max_fd_index > 0) {
-		sockets = socket_bitmask[fds.max_fd_index - 1];
+		memcpy(&sockets, socket_bitmask + fds.max_fd_index - 1, sizeof(sockets));
     
     	if (!sockets) {
     		fds.max_fd_index--;
@@ -586,7 +602,7 @@ static int run_multi_socket(CURLM *multi_handle) {
 	}
 
 	for (int i = 0; i < fds.max_fd_index; i++) {
-		sockets = socket_bitmask[i];
+		memcpy(&sockets, socket_bitmask + i, sizeof(sockets));
 		
 		while (sockets) {
 			int curl_s = (i * WORD_SIZE_BITS) + __builtin_ctzll(sockets);
