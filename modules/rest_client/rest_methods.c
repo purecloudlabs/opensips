@@ -35,6 +35,7 @@
 #include "../../trace_api.h"
 #include "../../resolve.h"
 #include "../../timer.h"
+#include "../../lock_ops.h"
 
 #include "../tls_mgm/api.h"
 
@@ -89,6 +90,10 @@ extern trace_proto_t tprot;
 extern char *rest_id_s;
 
 static CURLSH *curl_share = NULL;
+static gen_lock_t curl_share_locks[CURL_LOCK_DATA_LAST];
+
+static enum curl_status status;
+static long timer;
 
 /**
  * We cannot use the "parallel transfers" feature of libcurl's multi interface
@@ -179,9 +184,18 @@ int rcl_init_internals(void)
 
 #define w_curl_multi_setopt(mh, opt, value) \
 	do { \
-		rc = curl_multi_setopt(mh, opt, value); \
-		if (rc != CURLE_OK) { \
-			LM_ERR("curl_multi_setopt(%d): (%s)\n", opt, curl_easy_strerror(rc)); \
+		mrc = curl_multi_setopt(mh, opt, value); \
+		if (mrc != CURLE_OK) { \
+			LM_ERR("curl_multi_setopt(%d): (%s)\n", opt, curl_multi_strerror(mrc)); \
+			goto cleanup; \
+		} \
+	} while (0)
+
+#define w_curl_share_setopt(cs, opt, value) \
+	do { \
+		src = curl_share_setopt(cs, opt, value); \
+		if (src != CURLE_OK) { \
+			LM_ERR("curl_share_setopt: %s\n", curl_share_strerror(src)); \
 			goto cleanup; \
 		} \
 	} while (0)
@@ -426,21 +440,40 @@ static inline int get_easy_status(CURL *handle, CURLM *multi, CURLcode *code)
 	return -1;
 }
 
+static void libcurl_share_lock(CURL *handle, curl_lock_data data, curl_lock_access access, void *clientp) {
+	LM_DBG("Locking libcurl share %d\n", data);
+	lock_get(&curl_share_locks[data]);
+}
+
+static void libcurl_share_unlock(CURL *handle, curl_lock_data data, void *clientp) {
+	LM_DBG("Unlocking libcurl share %d\n", data);
+	lock_release(&curl_share_locks[data]);
+}
+
 static CURLSH *get_curl_share(void) {
 	CURLSHcode src;
 
 	if (!curl_share) {
+		for (int i =0; i < CURL_LOCK_DATA_LAST; ++i) {
+			lock_init(&curl_share_locks[i]);
+		}
+
 		curl_share = curl_share_init();
 
-		src = curl_share_setopt(curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
-
-		if (src != CURLSHE_OK) {
-			LM_WARN("curl_share_setopt: %s\n", curl_share_strerror(src));
-			return NULL;
-		}
+		w_curl_share_setopt(curl_share, CURLSHOPT_SHARE, CURL_LOCK_DATA_CONNECT);
+		w_curl_share_setopt(curl_share, CURLSHOPT_LOCKFUNC, libcurl_share_lock);
+		w_curl_share_setopt(curl_share, CURLSHOPT_UNLOCKFUNC, libcurl_share_unlock);
 	}
 
 	return curl_share;
+cleanup:
+	for (int i =0; i < CURL_LOCK_DATA_LAST; ++i) {
+		lock_destroy(&curl_share_locks[i]);
+	}
+
+	curl_share_cleanup(curl_share);
+	curl_share = NULL;
+	return NULL;
 }
 
 static int init_transfer(CURL *handle, char *url, unsigned long timeout_s)
@@ -466,8 +499,7 @@ static int init_transfer(CURL *handle, char *url, unsigned long timeout_s)
 	w_curl_easy_setopt(handle, CURLOPT_VERBOSE, 1);
 	w_curl_easy_setopt(handle, CURLOPT_FAILONERROR, 0);
 
-	if (is_printable(L_DBG))
-		w_curl_easy_setopt(handle, CURLOPT_STDERR, stderr);
+	w_curl_easy_setopt(handle, CURLOPT_STDERR, stdout);
 
 	if (ssl_capath)
 		w_curl_easy_setopt(handle, CURLOPT_CAPATH, ssl_capath);
@@ -487,12 +519,15 @@ cleanup:
 static int init_socket_keepalive(CURL *handle) {
 	CURLcode rc;
 
-	curl_share = get_curl_share();
-	w_curl_easy_setopt(handle, CURLOPT_SHARE, curl_share);
+	if (share_connections) {
+		// If the share cannot be created then log warn but keep going
+		curl_share = get_curl_share();
+		w_curl_easy_setopt(handle, CURLOPT_SHARE, curl_share);
+	}
 	
 	w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPALIVE, 1L);
-	w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPIDLE, 5L);
-	w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPINTVL, 5L);
+	w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPIDLE, 180L);
+	w_curl_easy_setopt(handle, CURLOPT_TCP_KEEPINTVL, 180L);
 	w_curl_easy_setopt(handle, CURLOPT_MAXAGE_CONN, socket_keep_alive);
 
 	return 0;
@@ -1290,6 +1325,9 @@ static enum async_ret_code _resume_async_http_req_v2(int fd, struct sip_msg *msg
 		goto cleanup;
 	}
 
+	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERFUNCTION, timer_cb);
+  	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERDATA, &timer);
+
 	retr = 0;
 	do {
 		/* When @enable_expect_100 is on, both the client body upload and the
@@ -1686,8 +1724,7 @@ int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
 	CURLMcode mrc;
 	OSS_CURLM *multi_list;
 	CURLM *multi_handle;
-	long busy_wait, timeout, connect_timeout, retry_time, timer;
-	enum curl_status status = CURL_NONE;
+	long busy_wait, timeout, connect_timeout, retry_time;
 
 	handle = curl_easy_init();
 
@@ -1722,10 +1759,7 @@ int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
 	w_curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, write_func);
 	w_curl_easy_setopt(handle, CURLOPT_WRITEDATA, body);
 
-	if (share_connections) {
-		// If the share cannot be created then log warn but keep going
-		init_socket_keepalive(handle);
-	}
+	init_socket_keepalive(handle);
 
 	if (ctype) {
 		w_curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, header_func);
@@ -1761,6 +1795,7 @@ int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
 
 	w_curl_multi_setopt(multi_handle, CURLMOPT_MAXCONNECTS, (long) max_connections);
 
+	status = CURL_NONE;
 	w_curl_easy_setopt(handle, CURLOPT_PREREQFUNCTION, prereq_callback);
     w_curl_easy_setopt(handle, CURLOPT_PREREQDATA, &status);
 
@@ -1778,6 +1813,10 @@ int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
 
 	do {
 		running_handles = run_multi_socket(multi_handle);
+
+		if (running_handles < 0) {
+			goto error;
+		}
 
 		if (status == CURL_REQUEST_SENT) {
 			goto success;
@@ -1797,9 +1836,14 @@ int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
 success:
 	async_parm->header_list = header_list;
 	async_parm->handle = handle;
-	async_parm->multi_list = multi_list;
 	header_list = NULL;
 	*out_fd = get_max_fd(ASYNC_SYNC); // Running only one socket at a time so it's always the max
+
+	if (*out_fd >= 0) {
+		async_parm->multi_list = multi_list;
+	} else {
+		put_multi(multi_list);
+	}
 	return RCL_OK;
 
 error:
