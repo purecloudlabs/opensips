@@ -1040,11 +1040,6 @@ int async_rest_method_v2(enum rest_client_method method, struct sip_msg *msg,
 
 	async_status = read_fd;
 	return 1;
-
-done:
-	if (lrc == RCL_OK_LOCKED)
-		rcl_release_url(host, rc == RCL_OK);
-	return rc;
 }
 
 static int w_async_rest_get_v2(struct sip_msg *msg, async_ctx *ctx, str *url,
