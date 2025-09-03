@@ -255,9 +255,9 @@ static const trans_export_t trans[] = {
 
 static int warm_pool_urls(modparam_t type, void *val) {
 	unsigned int num_conns;
-	char *mod_param, *delim, *host;
+	char *mod_param, *delim, *host = NULL;
 	size_t delim_index, string_end;
-	preconnect_urls *tmp;
+	preconnect_urls *tmp = NULL;
 	str num_conns_s;
 
 	if (!share_connections) {
