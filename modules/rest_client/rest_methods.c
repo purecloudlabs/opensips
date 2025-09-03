@@ -185,7 +185,7 @@ int rcl_init_internals(void)
 #define w_curl_multi_setopt(mh, opt, value) \
 	do { \
 		mrc = curl_multi_setopt(mh, opt, value); \
-		if (mrc != CURLE_OK) { \
+		if (mrc != CURLM_OK) { \
 			LM_ERR("curl_multi_setopt(%d): (%s)\n", opt, curl_multi_strerror(mrc)); \
 			goto cleanup; \
 		} \
@@ -194,7 +194,7 @@ int rcl_init_internals(void)
 #define w_curl_share_setopt(cs, opt, value) \
 	do { \
 		src = curl_share_setopt(cs, opt, value); \
-		if (src != CURLE_OK) { \
+		if (src != CURLSHE_OK) { \
 			LM_ERR("curl_share_setopt: %s\n", curl_share_strerror(src)); \
 			goto cleanup; \
 		} \
@@ -1607,7 +1607,6 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 	CURL *handle;
 	CURLM *multi_handle;
 	OSS_CURLM *multi_list;
-	CURL **list;
 	struct CURLMsg *m;
 	preconnect_urls *start, *next;
 	char *url;
@@ -1711,6 +1710,7 @@ cleanup:
 
 	put_multi(multi_list);
 
+done:
 	return exit_code;
 }
 
@@ -1724,7 +1724,7 @@ int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
 	CURLMcode mrc;
 	OSS_CURLM *multi_list;
 	CURLM *multi_handle;
-	long busy_wait, timeout, connect_timeout, retry_time;
+	long busy_wait, connect_timeout;
 
 	handle = curl_easy_init();
 
@@ -1801,7 +1801,6 @@ int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
 
 	connect_timeout = (async_parm->timeout_s*1000) > connection_timeout_ms ?
 			(async_parm->timeout_s*1000) : connection_timeout_ms;
-	timeout = connect_timeout;
 	busy_wait = connect_poll_interval;
 
 	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERFUNCTION, timer_cb);
