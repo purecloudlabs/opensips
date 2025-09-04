@@ -4,10 +4,9 @@
 
 #include "../../sr_module.h"
 #include "../../timer.h"
+#include "../../dprint.h"
 #include <stdio.h>
 #include <unistd.h>
-
-MODULE_VERSION
 
 static int mod_init(void);
 static void mod_destroy(void);
@@ -20,18 +19,25 @@ static proc_export_t procs[] = {
 
 struct module_exports exports = {
     "evan_read_cpu",        /* module name */
-    MODULE_VERSION,         /* module version */
+    MOD_TYPE_DEFAULT,       /* class of this module */
+    MODULE_VERSION,
     DEFAULT_DLFLAGS,        /* dlopen flags */
+    0,                      /* load function */
+    0,                      /* OpenSIPS module dependencies */
     0,                      /* exported functions */
+    0,                      /* exported asynchronous functions */
     0,                      /* exported parameters */
     0,                      /* exported statistics */
     0,                      /* exported MI functions */
     0,                      /* exported pseudo-variables */
+    0,                      /* exported transformations */
     procs,                  /* extra processes */
+    0,                      /* module pre-initialization function */
     mod_init,               /* module initialization function */
     0,                      /* response function */
     mod_destroy,            /* destroy function */
-    0                       /* child init function */
+    0,                      /* per-child init function */
+    0                       /* reload-ack function */
 };
 
 static int mod_init(void)
