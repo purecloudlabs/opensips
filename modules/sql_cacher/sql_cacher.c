@@ -936,7 +936,7 @@ static int load_entire_table(cache_entry_t *c_entry, db_handlers_t *db_hdls,
 
 	pkg_free(query_cols);
 
-	lock_start_write(db_hdls->c_entry->ref_lock);
+	// lock_start_write(db_hdls->c_entry->ref_lock);
 
 	if (inc_rld_vers && inc_cache_rld_vers(db_hdls, &reload_vers) < 0) {
 		lock_stop_write(db_hdls->c_entry->ref_lock);
@@ -1183,8 +1183,8 @@ static mi_item_t *mi_reload(const mi_params_t *params, str *key, str *entry_id)
 					lock_release(queries_lock);
 					lock_get(it->wait_sql_query);
 				}
-			} else {
-				lock_start_write(db_hdls->c_entry->ref_lock);
+			// } else {
+			// 	lock_start_write(db_hdls->c_entry->ref_lock);
 			}
 
 			if ((rld_vers = get_rld_vers_from_cache(db_hdls->c_entry, db_hdls)) < 0) {
@@ -1928,8 +1928,8 @@ int pv_get_sql_cached_value(struct sip_msg *msg,  pv_param_t *param, pv_value_t 
 		}
 	}
 
-	if (!pv_name->c_entry->on_demand)
-		lock_start_read(pv_name->c_entry->ref_lock);
+	// if (!pv_name->c_entry->on_demand)
+	// 	lock_start_read(pv_name->c_entry->ref_lock);
 
 	rc = cdb_fetch(pv_name, &cdb_res, &entry_rld_vers);
 	if (rc == -1) {
