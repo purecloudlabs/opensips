@@ -54,7 +54,8 @@ long connection_timeout = 20; /* s */
 long connect_poll_interval = 20; /* ms */
 long connection_timeout_ms;
 int max_async_transfers = 100;
-int max_connections = 100;
+long max_connections = 100;
+long max_host_connections = 0;
 long curl_timeout = 20;
 char *ssl_capath;
 unsigned int max_transfer_size = 10240; /* KB (10MB) */
@@ -342,6 +343,7 @@ static const param_export_t params[] = {
 	{ "use_multi_socket_api",	INT_PARAM, &use_multi_socket_api	},
 	{ "share_connections",	INT_PARAM, &share_connections	},
 	{ "max_connections",	INT_PARAM, &max_connections	},
+	{ "max_host_connections",	INT_PARAM, &max_host_connections	},
 	{ "warm_pool_urls",		STR_PARAM|USE_FUNC_PARAM,
 		(void*)&warm_pool_urls },
 	{ 0, 0, 0 }
@@ -413,6 +415,18 @@ static int mod_init(void)
 	if (curl_global_init(CURL_GLOBAL_ALL) != CURLE_OK) {
 		LM_ERR("could not initialize curl!\n");
 		return -1;
+	}
+
+	if (max_connections <= 0) {
+		LM_WARN("Bad max_connections value (%ld), setting to default of 100\n", max_connections);
+		max_connections = 100;
+	}
+
+	if (max_host_connections < 0) {
+		LM_WARN("Bad max_host_connections value (%ld), setting to max_connections value (%ld)\n",
+			max_host_connections, max_connections);
+
+		max_host_connections = max_connections;
 	}
 
 	LM_INFO("Module initialized!\n");
