@@ -160,17 +160,17 @@ int run_multi_socket(CURLM *multi_handle) {
 }
 
 int setsocket_callback(CURLM *multi_handle) {
-    CURLcode rc;
+    CURLMcode mrc;
     
-    rc = curl_multi_setopt(multi_handle, CURLMOPT_SOCKETFUNCTION, socket_action_cb);
-    if (rc != CURLE_OK) {
-        LM_ERR("curl_multi_setopt(%d): (%s)\n", CURLMOPT_SOCKETFUNCTION, curl_easy_strerror(rc));
+    mrc = curl_multi_setopt(multi_handle, CURLMOPT_SOCKETFUNCTION, socket_action_cb);
+    if (mrc != CURLM_OK) {
+        LM_ERR("curl_multi_setopt(%d): (%s)\n", CURLMOPT_SOCKETFUNCTION, curl_multi_strerror(mrc));
         return -1;
     }
 
-    rc = curl_multi_setopt(multi_handle, CURLMOPT_SOCKETDATA, &fds);
-    if (rc != CURLE_OK) {
-        LM_ERR("curl_multi_setopt(%d): (%s)\n", CURLMOPT_SOCKETFUNCTION, curl_easy_strerror(rc));
+    mrc = curl_multi_setopt(multi_handle, CURLMOPT_SOCKETDATA, &fds);
+    if (mrc != CURLM_OK) {
+        LM_ERR("curl_multi_setopt(%d): (%s)\n", CURLMOPT_SOCKETFUNCTION, curl_multi_strerror(mrc));
         return -1;
     }
 

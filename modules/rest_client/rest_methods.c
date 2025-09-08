@@ -90,9 +90,8 @@ extern trace_proto_t tprot;
 extern char *rest_id_s;
 
 static CURLSH *curl_share = NULL;
-static gen_lock_t curl_share_locks[CURL_LOCK_DATA_LAST];
+static gen_lock_t *curl_socket_lock = NULL;
 
-static enum curl_status status;
 static long timer;
 
 /**
@@ -441,22 +440,30 @@ static inline int get_easy_status(CURL *handle, CURLM *multi, CURLcode *code)
 }
 
 static void libcurl_share_lock(CURL *handle, curl_lock_data data, curl_lock_access access, void *clientp) {
-	LM_DBG("Locking libcurl share %d\n", data);
-	lock_get(&curl_share_locks[data]);
+	if (data == CURL_LOCK_DATA_CONNECT) {
+		LM_DBG("Locking libcurl share %d\n", data);
+		lock_get(curl_socket_lock);
+	}
 }
 
 static void libcurl_share_unlock(CURL *handle, curl_lock_data data, void *clientp) {
-	LM_DBG("Unlocking libcurl share %d\n", data);
-	lock_release(&curl_share_locks[data]);
+	if (data == CURL_LOCK_DATA_CONNECT) {
+		LM_DBG("Unlocking libcurl share %d\n", data);
+		lock_release(curl_socket_lock);
+	}
 }
 
 static CURLSH *get_curl_share(void) {
 	CURLSHcode src;
 
 	if (!curl_share) {
-		for (int i =0; i < CURL_LOCK_DATA_LAST; ++i) {
-			lock_init(&curl_share_locks[i]);
+		curl_socket_lock = lock_alloc();
+
+		if (!curl_socket_lock) {
+			goto done;
 		}
+
+		lock_init(curl_socket_lock);
 
 		curl_share = curl_share_init();
 
@@ -467,16 +474,19 @@ static CURLSH *get_curl_share(void) {
 
 	return curl_share;
 cleanup:
-	for (int i =0; i < CURL_LOCK_DATA_LAST; ++i) {
-		lock_destroy(&curl_share_locks[i]);
+	if (curl_socket_lock) {
+		lock_destroy(curl_socket_lock);
+		lock_dealloc(curl_socket_lock);
+		curl_socket_lock = NULL;
 	}
 
-	curl_share_cleanup(curl_share);
+	curl_share_cleanup(curl_share); // Passing NULL returns early if init failed
 	curl_share = NULL;
+done:
 	return NULL;
 }
 
-static int init_transfer(CURL *handle, char *url, unsigned long timeout_s)
+static int init_transfer(CURL *handle, char *url, unsigned long connect_timeout_s, unsigned long timeout_s)
 {
 	CURLcode rc;
 
@@ -491,10 +501,8 @@ static int init_transfer(CURL *handle, char *url, unsigned long timeout_s)
 		tls_dom = NULL;
 	}
 
-	w_curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT,
-			timeout_s && timeout_s > connection_timeout ? timeout_s : connection_timeout);
-	w_curl_easy_setopt(handle, CURLOPT_TIMEOUT,
-			timeout_s && timeout_s > curl_timeout ? timeout_s : curl_timeout);
+	w_curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, connect_timeout_s);
+	w_curl_easy_setopt(handle, CURLOPT_TIMEOUT, curl_timeout);
 
 	w_curl_easy_setopt(handle, CURLOPT_VERBOSE, 1);
 	w_curl_easy_setopt(handle, CURLOPT_FAILONERROR, 0);
@@ -802,7 +810,7 @@ int rest_sync_transfer(enum rest_client_method method, struct sip_msg *msg,
 	str st = STR_NULL, res_body = STR_NULL, tbody, ttype;
 
 	curl_easy_reset(sync_handle);
-	if (init_transfer(sync_handle, url, 0) != 0) {
+	if (init_transfer(sync_handle, url, connection_timeout, curl_timeout) != 0) {
 		LM_ERR("failed to init transfer to %s\n", url);
 		goto cleanup;
 	}
@@ -918,7 +926,7 @@ static int start_async_http_req_v1(struct sip_msg *msg, enum rest_client_method 
 		goto cleanup;
 	}
 
-	if (init_transfer(handle, url, async_parm->timeout_s) != 0) {
+	if (init_transfer(handle, url, async_parm->timeout_s, async_parm->timeout_s) != 0) {
 		LM_ERR("failed to init transfer to %s\n", url);
 		goto cleanup;
 	}
@@ -1613,9 +1621,7 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 	long busy_wait, timer;
 	int msgq, num_of_connections, exit_code = 0;
 
-	curl_share = get_curl_share();
-
-	if (!curl_share) {
+	if (!share_connections) {
 		exit_code = -1;
 		goto done;
 	}
@@ -1640,7 +1646,7 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 			handle = curl_easy_init();
 			curl_multi_add_handle(multi_handle, handle);
 
-			if (init_transfer(handle, url, 0) != 0) {
+			if (init_transfer(handle, url, curl_timeout, curl_timeout) != 0) {
 				exit_code = -1;
 				goto cleanup;
 			}
@@ -1651,7 +1657,6 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 			}
 
 			w_curl_easy_setopt(handle, CURLOPT_NOBODY, 1L); 
-			w_curl_easy_setopt(handle, CURLOPT_SHARE, curl_share);
 		}
 
 		start = start->next;
@@ -1726,7 +1731,7 @@ int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
 	CURLMcode mrc;
 	OSS_CURLM *multi_list;
 	CURLM *multi_handle;
-	long busy_wait;
+	long busy_wait, req_sz;
 
 	handle = curl_easy_init();
 
@@ -1735,7 +1740,7 @@ int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
 		goto cleanup;
 	}
 
-	if (init_transfer(handle, url, async_parm->timeout_s) != 0) {
+	if (init_transfer(handle, url, connection_timeout, async_parm->timeout_s) != 0) {
 		LM_ERR("failed to init transfer to %s\n", url);
 		goto cleanup;
 	}
@@ -1795,13 +1800,8 @@ int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
 		goto cleanup;
 	}
 
-	w_curl_multi_setopt(multi_handle, CURLMOPT_MAXCONNECTS, (long) max_connections);
-
-	status = CURL_NONE;
-	w_curl_easy_setopt(handle, CURLOPT_PREREQFUNCTION, prereq_callback);
-    w_curl_easy_setopt(handle, CURLOPT_PREREQDATA, &status);
-
-	busy_wait = connect_poll_interval;
+	w_curl_multi_setopt(multi_handle, CURLMOPT_MAX_HOST_CONNECTIONS, max_host_connections);
+	w_curl_multi_setopt(multi_handle, CURLMOPT_MAXCONNECTS, max_connections);
 
 	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERFUNCTION, timer_cb);
   	w_curl_multi_setopt(multi_handle, CURLMOPT_TIMERDATA, &timer);
@@ -1810,6 +1810,8 @@ int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
 		goto cleanup;
 	}
 
+	busy_wait = connect_poll_interval;
+
 	do {
 		running_handles = run_multi_socket(multi_handle);
 
@@ -1817,7 +1819,9 @@ int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
 			goto error;
 		}
 
-		if (status == CURL_REQUEST_SENT) {
+      	curl_easy_getinfo(handle, CURLINFO_REQUEST_SIZE, &req_sz);
+
+		if (req_sz > 0) {
 			goto success;
 		}
 

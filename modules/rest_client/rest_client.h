@@ -32,7 +32,7 @@ enum tr_rest_subtype {
 
 typedef struct _preconnect_urls {
 	char *url;
-	unsigned int connections;
+	long connections;
 	struct _preconnect_urls *next;
 } preconnect_urls;
 

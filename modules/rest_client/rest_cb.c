@@ -118,14 +118,3 @@ int timer_cb(CURLM *multi_handle, long timeout_ms, void *cbp)
 
   	return 0;
 }
-
-int prereq_callback(void *cbp,
-                           char *conn_primary_ip,
-                           char *conn_local_ip,
-                           int conn_primary_port,
-                           int conn_local_port)
-{
-	enum curl_status *p = (enum curl_status*) cbp;
-	*p = CURL_REQUEST_SENT;
-	return 0;
-}
