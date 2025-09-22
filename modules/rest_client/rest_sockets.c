@@ -81,6 +81,21 @@ int get_max_fd(int no_max_default) {
     return ((fds.max_fd_index << 3) + WORD_SIZE_BITS - 1) - COUNT_LEADING_ZEROS(sockets);
 }
 
+int running_sockets(void) {
+	cpuword_t sockets;
+    int running, curl_fd;
+
+	for (int i = 0; i <= fds.max_fd_index; i += WORD_SIZE_BYTES) {
+		memcpy(&sockets, fds.tracked_socks + i, sizeof(cpuword_t));
+
+		if (sockets) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
 static void add_sock(int s) {
     int sock_index = s >> 3;
 

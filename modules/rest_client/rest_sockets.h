@@ -28,6 +28,7 @@
 
 int init_process_limits(rlim_t rlim_cur);
 int get_max_fd(int no_max_default);
+int running_sockets(void);
 int start_multi_socket(CURLM *multi_handle);
 int run_multi_socket(CURLM *multi_handle);
 int setsocket_callback(CURLM *multi_handle);

@@ -1662,7 +1662,7 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 		start = start->next;
 	}
 
-	busy_wait = connect_poll_interval;
+	busy_wait = 100;
 
 	if (setsocket_callback(multi_handle) != 0) {
 		goto cleanup;
@@ -1686,11 +1686,11 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 
 		if (timer < 0) {
 			break;
-		} 
+		}
 	
 		usleep(1000UL * busy_wait);
 		LM_DBG("Creating warm pool connection, running handles %d\n", running_handles);
-	} while (running_handles != 0);
+	} while (running_sockets());
 
 cleanup:
 	do {
