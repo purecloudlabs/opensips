@@ -109,3 +109,12 @@ size_t header_func(char *ptr, size_t size, size_t nmemb, void *userdata)
 	return len;
 }
 
+int timer_cb(CURLM *multi_handle, long timeout_ms, void *cbp)
+{
+	LM_DBG("multi_handle timer called %ld\n", timeout_ms);
+	long *p = (long*) cbp;
+
+	*p = timeout_ms;
+
+  	return 0;
+}
