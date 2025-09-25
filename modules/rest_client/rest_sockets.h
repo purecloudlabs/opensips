@@ -26,11 +26,18 @@
 
 #include <sys/resource.h>
 
+typedef struct _curl_easy_handles {
+    int size;
+    CURL **handles;
+} CURLEasyHandles;
+
 int init_process_limits(rlim_t rlim_cur);
 int get_max_fd(int no_max_default);
 int running_sockets(void);
 int start_multi_socket(CURLM *multi_handle);
+int end_multi_socket(CURLM *multi_handle);
 int run_multi_socket(CURLM *multi_handle);
-int setsocket_callback(CURLM *multi_handle);
+int setsocket_callback_request(CURLM *multi_handle);
+int setsocket_callback_connect(CURLM *multi_handle, CURLEasyHandles *easy_handles);
 
 #endif /* _REST_SOCKET_H_ */ 
