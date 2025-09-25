@@ -1602,12 +1602,13 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 	CURLMcode mrc;
 	CURL *handle;
 	CURLM *multi_handle;
+	curl_socket_t sockfd;
 	OSS_CURLM *multi_list;
-	struct CURLMsg *m;
+	CURLEasyHandles easy_handles = { 0, 0 };
 	preconnect_urls *start, *next;
 	char *url;
-	long busy_wait, timer;
-	int msgq, num_of_connections, exit_code = 0;
+	long busy_wait, timer, local_timer;
+	int num_of_connections = 0, exit_code = 0, open_sockets = 0;
 
 	if (!share_connections) {
 		exit_code = -1;
@@ -1649,10 +1650,21 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 		start = start->next;
 	}
 
+	if (num_of_connections == 0) {
+		goto error;
+	}
+
+	easy_handles.size = 0;
+	easy_handles.handles = pkg_malloc(sizeof(CURL*) * num_of_connections);
+
+	if (easy_handles.handles == NULL) {
+		goto error;
+	}
+
 	busy_wait = 100;
 
-	if (setsocket_callback(multi_handle) != 0) {
-		goto cleanup;
+	if (setsocket_callback_connect(multi_handle, &easy_handles) != 0) {
+		goto error;
 	}
 
 	w_curl_multi_setopt(multi_handle, CURLMOPT_MAX_HOST_CONNECTIONS, (long) num_of_connections);
@@ -1666,31 +1678,45 @@ int connect_only(preconnect_urls *precon_urls, int total_cons) {
 		goto cleanup;
 	}
 
-	LM_DBG("Creating warm pool connection, running handles %d\n", running_handles);
+	LM_INFO("Creating warm pool connection, running handles %d\n", running_handles);
+
+	local_timer = 0;
 
 	do {
 		running_handles = run_multi_socket(multi_handle);
 
-		if (timer < 0) {
+		if (timer < 0 || local_timer >= curl_timeout) {
 			break;
 		}
 	
+		local_timer += busy_wait;
 		usleep(1000UL * busy_wait);
-		LM_DBG("Creating warm pool connection, running handles %d\n", running_handles);
 	} while (running_sockets());
-
 cleanup:
-	do {
-		m = curl_multi_info_read(multi_handle, &msgq);
-		if (m && m->msg == CURLMSG_DONE) {
-			mrc = curl_multi_remove_handle(multi_handle, m->easy_handle);
-			if (mrc != CURLM_OK) {
-				LM_ERR("curl_multi_remove_handle: %s\n", curl_multi_strerror(mrc));
-			}
-			curl_easy_cleanup(m->easy_handle);
-		}
-	} while (m);
+	LM_INFO("Finishing warm pool connection, open sockets %d\n", easy_handles.size);
 
+	if (running_sockets()) {
+		running_handles = end_multi_socket(multi_handle);
+	}
+
+	for (int i = 0; i < easy_handles.size; i++) {
+		curl_easy_getinfo(easy_handles.handles[i], CURLINFO_ACTIVESOCKET, &sockfd);
+
+		if (sockfd != CURL_SOCKET_BAD) {
+			open_sockets += 1;
+		}
+
+		curl_multi_remove_handle(multi_handle, easy_handles.handles[i]);
+
+		if (mrc != CURLM_OK) {
+			LM_ERR("curl_multi_remove_handle: %s\n", curl_multi_strerror(mrc));
+		}
+
+		curl_easy_cleanup(easy_handles.handles[i]);
+	}
+
+	LM_INFO("Finishing warm pool connection, open sockets %d\n", open_sockets);
+error:
 	start = precon_urls;
 
 	while (start != NULL) {
@@ -1700,6 +1726,10 @@ cleanup:
 		pkg_free(start);
 
 		start = next;
+	}
+
+	if (easy_handles.handles != NULL) {
+		pkg_free(easy_handles.handles);
 	}
 
 	put_multi(multi_list);
@@ -1783,7 +1813,7 @@ int start_async_http_req_v2(struct sip_msg *msg, enum rest_client_method method,
 	multi_handle = multi_list->multi_handle;
 	curl_multi_add_handle(multi_handle, handle);
 
-	if (setsocket_callback(multi_handle) != 0) {
+	if (setsocket_callback_request(multi_handle) != 0) {
 		goto cleanup;
 	}
 

@@ -120,8 +120,24 @@ static void remove_sock(int s) {
 	}
 }
 
-static int socket_action_cb(CURL *e, curl_socket_t s, int event, void *cbp, void *sockp)
-{
+static int socket_action_connect(CURL *e, curl_socket_t s, int event, void *cbp, void *sockp) {
+	LM_DBG("called for socket %d status %d\n", s, event);
+
+	CURLEasyHandles *easy_handles = (CURLEasyHandles*) cbp;
+	if (event != CURL_POLL_REMOVE) {
+		add_sock(s);
+	} else if (event == CURL_POLL_REMOVE) {
+		remove_sock(s);
+
+		LM_DBG("Adding handle for socket %d current size %d\n", s, easy_handles->size);
+		easy_handles->handles[easy_handles->size] = e;
+		easy_handles->size += 1;
+	}
+
+  	return 0;
+}
+
+static int socket_action_http(CURL *e, curl_socket_t s, int event, void *cbp, void *sockp) {
 	LM_DBG("called for socket %d status %d\n", s, event);
 
 	if (event != CURL_POLL_REMOVE) {
@@ -133,7 +149,37 @@ static int socket_action_cb(CURL *e, curl_socket_t s, int event, void *cbp, void
   	return 0;
 }
 
-int start_multi_socket(CURLM *multi_handle) {
+int setsocket_callback_connect(CURLM *multi_handle, CURLEasyHandles *easy_handles) {
+    CURLMcode mrc;
+
+    mrc = curl_multi_setopt(multi_handle, CURLMOPT_SOCKETFUNCTION, socket_action_connect);
+    if (mrc != CURLM_OK) {
+        LM_ERR("curl_multi_setopt(%d): (%s)\n", CURLMOPT_SOCKETFUNCTION, curl_multi_strerror(mrc));
+        return -1;
+    }
+
+    mrc = curl_multi_setopt(multi_handle, CURLMOPT_SOCKETDATA, easy_handles);
+    if (mrc != CURLM_OK) {
+        LM_ERR("curl_multi_setopt(%d): (%s)\n", CURLMOPT_SOCKETFUNCTION, curl_multi_strerror(mrc));
+        return -1;
+    }
+
+    return 0;
+}
+
+int setsocket_callback_request(CURLM *multi_handle) {
+    CURLMcode mrc;
+    
+    mrc = curl_multi_setopt(multi_handle, CURLMOPT_SOCKETFUNCTION, socket_action_http);
+    if (mrc != CURLM_OK) {
+        LM_ERR("curl_multi_setopt(%d): (%s)\n", CURLMOPT_SOCKETFUNCTION, curl_multi_strerror(mrc));
+        return -1;
+    }
+
+    return 0;
+}
+
+static int run_all_multi_socket(CURLM *multi_handle, int ev_bitmask) {
 	CURLMcode mrc;
 	int running;
 
@@ -147,6 +193,14 @@ int start_multi_socket(CURLM *multi_handle) {
 	}
 
 	return running;
+}
+
+int start_multi_socket(CURLM *multi_handle) {
+	return run_all_multi_socket(multi_handle, CURL_SOCKET_TIMEOUT);
+}
+
+int end_multi_socket(CURLM *multi_handle) {
+	return run_all_multi_socket(multi_handle, CURL_POLL_REMOVE);
 }
 
 int run_multi_socket(CURLM *multi_handle) {
@@ -172,22 +226,4 @@ int run_multi_socket(CURLM *multi_handle) {
 	}
 
 	return running;
-}
-
-int setsocket_callback(CURLM *multi_handle) {
-    CURLMcode mrc;
-    
-    mrc = curl_multi_setopt(multi_handle, CURLMOPT_SOCKETFUNCTION, socket_action_cb);
-    if (mrc != CURLM_OK) {
-        LM_ERR("curl_multi_setopt(%d): (%s)\n", CURLMOPT_SOCKETFUNCTION, curl_multi_strerror(mrc));
-        return -1;
-    }
-
-    mrc = curl_multi_setopt(multi_handle, CURLMOPT_SOCKETDATA, &fds);
-    if (mrc != CURLM_OK) {
-        LM_ERR("curl_multi_setopt(%d): (%s)\n", CURLMOPT_SOCKETFUNCTION, curl_multi_strerror(mrc));
-        return -1;
-    }
-
-    return 0;
 }
