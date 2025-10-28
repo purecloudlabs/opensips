@@ -926,12 +926,12 @@ static void th_no_dlg_user_onreply(struct cell* t, int type, struct tmcb_params 
 
 static void th_no_dlg_onreply_within(struct cell* t, int type, struct tmcb_params *param)
 {
-	_th_no_dlg_onreply(t,type,param,0,0);
+	_th_no_dlg_onreply(t,type,param,0,1);
 }
 
 static void th_no_dlg_user_onreply_within(struct cell* t, int type, struct tmcb_params *param)
 {
-	_th_no_dlg_onreply(t,type,param,TOPOH_KEEP_USER,0);
+	_th_no_dlg_onreply(t,type,param,TOPOH_KEEP_USER,1);
 }
 
 static int topo_hiding_no_dlg(struct sip_msg *req,struct cell* t,int extra_flags)
