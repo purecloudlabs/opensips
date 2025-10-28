@@ -51,6 +51,7 @@
 #include "../reactor.h"
 #include "../timer.h"
 #include "../ipc.h"
+#include "../tracing.h"
 
 #include "tcp_passfd.h"
 #include "net_tcp_proc.h"
@@ -1013,6 +1014,11 @@ struct tcp_connection* tcp_conn_create(int sock, const union sockaddr_union* su,
 	}
 	c->flags |= F_CONN_INIT;
 
+	if (state == S_CONN_OK) {
+		tracing_run_tcp_connected(&c->rcv.dst_ip, c->rcv.dst_port,
+				&c->rcv.src_ip, c->rcv.src_port, c->type, c->cid);
+	}
+
 	c->refcnt++; /* safe to do it w/o locking, it's not yet
 					available to the rest of the world */
 	sh_log(c->hist, TCP_REF, "connect, (%d)", c->refcnt);
@@ -1149,6 +1155,19 @@ static inline int handle_new_connect(const struct socket_info* si)
 		tcpconn_add(tcpconn);
 		LM_DBG("new connection: %p %d flags: %04x\n",
 				tcpconn, tcpconn->s, tcpconn->flags);
+
+		{
+			struct ip_addr src_ip, dst_ip;
+			unsigned short src_port, dst_port;
+
+			sockaddr2ip_addr(&src_ip, &su.s);
+			src_port = su_getport(&su);
+			dst_ip = si->address;
+			dst_port = si->port_no;
+
+			tracing_run_tcp_connected(&src_ip, src_port, &dst_ip, dst_port, si->proto, tcpconn->cid);
+		}
+
 		/* pass it to a workerr */
 		sh_log(tcpconn->hist, TCP_SEND2CHILD, "accept");
 		if(send2worker(tcpconn,IO_WATCH_READ)<0){
@@ -1243,6 +1262,9 @@ inline static int handle_tcpconn_ev(struct tcp_connection* tcpconn, int fd_i,
 			 * were coming from an async write */
 			tcpconn->state = S_CONN_OK;
 			LM_DBG("Successfully completed previous async connect\n");
+			tracing_run_tcp_connected(&tcpconn->rcv.dst_ip, tcpconn->rcv.dst_port,
+					&tcpconn->rcv.src_ip, tcpconn->rcv.src_port, tcpconn->type,
+						 tcpconn->cid);
 
 			/* now that we completed the async connection, we also need to
 			 * listen for READ events, otherwise these will get lost */
