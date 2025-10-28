@@ -23,6 +23,7 @@
 #include "trans.h"
 #include "net_tcp.h"
 #include "net_tcp_report.h"
+#include "../tracing.h"
 
 /* is the process TCP MAIN ? */
 extern int is_tcp_main;
@@ -87,6 +88,13 @@ void tcp_trigger_report(struct tcp_connection *conn, int type, void *extra)
 		/* the extra is the "reason" string for having the TCP connection
 		 * closed; it is a static string, so no handling/conversion is
 		 * needed for it */
+	{
+		unsigned int chunk_seq = (conn->msg_seq_no > 0) ?
+			conn->msg_seq_no - 1 : 0;
+		tracing_run_tcp_disconnected(&conn->rcv.src_ip, conn->rcv.src_port,
+			&conn->rcv.dst_ip, conn->rcv.dst_port, conn->type,
+			(const char *)extra, conn->cid, chunk_seq);
+	}
 	} else {
 		LM_ERR("not understanding report type %d, discarding\n", type);
 		return;

@@ -29,6 +29,7 @@
 
 #include "../../pt.h"
 #include "../../receive.h"
+#include "../../tracing.h"
 
 #include "tcp_common_defs.h"
 
@@ -375,6 +376,26 @@ static inline int tcp_handle_req(struct tcp_req *req,
 		bind_address=con->rcv.bind_address;
 		/* just for debugging use sendipv4 as receiving socket  FIXME*/
 		con->rcv.proto_reserved1=con->id; /* copy the id */
+		/* increment message sequence number */
+		con->msg_seq_no++;
+		if (con->cid) {
+			struct tracing_tcp_chunk_event chunk_evt;
+			unsigned int chunk_seq_no = (con->msg_seq_no > 0) ?
+				(con->msg_seq_no - 1) : 0;
+
+			memset(&chunk_evt, 0, sizeof(chunk_evt));
+			chunk_evt.event_name = "read";
+			chunk_evt.conn_id = con->cid;
+			chunk_evt.seq_no = chunk_seq_no;
+			chunk_evt.is_write = 0;
+			chunk_evt.payload_len = (unsigned int)(req->parsed - req->start);
+			chunk_evt.src_ip = &con->rcv.src_ip;
+			chunk_evt.src_port = con->rcv.src_port;
+			chunk_evt.dst_ip = &con->rcv.dst_ip;
+			chunk_evt.dst_port = con->rcv.dst_port;
+			chunk_evt.proto = con->rcv.proto;
+			tracing_run_tcp_chunk_event(&chunk_evt);
+		}
 		c=*req->parsed; /* ugly hack: zero term the msg & save the
 						   previous char, req->parsed should be ok
 						   because we always alloc BUF_SIZE+1 */
@@ -415,12 +436,12 @@ static inline int tcp_handle_req(struct tcp_req *req,
 					tcp_done_reading( con );
 				}
 
-			} else {
-				LM_DBG("We still have things on the pipe - "
-					"keeping connection \n");
-			}
+		} else {
+			LM_DBG("We still have things on the pipe - "
+				"keeping connection \n");
+		}
 
-			if (receive_msg(msg_buf, msg_len,
+		if (receive_msg(msg_buf, msg_len,
 				&local_rcv, NULL, 0) <0)
 					LM_ERR("receive_msg failed \n");
 

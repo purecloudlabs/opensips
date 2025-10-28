@@ -34,6 +34,7 @@
 #include "../../trace_api.h"
 #include "../../resolve.h"
 #include "../../timer.h"
+#include "../../tracing.h"
 
 #include "../tls_mgm/api.h"
 
@@ -96,6 +97,9 @@ int curl_conn_lifetime;
 
 static inline int rest_trace_enabled(void);
 static int trace_rest_message( rest_trace_param_t* tparam );
+static void emit_rest_tracing_event(struct sip_msg *msg, enum rest_client_method method,
+	const char *url, const char *event_name, const char *correlation_id, long http_rc, 
+	long req_size, long resp_size, const char *remote_ip, long remote_port);
 
 int init_sync_handle(void)
 {
@@ -735,8 +739,33 @@ int rest_sync_transfer(enum rest_client_method method, struct sip_msg *msg,
 	if (rest_trace_enabled())
 		init_rest_trace(sync_handle, msg, &tparam);
 
+	/* Generate unique correlation ID for this REST request */
+	char rest_correlation_id[64];
+	static unsigned int rest_counter = 0;
+	snprintf(rest_correlation_id, sizeof(rest_correlation_id), "rest_%u_%lu", 
+		++rest_counter, (unsigned long)time(NULL));
+
+	/* Emit REST request start event */
+	emit_rest_tracing_event(msg, method, url, "request_start", rest_correlation_id, 
+		0, 0, 0, "", 0);
+
 	ret = rest_easy_perform(sync_handle, url, &http_rc);
 	clean_header_list;
+
+	/* Emit REST request complete event with same correlation ID */
+	{
+		long req_sz = 0, resp_sz = 0;
+		char *remote_ip_str = NULL;
+		long remote_port = 0;
+		
+		curl_easy_getinfo(sync_handle, CURLINFO_REQUEST_SIZE, &req_sz);
+		curl_easy_getinfo(sync_handle, CURLINFO_SIZE_DOWNLOAD, &resp_sz);
+		curl_easy_getinfo(sync_handle, CURLINFO_PRIMARY_IP, &remote_ip_str);
+		curl_easy_getinfo(sync_handle, CURLINFO_PRIMARY_PORT, &remote_port);
+		
+		emit_rest_tracing_event(msg, method, url, "request_complete", rest_correlation_id,
+			http_rc, req_sz, resp_sz, remote_ip_str ? remote_ip_str : "", remote_port);
+	}
 
 	if (code_pv) {
 		pv_val.flags = PV_VAL_INT|PV_TYPE_INT;
@@ -1266,6 +1295,41 @@ int rest_init_client_tls(struct sip_msg *msg, str *tls_client_dom)
 static inline int rest_trace_enabled(void)
 {
 	return (check_is_traced ? 1 : 0) && check_is_traced(rest_proto_id);
+}
+
+static void emit_rest_tracing_event(struct sip_msg *msg, enum rest_client_method method,
+	const char *url, const char *event_name, const char *correlation_id, long http_rc, 
+	long req_size, long resp_size, const char *remote_ip, long remote_port)
+{
+	struct tracing_rest_event info;
+	str callid = STR_NULL;
+	str cseq = STR_NULL;
+
+	memset(&info, 0, sizeof(info));
+
+	/* Get callid and cseq from message if available */
+	if (msg && msg->callid)
+		callid = msg->callid->body;
+	
+	if (msg && msg->cseq) {
+		if (get_cseq(msg)->number.s && get_cseq(msg)->number.len > 0)
+			cseq = get_cseq(msg)->number;
+	}
+
+	info.callid = callid;
+	info.cseq = cseq;
+	info.event_name = event_name;
+	info.event_id = (int)method;
+	info.method = rest_client_method_str(method);
+	info.url = url;
+	info.correlation_id = correlation_id;
+	info.response_code = (unsigned int)http_rc;
+	info.request_len = (unsigned int)(req_size > 0 ? req_size : 0);
+	info.response_len = (unsigned int)(resp_size > 0 ? resp_size : 0);
+	info.remote_ip = remote_ip;
+	info.remote_port = (unsigned short)remote_port;
+
+	tracing_run_rest_event(&info);
 }
 
 void append_body_to_msg( trace_message message, void* param)

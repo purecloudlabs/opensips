@@ -173,6 +173,7 @@ struct tcp_connection{
 	int aliases;				/*!< Number of aliases, at least 1 */
 	struct tcp_req *con_req;	/*!< Per connection req buffer */
 	unsigned int msg_attempts;	/*!< how many read attempts we have done for the last request */
+	unsigned int msg_seq_no;	/*!< message sequence number for this connection */
 	/*!< connection related flags */
 	unsigned short flags;
 	struct tcp_conn_profile profile;

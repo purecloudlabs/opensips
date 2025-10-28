@@ -106,6 +106,10 @@ void tcp_conn_destroy(struct tcp_connection* tcpconn);
 /* used to tune the connection attributes */
 int tcp_conn_fcntl(struct receive_info *rcv, int attr, void *value);
 
+/* returns the correlation info (connection id + message seq) of a TCP connection */
+int tcp_get_correlation_chunk(unsigned int id, unsigned long long *cid,
+	unsigned int *seq_no);
+
 /* returns the correlation ID of a TCP connection */
 int tcp_get_correlation_id( unsigned int id, unsigned long long *cid);
 
