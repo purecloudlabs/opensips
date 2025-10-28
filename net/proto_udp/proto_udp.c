@@ -34,6 +34,7 @@
 #include "../../timer.h"
 #include "../../socket_info.h"
 #include "../../receive.h"
+#include "../../tracing.h"
 #include "../api_proto.h"
 #include "../api_proto_net.h"
 #include "../net_udp.h"
@@ -169,6 +170,28 @@ static int udp_read_req(const struct socket_info *si, int* bytes_read)
 	msg.s = buf;
 	msg.len = len;
 
+	/* trace UDP read event and store timestamp for correlation */
+	{
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		/* Store timestamp in proto_reserved fields for correlation */
+		ri.proto_reserved1 = (unsigned int)tv.tv_usec;  /* microseconds */
+		ri.proto_reserved2 = (unsigned int)tv.tv_sec;   /* seconds */
+		
+		struct tracing_udp_datagram_event udp_evt = {
+			.event_name = "read",
+			.payload_len = (unsigned int)len,
+			.src_ip = &ri.src_ip,
+			.src_port = ri.src_port,
+			.dst_ip = &ri.dst_ip,
+			.dst_port = ri.dst_port,
+			.proto = ri.proto,
+			.tv_sec = (unsigned int)tv.tv_sec,
+			.tv_usec = (unsigned int)tv.tv_usec
+		};
+		tracing_run_udp_datagram_event(&udp_evt);
+	}
+
 	/* run callbacks if looks like non-SIP message*/
 	if( !isalpha(msg.s[0]) ){    /* not-SIP related */
 		for(p = cb_list; p; p = p->next){
@@ -209,6 +232,8 @@ static int proto_udp_send(const struct socket_info* source,
 		unsigned int id)
 {
 	int n, tolen;
+	struct ip_addr dst_ip;
+	unsigned short dst_port;
 
 	tolen=sockaddru_len(*to);
 again:
@@ -223,6 +248,24 @@ again:
 			"one possible reason is the server is bound to localhost and\n"
 			"attempts to send to the net\n");
 		}
+	} else {
+		/* trace UDP write event */
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		su2ip_addr(&dst_ip, to);
+		dst_port = su_getport(to);
+		struct tracing_udp_datagram_event udp_evt = {
+			.event_name = "write",
+			.payload_len = (unsigned int)len,
+			.src_ip = &source->address,
+			.src_port = source->port_no,
+			.dst_ip = &dst_ip,
+			.dst_port = dst_port,
+			.proto = source->proto,
+			.tv_sec = (unsigned int)tv.tv_sec,
+			.tv_usec = (unsigned int)tv.tv_usec
+		};
+		tracing_run_udp_datagram_event(&udp_evt);
 	}
 	return n;
 }

@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include <netinet/tcp.h>
 #include <poll.h>
+#include <string.h>
 
 #include "../../timer.h"
 #include "../../sr_module.h"
@@ -76,6 +77,8 @@ static mi_response_t *w_tcp_trace_mi(const mi_params_t *params,
 								struct mi_handler *async_hdl);
 static mi_response_t *w_tcp_trace_mi_1(const mi_params_t *params,
 								struct mi_handler *async_hdl);
+static unsigned int tracing_tcp_write_seq_counter;
+static void tracing_tcp_emit_write_chunk(struct tcp_connection *c, unsigned int len);
 
 #define TRACE_PROTO "proto_hep"
 
@@ -349,6 +352,31 @@ static void tcp_report(int type, unsigned long long conn_id, int conn_flags,
 	return;
 }
 
+static void tracing_tcp_emit_write_chunk(struct tcp_connection *c, unsigned int len)
+{
+	struct tracing_tcp_chunk_event chunk_evt;
+	unsigned int counter;
+
+	if (!c || !c->cid || len == 0)
+		return;
+
+	counter = __sync_add_and_fetch(&tracing_tcp_write_seq_counter, 1);
+
+	memset(&chunk_evt, 0, sizeof(chunk_evt));
+	chunk_evt.event_name = "write";
+	chunk_evt.conn_id = c->cid;
+	chunk_evt.seq_no = counter;
+	chunk_evt.is_write = 1;
+	chunk_evt.payload_len = len;
+	chunk_evt.src_ip = &c->rcv.dst_ip;
+	chunk_evt.src_port = c->rcv.dst_port;
+	chunk_evt.dst_ip = &c->rcv.src_ip;
+	chunk_evt.dst_port = c->rcv.src_port;
+	chunk_evt.proto = c->rcv.proto;
+
+	tracing_run_tcp_chunk_event(&chunk_evt);
+}
+
 
 /**************  WRITE related functions ***************/
 /* This is just a wrapper around the writing function, so we can use them
@@ -427,6 +455,8 @@ static int proto_tcp_send(const struct socket_info* send_sock,
 				if (tcp_async_add_chunk(c, buf, len, 1) < 0) {
 					LM_ERR("Failed to add the initial write chunk\n");
 					len = -1; /* report an error - let the caller decide what to do */
+				} else {
+					tracing_tcp_emit_write_chunk(c, len);
 				}
 
 				/* trace the message */
@@ -530,6 +560,8 @@ static int proto_tcp_send(const struct socket_info* send_sock,
 				sh_log(c->hist, TCP_SEND2MAIN, "send 2, (%d)", c->refcnt);
 				tcp_conn_release(c, 0);
 				return -1;
+			} else {
+				tracing_tcp_emit_write_chunk(c, len);
 			}
 
 			/* mark the ID of the used connection (tracing purposes) */
@@ -574,6 +606,12 @@ send_it:
 		sh_log(c->hist, TCP_SEND2MAIN, "send 5, (%d)", c->refcnt);
 		tcp_conn_release(c, 0);
 		return -1;
+	}
+
+	if (len > 0) {
+		unsigned int emitted_len = (n > 0) ? (unsigned int)n : len;
+		if (emitted_len > 0)
+			tracing_tcp_emit_write_chunk(c, emitted_len);
 	}
 
 	/* only close the FD if not already in the context of our process

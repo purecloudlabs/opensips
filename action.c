@@ -60,6 +60,8 @@
 #include "script_var.h"
 #include "xlog.h"
 #include "cfg_pp.h"
+#include "tracing.h"
+#include "net/net_tcp.h"
 
 #include <string.h>
 
@@ -250,6 +252,51 @@ int run_top_route(struct script_route sr, struct sip_msg* msg)
 		route_stack[route_stack_start] = NULL;
 	else
 		route_stack[route_stack_start] = sr.name;
+
+	/* Trace main/top route execution */
+	{
+		struct tracing_script_function_event script_ev;
+		const char *route_name = sr.name;
+		
+		memset(&script_ev, 0, sizeof(script_ev));
+		
+		/* Get Call-ID, CSeq and connection info from message */
+		if (msg && msg != FAKED_REPLY) {
+			if (parse_headers(msg, HDR_CALLID_F | HDR_CSEQ_F, 0) >= 0) {
+				if (msg->callid)
+					script_ev.callid = msg->callid->body;
+				if (msg->cseq)
+					script_ev.cseq = get_cseq(msg)->number;
+			}
+			
+			/* Get connection/chunk reference for parent linkage */
+			if (msg->rcv.proto == PROTO_UDP || is_udp_based_proto(msg->rcv.proto)) {
+				/* UDP: use timestamp from proto_reserved fields */
+				script_ev.conn_chunk.conn_id = (unsigned long long)msg->rcv.proto_reserved2;
+				script_ev.conn_chunk.seq_no = msg->rcv.proto_reserved1;
+			} else if (msg->rcv.proto_reserved1) {
+				/* TCP: get correlation chunk */
+				unsigned long long cid = 0;
+				unsigned int seq = 0;
+				if (tcp_get_correlation_chunk(msg->rcv.proto_reserved1, &cid, &seq) >= 0) {
+					if (seq > 0) seq--;
+					script_ev.conn_chunk.conn_id = cid;
+					script_ev.conn_chunk.seq_no = seq;
+				}
+			}
+		}
+		
+		script_ev.event_name = "call";
+		/* Use "main" for the main route, otherwise use the route name */
+		if (!route_name || !strcmp(route_name, "0"))
+			script_ev.function_name = "main";
+		else
+			script_ev.function_name = route_name;
+		script_ev.caller_function = NULL;  /* No caller for top route */
+		script_ev.depth = 0;
+		
+		tracing_run_script_function_event(&script_ev);
+	}
 
 	run_actions(sr.a, msg);
 	ret = action_flags;
@@ -789,10 +836,65 @@ int do_action(struct action* a, struct sip_msg* msg)
 				ret=E_CFG;
 				break;
 			}
-			script_trace("route", sroutes->request[i].name,
-				msg, a->file, a->line) ;
-			/* check if the route has parameters */
-			if (a->elem[1].type != 0) {
+		script_trace("route", sroutes->request[i].name,
+			msg, a->file, a->line) ;
+		/* Trace script function call */
+		{
+			struct tracing_script_function_event script_ev;
+			char route_name_buf[256];
+			const char *caller = NULL;
+			int depth = route_stack_size - route_stack_start;
+			
+			memset(&script_ev, 0, sizeof(script_ev));
+			
+			/* Get caller route name from stack */
+			if (route_stack_size > route_stack_start + 1) {
+				caller = route_stack[route_stack_size - 1];
+				if (caller && caller[0] == '\0')
+					caller = "main";
+			} else if (route_stack_size > 0) {
+				caller = "main";
+			}
+			
+			/* Format route name */
+			snprintf(route_name_buf, sizeof(route_name_buf), "route[%s]", 
+				sroutes->request[i].name);
+			
+			/* Get Call-ID, CSeq and connection info from message */
+			if (msg && msg != FAKED_REPLY) {
+				if (parse_headers(msg, HDR_CALLID_F | HDR_CSEQ_F, 0) >= 0) {
+					if (msg->callid)
+						script_ev.callid = msg->callid->body;
+					if (msg->cseq)
+						script_ev.cseq = get_cseq(msg)->number;
+				}
+				
+				/* Get connection/chunk reference for parent linkage */
+				if (msg->rcv.proto == PROTO_UDP || is_udp_based_proto(msg->rcv.proto)) {
+					/* UDP: use timestamp from proto_reserved fields */
+					script_ev.conn_chunk.conn_id = (unsigned long long)msg->rcv.proto_reserved2;
+					script_ev.conn_chunk.seq_no = msg->rcv.proto_reserved1;
+				} else if (msg->rcv.proto_reserved1) {
+					/* TCP: get correlation chunk */
+					unsigned long long cid = 0;
+					unsigned int seq = 0;
+					if (tcp_get_correlation_chunk(msg->rcv.proto_reserved1, &cid, &seq) >= 0) {
+						if (seq > 0) seq--;
+						script_ev.conn_chunk.conn_id = cid;
+						script_ev.conn_chunk.seq_no = seq;
+					}
+				}
+			}
+			
+			script_ev.event_name = "call";
+			script_ev.function_name = route_name_buf;
+			script_ev.caller_function = caller;
+			script_ev.depth = depth;
+			
+			tracing_run_script_function_event(&script_ev);
+		}
+		/* check if the route has parameters */
+		if (a->elem[1].type != 0) {
 				if (a->elem[1].type != NUMBER_ST || a->elem[2].type != SCRIPTVAR_ST) {
 					LM_ALERT("BUG in route() type %d/%d\n",
 							a->elem[1].type, a->elem[2].type);

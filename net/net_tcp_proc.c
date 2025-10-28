@@ -30,6 +30,7 @@
 #include "../reactor.h"
 #include "../async.h"
 #include "../cfg_reload.h"
+#include "../tracing.h"
 
 #include "tcp_conn.h"
 #include "tcp_passfd.h"
@@ -295,6 +296,10 @@ again:
 				con->proc_id = process_no;
 				/* save FD which is valid in context of this TCP worker */
 				con->fd=s;
+
+		tracing_run_tcp_picked_up_by_worker(&con->rcv.src_ip, con->rcv.src_port,
+			&con->rcv.dst_ip, con->rcv.dst_port, con->rcv.proto,
+			process_no, con->cid, con->msg_seq_no);
 			} else if (rw & IO_WATCH_WRITE) {
 				LM_DBG("Received con for async write %p ref = %d\n",
 					con, con->refcnt);
