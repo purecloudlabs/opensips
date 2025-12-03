@@ -213,7 +213,14 @@ static void tracing_emit_dialog_event(struct dlg_cell *dlg, int cb_type,
 	struct tracing_dialog_event info;
 	struct sip_msg *msg = params ? params->msg : NULL;
 	unsigned int direction = params ? params->direction : DLG_DIR_NONE;
-	int dst_leg = params ? params->dst_leg : -1;
+	int dst_leg = -1;
+
+	/* derive dst_leg from direction: upstream means caller (leg 0),
+	 * downstream means callee (leg 1), none means unknown (-1) */
+	if (direction == DLG_DIR_UPSTREAM)
+		dst_leg = 0;
+	else if (direction == DLG_DIR_DOWNSTREAM)
+		dst_leg = 1;
 	unsigned int code = 0;
 	str method = STR_NULL;
 	str cseq_no = STR_NULL;
