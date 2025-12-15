@@ -53,6 +53,8 @@
 #include "ds_bl.h"
 #include "ds_clustering.h"
 
+#include "../../redact_pii.h"
+
 #define DS_TABLE_VERSION	9
 
 extern ds_partition_t *partitions;
@@ -2435,7 +2437,7 @@ int ds_is_in_list(struct sip_msg *_m, str *_ip, int port, int set,
 	char *pattern = NULL;
 
 	if (!(ip = str2ip(_ip)) && !(ip = str2ip6(_ip))) {
-		LM_ERR("IP val is not IP <%.*s>\n", _ip->len, _ip->s);
+		LM_ERR("IP val is not IP <%.*s>\n", _ip->len, redact_pii(_ip->s));
 		return -1;
 	}
 
@@ -2974,7 +2976,7 @@ int ds_push_script_attrs(struct sip_msg *_m, str *script_attrs,
 	int j,k;
 
 	if (!(ip = str2ip(_ip)) && !(ip = str2ip6(_ip))) {
-		LM_ERR("IP val is not IP <%.*s>\n",_ip->len,_ip->s);
+		LM_ERR("IP val is not IP <%.*s>\n",_ip->len,redact_pii(_ip->s));
 		return -1;
 	}
 
