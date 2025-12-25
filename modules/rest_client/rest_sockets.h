@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 OpenSIPS Solutions
+ * Copyright (C) 2025 OpenSIPS Solutions
  *
  * This file is part of opensips, a free SIP server.
  *
@@ -16,34 +16,28 @@
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
- *
- * History:
- * -------
- * 2013-02-28: Created (Liviu)
  */
 
-#ifndef _REST_CB_H_
-#define _REST_CB_H_
+#ifndef _REST_SOCKET_H_
+#define _REST_SOCKET_H_
 
 #include <curl/curl.h>
+#include <curl/multi.h>
 
-#include "rest_client.h"
+#include <sys/resource.h>
 
-#include "../../str.h"
-#include "../../mem/mem.h"
-#include "../../error.h"
-#include "../../dprint.h"
-#include "../../pvar.h"
-#include "../../trim.h"
+typedef struct _curl_easy_handles {
+    int size;
+    CURL **handles;
+} CURLEasyHandles;
 
-#define HTTP_HDR_CONTENT_TYPE    "Content-Type"
-#define CONTENT_TYPE_HDR_LEN     12
-#define MAX_CONTENT_TYPE_LEN     64
-#define MAX_HEADER_FIELD_LEN	 1024 /* arbitrary */
+int init_process_limits(rlim_t rlim_cur);
+int get_max_fd(int no_max_default);
+int running_sockets(void);
+int start_multi_socket(CURLM *multi_handle);
+int end_multi_socket(CURLM *multi_handle);
+int run_multi_socket(CURLM *multi_handle);
+int setsocket_callback_request(CURLM *multi_handle);
+int setsocket_callback_connect(CURLM *multi_handle, CURLEasyHandles *easy_handles);
 
-size_t write_func(char *ptr, size_t size, size_t nmemb, void *userdata);
-size_t header_func(char *ptr, size_t size, size_t nmemb, void *userdata);
-int timer_cb(CURLM *multi_handle, long timeout_ms, void *cbp);
-
-#endif /* _REST_CB_H_ */
-
+#endif /* _REST_SOCKET_H_ */ 
