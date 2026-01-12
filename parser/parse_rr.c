@@ -354,15 +354,15 @@ int shm_duplicate_rr(rr_t** _new, rr_t* _r, int first)
 int print_rr_body_ignore(struct hdr_field *iroute, str *oroute, int order,
 		int no_change, str *rrs_to_ignore) 
 {
-		rr_t *p, *ignored = NULL;
-	int n = 0;
+	rr_t *p;
+	int n = 0, nr=0;
 	int i = 0;
 	int route_len;
 #define MAX_RR_HDRS	64
 	static str route[MAX_RR_HDRS];
+	str s_rr;
 	char *cp, *start;
 	struct hdr_field tmp, *hdr;
-	str s_rr = STR_NULL;
 
 	if(iroute==NULL)
 		return 0;
@@ -391,18 +391,17 @@ int print_rr_body_ignore(struct hdr_field *iroute, str *oroute, int order,
 			s_rr.s = p->nameaddr.name.s;
 			s_rr.len = p->len;
 			if (str_strstr(rrs_to_ignore, &s_rr) == NULL) {
-				route[n].s = s_rr.s;
-				route[n].len = s_rr.len;
+				route[n].s = p->nameaddr.name.s;
+				route[n].len = p->len;
 				LM_DBG("current rr is %.*s\n", route[n].len, route[n].s);
 
+				route_len += route[n].len;
 				n++;
-				route_len += route[i].len;
-				if (n==MAX_RR_HDRS)
+				if(n==MAX_RR_HDRS)
 				{
 					LM_ERR("too many RR\n");
 					goto error;
 				}
-				s_rr = STR_NULL;
 			}
 			p = p->next;
 		}
@@ -411,9 +410,11 @@ int print_rr_body_ignore(struct hdr_field *iroute, str *oroute, int order,
 		iroute = iroute->sibling;
 	}
 
-	route_len += (n - 1); /* for commas */
+	route_len += n - 1; /* for commas */
 
-	oroute->s = (char*)pkg_malloc(route_len);
+	LM_ERR("Route len %d\n", route_len);
+
+	oroute->s = (char*) pkg_malloc(route_len);
 
 	if(oroute->s==0)
 	{
@@ -444,7 +445,7 @@ int print_rr_body_ignore(struct hdr_field *iroute, str *oroute, int order,
 				*(cp++) = ',';
 		}
 	}
-	oroute->len=cp - start;
+	oroute->len = route_len;
 
 	LM_DBG("out rr [%.*s]\n", oroute->len, oroute->s);
 	LM_DBG("we have %i records\n", n);
