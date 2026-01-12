@@ -1666,6 +1666,7 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, str*
 	param_t *it;
 	rr_t *head = NULL;
 	int is_req = (msg->first_line.type==SIP_REQUEST)?1:0;
+	int params_len = 0;
 	int local_len = sizeof(short) /* RR length */ +
 			sizeof(short) /* Contact length */ +
 			sizeof(short) /* RR length */ +
@@ -1729,7 +1730,7 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, str*
 					/* we just iterate over the unknown params */
 					for (i=0;i<ctu.u_params_no;i++) {
 						if (str_match(&el->param_name, &ctu.u_name[i]))
-							suffix_len += topo_ct_param_len(&ctu.u_name[i], &ctu.u_val[i], 0);
+							params_len += topo_ct_param_len(&ctu.u_name[i], &ctu.u_val[i], 0);
 					}
 				}
 			}
@@ -1745,11 +1746,13 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, str*
 			for (el=th_hdr_param_list;el;el=el->next) {
 				for (it=((contact_body_t *)msg->contact->parsed)->contacts->params;it;it=it->next) {
 					if (str_match(&el->param_name, &it->name))
-						suffix_len += topo_ct_param_len(&it->name, &it->body, 1);
+						params_len += topo_ct_param_len(&it->name, &it->body, 1);
 				}
 			}
 		}
 	}
+
+	total_len += params_len;
 
 	suffix_enc = pkg_malloc(total_len+1);
 	if (!suffix_enc) {
@@ -1837,7 +1840,7 @@ static int topo_no_dlg_encode_contact(struct sip_msg *msg, unsigned int flags, s
 {
 	struct lump* lump;
 	char *prefix=NULL,*suffix=NULL,*ct_username=NULL;
-	int prefix_len,suffix_len,ct_username_len=0;
+	int prefix_len,suffix_len = 0,ct_username_len=0;
 	struct sip_uri ctu;
 	str contact;
 
