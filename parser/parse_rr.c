@@ -412,8 +412,6 @@ int print_rr_body_ignore(struct hdr_field *iroute, str *oroute, int order,
 
 	route_len += n - 1; /* for commas */
 
-	LM_ERR("Route len %d\n", route_len);
-
 	oroute->s = (char*) pkg_malloc(route_len);
 
 	if(oroute->s==0)
