@@ -1576,7 +1576,7 @@ enum sip_validation_failures {
 	SV_BAD_USERNAME=-27,
 	SV_FROM_USERNAME_ERROR=-28,
 	SV_TO_USERNAME_ERROR=-29,
-	SV_BAD_EXPIRES=-30,
+	SV_BAD_STAR_CONTACT=-30,
 	SV_GENERIC_FAILURE=-255
 };
 
@@ -1621,24 +1621,39 @@ static enum sip_validation_failures validate_contact_header(struct sip_msg *msg,
 				/* empty contacts header - this can be a * Contact header, valid only for REGISTER requests */
 				contact_body = (contact_body_t *) msg->contact->parsed;
 
-				if (method != METHOD_REGISTER || msg->first_line.type == SIP_REPLY) {
-					strcpy(reason, "empty body for 'Contact' header");
-					ret = SV_CONTACT_PARSE_ERROR;
-					goto failed;
-				} else {
+				if (method == METHOD_REGISTER) {
+					if (contact_body->star != 1) {
+						strcpy(reason, "empty body for 'Contact' header");
+						ret = SV_CONTACT_PARSE_ERROR;
+						goto failed;
+					} else if (msg->first_line.type == SIP_REPLY) {
+						strcpy(reason, "Contact header for REGISTER reply contains '*' only valid for REGISTER request");
+						ret = SV_BAD_STAR_CONTACT;
+						goto failed;
+					}
+
 					if (!msg->expires || (parse_expires(msg->expires) < 0 || !msg->expires->parsed)) {
 						strcpy(reason, "failed to parse 'Expires' header");
-						ret = SV_BAD_EXPIRES;
+						ret = SV_BAD_STAR_CONTACT;
 						goto failed;
 					}
 
 					expires_body = (exp_body_t*) msg->expires->parsed;
 
-					if (!expires_body || !(expires_body->val == 0 && contact_body->star == 1)) {
+					if (!expires_body || expires_body->val != 0) {
 						strcpy(reason, "Expires header greater than 0 for REGISTER 'Contact' header with '*' value");
-						ret = SV_CONTACT_PARSE_ERROR;
+						ret = SV_BAD_STAR_CONTACT;
 						goto failed;
 					}
+				} else {
+					if (contact_body->star != 1) {
+						strcpy(reason, "empty body for 'Contact' header");
+						ret = SV_CONTACT_PARSE_ERROR;
+					} else {
+						strcpy(reason, "Contact header for SIP message contains '*' only valid for REGISTER request");
+						ret = SV_BAD_STAR_CONTACT;
+					}
+					goto failed;
 				}
 			}
 		}
@@ -1894,7 +1909,7 @@ static int w_sip_validate(struct sip_msg *msg, void *_flags, pv_spec_t* err_txt)
 				}
 			}
 
-			if (flags & SIP_PARSE_CONTACT && (status_code > 199 || status_code < 400)) {
+			if (flags & SIP_PARSE_CONTACT && (status_code > 199 && status_code < 400)) {
 				ret = validate_contact_header(msg, method, reason);
 
 				if (ret != 0) {
