@@ -154,6 +154,9 @@ int is_tcp_main = 0;
  * current process - attention, this is a really ugly HACK here */
 unsigned int last_outgoing_tcp_id = 0;
 
+/* Incremental count of which index to check first when picking a worker to send a TCP connection to */
+static int send2worker_start_index = 0;
+
 static struct scaling_profile *s_profile = NULL;
 
 /****************************** helper functions *****************************/
@@ -268,15 +271,15 @@ error:
 
 static int send2worker(struct tcp_connection* tcpconn,int rw)
 {
-	int i;
-	int min_load;
-	int idx;
+	int i = send2worker_start_index;
+	int min_load = 100; /* it is a percentage */
+	int idx = -1;
+	int worker_check_count = 0;
 	long response[2];
 	unsigned int load;
 
-	min_load=100; /* it is a percentage */
-	idx=0;
-	for (i=0; i<tcp_workers_max_no; i++){
+	while (worker_check_count < tcp_workers_max_no) {
+		worker_check_count++;
 		if (tcp_workers[i].state==STATE_ACTIVE) {
 			load = pt_get_1m_proc_load( tcp_workers[i].pt_idx );
 #ifdef EXTRA_DEBUG
@@ -284,11 +287,20 @@ static int send2worker(struct tcp_connection* tcpconn,int rw)
 				"min_load so far %u\n", i, tcp_workers[i].pt_idx, load,
 				min_load);
 #endif
-			if (min_load>load) {
+			if (min_load > load) {
 				min_load = load;
 				idx = i;
 			}
 		}
+	}
+
+	if (idx == -1) {
+		LM_ERR("No active TCP workers\n");
+		return -1;
+	}
+	
+	if (++send2worker_start_index == tcp_workers_max_no) {
+		send2worker_start_index = 0;
 	}
 
 	tcp_workers[idx].n_reqs++;
