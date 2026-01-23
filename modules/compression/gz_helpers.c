@@ -109,6 +109,14 @@ memerr:
 	return -1;
 }
 
+static inline int is_gzip_compressed(unsigned char *data, int len)
+{
+    if (len < 3)
+        return 0;
+    
+    return (data[0] == 0x1f && data[1] == 0x8b && data[2] == 0x08);
+}
+
 /*
  *
  */
@@ -119,6 +127,11 @@ int gzip_uncompress(unsigned char* in, unsigned long ilen, str* out, unsigned lo
 
 	if (!in || !ilen) {
 		LM_ERR("nothing to compress\n");
+		return -1;
+	}
+
+	if (is_gzip_compressed(in, ilen) != 1) {
+		LM_ERR("Not gzip decompressable\n");
 		return -1;
 	}
 

@@ -47,14 +47,12 @@ struct th_params {
 
 extern str th_contact_caller_var;
 extern str th_contact_callee_var;
-enum encode_scheme {ENC_BASE64, ENC_BASE32};
 
 int topo_parse_passed_ct_params(str *params);
 int topo_parse_passed_hdr_ct_params(str *params);
 int topology_hiding(struct sip_msg *req,int extra_flags, struct th_params *params);
 int topo_callid_pre_raw(str *data, struct sip_msg* req);
 int topo_callid_post_raw(str *data, struct sip_msg* req);
-int topology_hiding_match(struct sip_msg *req);
 void th_loaded_callback(struct dlg_cell *dlg, int type,
 			struct dlg_cb_params *_params);
 

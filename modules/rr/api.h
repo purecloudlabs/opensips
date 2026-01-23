@@ -63,6 +63,7 @@ struct rr_binds {
 	loose_route_t       loose_route;
 	record_route_t      record_route;
 	int                 append_fromtag;
+	int                 enable_double_rr;
 };
 
 typedef  int (*load_rr_f)( struct rr_binds* );
