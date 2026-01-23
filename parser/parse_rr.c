@@ -350,7 +350,6 @@ int shm_duplicate_rr(rr_t** _new, rr_t* _r, int first)
 	return do_duplicate_rr(_new, _r, 1, first);
 }
 
-
 /**
  * get first RR header and print comma separated bodies in oroute
  * - order = 0 normal; order = 1 reverse
