@@ -65,6 +65,7 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info);
 static inline int th_no_dlg_one_way_hiding(struct socket_info *socket);
 static int dlg_th_onreply(struct dlg_cell *dlg, struct sip_msg *rpl, struct sip_msg *req,
 		int init_req, int dir, int dst_leg);
+static inline void topo_no_dlg_seq_free(void *p);
 
 /* exposed logic below */
 
@@ -135,9 +136,9 @@ int topo_parse_passed_hdr_ct_params(str *params)
 	return topo_parse_passed_params(params,&th_hdr_param_list);
 }
 
-#define TOPOH_MATCH_FAILURE       -1
-#define TOPOH_MATCH_SUCCESS        1
-#define TOPOH_MATCH_ONE_WAY_HIDING 2
+#define TOPOH_MATCH_SUCCESS         1
+#define TOPOH_MATCH_FAILURE        -1
+#define TOPOH_MATCH_ONE_WAY_HIDING -2
 
 int topology_hiding_match(struct sip_msg *msg)
 {
@@ -940,15 +941,13 @@ static void th_no_dlg_onreply(struct cell* t, int type, struct tmcb_params *para
 	str *route_s = (str *)*param->param;
 	struct sip_msg *req = param->req;
 	struct sip_msg *rpl = param->rpl;
-	char *route;
-	int size;
 	size_t route_size = 0;
 	unsigned int no_req_rrs = 0;
 	unsigned int flags = param->flags;
 	int do_rr = 0;
 	int one_way_hiding = th_no_dlg_one_way_hiding(t->uas.response.dst.send_sock);
 
-	LM_DBG("Response callback with flags %u\n", flags);
+	LM_DBG("Response callback with flags %u \n", flags);
 
 	/* parse all headers to be sure that all RR and Contact hdrs are found */
 	if (parse_headers(rpl, HDR_EOH_F, 0)< 0) {
@@ -995,12 +994,14 @@ static void th_no_dlg_onreply(struct cell* t, int type, struct tmcb_params *para
 			LM_ERR("Failed to remove via headers\n");
 			return;
 		}
+	}
 
-		if (!(lmp = restore_vias_from_req(req, rpl))) {
-			LM_ERR("Failed to restore VIA headers from request \n");
-			return;
-		}
+	if (!(lmp = restore_vias_from_req(req, rpl))) {
+		LM_ERR("Failed to restore VIA headers from request \n");
+		return;
+	}
 
+	if (!one_way_hiding) {
 		if (!(rpl->REPLY_STATUS >= 300 && rpl->REPLY_STATUS < 400) ) {
 			if (topo_no_dlg_encode_contact(rpl, flags, route_s, no_req_rrs) < 0) {
 				LM_ERR("Failed to encode contact header \n");
@@ -1019,7 +1020,6 @@ static void th_no_dlg_onreply(struct cell* t, int type, struct tmcb_params *para
 static inline int _th_no_dlg_onrequest(struct sip_msg *req, union sockaddr_union *su, int proto, unsigned int flags)
 {
 	struct socket_info *send_sock = NULL;
-	str *dest = NULL;
 
 	LM_DBG("Request callback with flags %u\n", flags);
 	
@@ -1971,7 +1971,7 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info)
 	char *dec_buf,*p,*route=NULL,*hdrs,*remote_contact;
 	struct hdr_field *it;
 	str rr_buf,ct_buf,flags_buf,bind_buf;
-	rr_t *head = NULL, *rrp;
+	rr_t *head = NULL, *head_next = NULL, *rrp;
 	int next_strict=0;
 	struct sip_uri fru, rru;
 	char* buf = msg->buf;
@@ -1980,6 +1980,7 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info)
 	int port,proto;
 	struct socket_info *sock = NULL;
 	str *route_s = NULL, route_buf = {0, 0};
+	int buf_start_count = 0;
 
 	/* parse all headers to be sure that all RR and Contact hdrs are found */
 	if (parse_headers(msg, HDR_EOH_F, 0)< 0) {
@@ -2068,7 +2069,8 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info)
 				goto err_free_head;
 			}
 		}
-		if( parse_headers( msg, HDR_EOH_F, 0)<0 ) {
+
+		if (parse_headers( msg, HDR_EOH_F, 0)<0 ) {
 			LM_ERR("failed to parse headers when looking after ROUTEs\n");
 			goto err_free_head;
 		}
@@ -2085,50 +2087,60 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info)
 		}
 
 		if (rr_buf.len != 0 && rr_buf.s) {
-			if (parse_uri(head->nameaddr.uri.s, head->nameaddr.uri.len, &rru) < 0) {
-				goto err_free_head;
-			}
+			head_next = head;
 
-			if (check_self(&rru.host, rru.port_no ? rru.port_no : SIP_PORT, 0) == 1) {
-				LM_DBG("Route header is me not adding to message\n");
-
-				sock = grep_sock_info(&rru.host, rru.port_no ? rru.port_no : SIP_PORT, 0);
-				if (sock) {
-					msg->force_send_socket = sock;
-				}
-			} else {
-				lmp = anchor_lump(msg,msg->headers->name.s - buf,0);
-				if (lmp == 0) {
-					LM_ERR("failed anchoring new lump\n");
+			while (head_next != NULL) {
+				if (parse_uri(head_next->nameaddr.uri.s, head_next->nameaddr.uri.len, &rru) < 0) {
 					goto err_free_head;
 				}
 
-				size = rr_buf.len + ROUTE_LEN + CRLF_LEN;
-				route = pkg_malloc(size+1);
-				if (route == 0) {
-					LM_ERR("no more pkg memory\n");
-					goto err_free_head;
+				if (check_self(&rru.host, rru.port_no ? rru.port_no : SIP_PORT, 0) != 1) {
+					lmp = anchor_lump(msg,msg->headers->name.s - buf,0);
+					if (lmp == 0) {
+						LM_ERR("failed anchoring new lump\n");
+						goto err_free_head;
+					}
+
+					size = rr_buf.len + ROUTE_LEN + CRLF_LEN;
+					route = pkg_malloc(size+1);
+					if (route == 0) {
+						LM_ERR("no more pkg memory\n");
+						goto err_free_head;
+					}
+
+					memcpy(route,ROUTE_STR,ROUTE_LEN);
+					memcpy(route + ROUTE_LEN, rr_buf.s + buf_start_count, rr_buf.len - buf_start_count);
+					memcpy(route + ROUTE_LEN + rr_buf.len - buf_start_count, CRLF,CRLF_LEN);
+
+					route[size] = 0;
+
+					if ((lmp = insert_new_lump_after(lmp,route,size,HDR_ROUTE_T)) == 0) {
+						LM_ERR("failed inserting new route set\n");
+						goto err_free_route;
+					}
+					msg->msg_flags |= FL_HAS_ROUTE_LUMP;
+					route_buf = rr_buf;
+
+					LM_DBG("Setting route  header to <%s> \n",route);
+					LM_DBG("setting dst_uri to <%.*s> \n", head_next->nameaddr.uri.len,
+							head_next->nameaddr.uri.s);
+					if (set_dst_uri(msg,&head_next->nameaddr.uri) != 0) {
+						goto err_free_head;
+					}
+					head = head_next;
+					break;
+				} else {
+					LM_DBG("Route header is me not adding to message\n");
+
+					/* Calculate buffer size of Route headers that match me sockets, should be max 2 but we don't validate, should we? */
+					buf_start_count += head_next->nameaddr.uri.len;
+					sock = grep_sock_info(&rru.host, rru.port_no ? rru.port_no : SIP_PORT, 0);
+					if (sock) {
+						msg->force_send_socket = sock;
+					}
 				}
-
-				memcpy(route,ROUTE_STR,ROUTE_LEN);
-				memcpy(route+ROUTE_LEN,rr_buf.s,rr_buf.len);
-				memcpy(route+ROUTE_LEN+rr_buf.len,CRLF,CRLF_LEN);
-
-				route[size] = 0;
-
-				if ((lmp = insert_new_lump_after(lmp,route,size,HDR_ROUTE_T)) == 0) {
-					LM_ERR("failed inserting new route set\n");
-					goto err_free_route;
-				}
-				msg->msg_flags |= FL_HAS_ROUTE_LUMP;
-				route_buf = rr_buf;
-
-				LM_DBG("Setting route  header to <%s> \n",route);
-				LM_DBG("setting dst_uri to <%.*s> \n",head->nameaddr.uri.len,
-						head->nameaddr.uri.s);
-				if (set_dst_uri(msg,&head->nameaddr.uri) != 0) {
-					goto err_free_head;
-				}
+				memset(&rru, 0, sizeof(rru));
+				head_next = head_next->next;
 			}
 		}
 	} else {
@@ -2144,7 +2156,7 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info)
 			}
 		}
 
-		if ( rr_buf.len !=0 && rr_buf.s) {
+		if (rr_buf.len !=0 && rr_buf.s) {
 			if (set_ruri(msg,&head->nameaddr.uri) !=0 ) {
 				LM_ERR("failed setting new dst uri\n");
 				goto err_free_head;
