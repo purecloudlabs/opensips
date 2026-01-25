@@ -32,6 +32,7 @@
 
 struct tm_binds tm_api;
 struct dlg_binds dlg_api;
+struct rr_binds rr_api;
 
 int force_dialog = 0;
 str topo_hiding_ct_params = {0,0};
@@ -190,6 +191,10 @@ static int mod_init(void)
 					"restart\n");
 
 
+	if (load_rr_api(&rr_api) != 0) {
+		LM_ERR("failed to load rr API\n");
+		return -1;
+	}
 
 	return 0;
 error:

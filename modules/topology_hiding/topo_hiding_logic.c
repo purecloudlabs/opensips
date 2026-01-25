@@ -60,9 +60,9 @@ static void th_down_onreply(struct cell* t, int type,struct tmcb_params *param);
 static void th_up_onreply(struct cell* t, int type, struct tmcb_params *param);
 static void th_no_dlg_onreply(struct cell* t, int type, struct tmcb_params *param);
 static void th_no_dlg_user_onreply(struct cell* t, int type, struct tmcb_params *param);
-static int topo_no_dlg_encode_contact(struct sip_msg *req, unsigned int flags, str *routes, str *rrs_to_ignore);
-static int topo_no_dlg_seq_handling(struct sip_msg *msg,str *info);
-static inline int th_no_dlg_one_way_hiding(struct sip_msg *msg, struct socket_info *socket);
+static int topo_no_dlg_encode_contact(struct sip_msg *req, unsigned int flags, str *routes, unsigned int rrs_to_ignore);
+static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info);
+static inline int th_no_dlg_one_way_hiding(struct socket_info *socket);
 static int dlg_th_onreply(struct dlg_cell *dlg, struct sip_msg *rpl, struct sip_msg *req,
 		int init_req, int dir, int dst_leg);
 
@@ -135,12 +135,19 @@ int topo_parse_passed_hdr_ct_params(str *params)
 	return topo_parse_passed_params(params,&th_hdr_param_list);
 }
 
+#define TOPOH_MATCH_FAILURE       -1
+#define TOPOH_MATCH_SUCCESS        1
+#define TOPOH_MATCH_ONE_WAY_HIDING 2
+
 int topology_hiding_match(struct sip_msg *msg)
 {
 	struct sip_uri *r_uri;
+	struct sip_uri rr_uri;
+	str *route_set = NULL;
+	int route_set_len = 0;
 	int i = 0;
 
-	if (parse_sip_msg_uri(msg)<0) {
+	if (parse_sip_msg_uri(msg) < 0) {
 		LM_ERR("Failed to parse request URI\n");
 		return -1;
 	}
@@ -152,20 +159,43 @@ int topology_hiding_match(struct sip_msg *msg)
 	r_uri = &msg->parsed_uri;
 
 	if (check_self(&r_uri->host,r_uri->port_no ? r_uri->port_no : SIP_PORT, 0) == 1 && msg->route == NULL) {
-		/* Seems we are in the topo hiding case :
-		 * we are in the R-URI and there are no other route headers */
-		for (i=0;i<r_uri->u_params_no;i++)
+		/* topology_hiding_match with thinfo and request domain is us
+		 * needs to have a thinfo to continue otherwise we cannot match */
+		for (i = 0; i < r_uri->u_params_no; i++) {
 			if (r_uri->u_name[i].len == th_contact_encode_param.len &&
-				memcmp(th_contact_encode_param.s,r_uri->u_name[i].s,th_contact_encode_param.len)==0) {
+				memcmp(th_contact_encode_param.s,r_uri->u_name[i].s,th_contact_encode_param.len) == 0) {
 				LM_DBG("We found param in R-URI with value of %.*s\n",
 					r_uri->u_val[i].len,r_uri->u_val[i].s);
 				/* pass the param value to the matching funcs */
-				return topo_no_dlg_seq_handling(msg,&r_uri->u_val[i]);
+				return topo_no_dlg_seq_handling(msg, &r_uri->u_val[i]);
+			}
+		}
+	} else if (msg->route != NULL) {
+		if (th_no_dlg_one_way_hiding(msg->rcv.bind_address)) {
+			route_set = rr_api.get_route_set(msg, &route_set_len);
+
+			if (route_set_len > 1) {
+				route_set++;
+				if (parse_uri(route_set->s, route_set->len, &rr_uri) < 0) {
+					LM_ERR("Route header has a bad Contact URI\n");
+					return TOPOH_MATCH_FAILURE;
+				}
+
+				if (check_self(&rr_uri.host, rr_uri.port_no ? rr_uri.port_no : SIP_PORT, 0) == 0) {
+					LM_DBG("Route header not us, skip checking the next one\n");
+					return TOPOH_MATCH_FAILURE;
+				}
+
+				if (rr_api.loose_route(msg) == 1) {
+					LM_DBG("Route set matches one of our sockets with one way hiding\n");
+					return TOPOH_MATCH_ONE_WAY_HIDING;
+				}				
+			}
 		}
 	}
 
 	LM_DBG("Topology hiding did not match\n");
-	return -1;
+	return TOPOH_MATCH_FAILURE;
 }
 
 /* internal functionality */
@@ -913,9 +943,10 @@ static void th_no_dlg_onreply(struct cell* t, int type, struct tmcb_params *para
 	char *route;
 	int size;
 	size_t route_size = 0;
+	unsigned int no_req_rrs = 0;
 	unsigned int flags = param->flags;
 	int do_rr = 0;
-	int one_way_hiding = th_no_dlg_one_way_hiding(rpl, t->uas.response.dst.send_sock);
+	int one_way_hiding = th_no_dlg_one_way_hiding(t->uas.response.dst.send_sock);
 
 	LM_DBG("Response callback with flags %u\n", flags);
 
@@ -945,7 +976,7 @@ static void th_no_dlg_onreply(struct cell* t, int type, struct tmcb_params *para
 	}
 
 	if (do_rr && req->record_route) {
-		if (print_rr_body(req->record_route, &req_rr_set, 0, 1, NULL) != 0) {
+		if (print_rr_body(req->record_route, &req_rr_set, 0, 1, &no_req_rrs) != 0) {
 			LM_ERR("failed to print route records \n");
 			return;
 		}
@@ -959,23 +990,23 @@ static void th_no_dlg_onreply(struct cell* t, int type, struct tmcb_params *para
 		return;
 	}
 
-	if (topo_delete_vias(rpl) < 0) {
-		LM_ERR("Failed to remove via headers\n");
-		return;
-	}
-
 	if (!one_way_hiding) {
+		if (topo_delete_vias(rpl) < 0) {
+			LM_ERR("Failed to remove via headers\n");
+			return;
+		}
+
+		if (!(lmp = restore_vias_from_req(req, rpl))) {
+			LM_ERR("Failed to restore VIA headers from request \n");
+			return;
+		}
+
 		if (!(rpl->REPLY_STATUS >= 300 && rpl->REPLY_STATUS < 400) ) {
-			if (topo_no_dlg_encode_contact(rpl, flags, route_s, &req_rr_set) < 0) {
+			if (topo_no_dlg_encode_contact(rpl, flags, route_s, no_req_rrs) < 0) {
 				LM_ERR("Failed to encode contact header \n");
 				return;
 			}
 		}
-	}
-
-	if (!(lmp = restore_vias_from_req(req, rpl))) {
-		LM_ERR("Failed to restore VIA headers from request \n");
-		return;
 	}
 
 	if (route_size > 0 && _th_no_dlg_rebuild_routes(route_size, route_sets, lmp) != 0) {
@@ -995,13 +1026,13 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, union sockaddr_union
 	/* parse all headers to be sure that all RR and Contact hdrs are found */
 	if (parse_headers(req, HDR_EOH_F, 0) >= 0) {
 		send_sock = get_send_socket(req, su, proto);
-		if (th_no_dlg_one_way_hiding(req, send_sock) == 0) {
+		if (th_no_dlg_one_way_hiding(send_sock) == 0) {
 			if (topo_delete_record_routes(req) < 0) {
 				LM_ERR("Failed to remove Record Route header \n");
 				return -1;
 			}
 
-			if(topo_delete_vias(req) < 0) {
+			if (topo_delete_vias(req) < 0) {
 				LM_ERR("Failed to remove via headers\n");
 				return -1;
 			}
@@ -1643,7 +1674,7 @@ error:
 
 /* We encode the RR headers, the actual Contact and the socket str for this leg */
 /* Via headers will be restored using the TM module, no need to save anything for them */
-static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, str* rrs_to_ignore, int *suffix_len, int flags)
+static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsigned int rrs_to_ignore, int *suffix_len, int flags)
 {
 	short rr_len,ct_len,addr_len,flags_len,enc_len;
 	char *suffix_plain,*suffix_enc,*p,*s;
@@ -1654,7 +1685,6 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, str*
 	struct sip_uri ctu;
 	struct th_ct_params* el;
 	param_t *it;
-	rr_t *head = NULL;
 	int is_req = (msg->first_line.type==SIP_REQUEST)?1:0;
 	int local_len = sizeof(short) /* RR length */ +
 			sizeof(short) /* Contact length */ +
@@ -1672,7 +1702,7 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, str*
 		rr_set = *routes;
 		rr_len = (short)routes->len;
 	} else if(msg->record_route){
-		if (print_rr_body_ignore(msg->record_route, &rr_set, !is_req, 0, rrs_to_ignore) != 0){
+		if (print_rr_body(msg->record_route, &rr_set, !is_req, 0, &rrs_to_ignore) != 0){
 			LM_ERR("failed to print route records \n");
 			return NULL;
 		}
@@ -1822,7 +1852,7 @@ error:
 	return NULL;
 }
 
-static int topo_no_dlg_encode_contact(struct sip_msg *msg, unsigned int flags, str *routes, str *rrs_to_ignore) 
+static int topo_no_dlg_encode_contact(struct sip_msg *msg, unsigned int flags, str *routes, unsigned int rrs_to_ignore) 
 {
 	struct lump* lump;
 	char *prefix=NULL,*suffix=NULL,*ct_username=NULL;
@@ -1920,7 +1950,7 @@ static inline void topo_no_dlg_seq_free(void *p)
 		shm_free(p);
 }
 
-static inline int th_no_dlg_one_way_hiding(struct sip_msg *msg, struct socket_info *socket) {
+static inline int th_no_dlg_one_way_hiding(struct socket_info *socket) {
 	int one_way_hiding = 0;
 
 	if (socket != NULL && socket->tag.len > 0) {
@@ -1943,31 +1973,25 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info)
 	str rr_buf,ct_buf,flags_buf,bind_buf;
 	rr_t *head = NULL, *rrp;
 	int next_strict=0;
-	struct sip_uri fru;
+	struct sip_uri fru, rru;
 	char* buf = msg->buf;
 	struct lump* lmp = NULL;
 	str host;
 	int port,proto;
-	struct socket_info *sock;
+	struct socket_info *sock = NULL;
 	str *route_s = NULL, route_buf = {0, 0};
 
 	/* parse all headers to be sure that all RR and Contact hdrs are found */
 	if (parse_headers(msg, HDR_EOH_F, 0)< 0) {
 		LM_ERR("Failed to parse reply\n");
-		return -1;
-	}
-
-	/* delete vias */
-	if(topo_delete_vias(msg) < 0) {
-		LM_ERR("Failed to remove via headers\n");
-		return -1;
+		return TOPOH_MATCH_FAILURE;
 	}
 
 	/* delete record route, shouldn't have a record-route here anyway */
 	for (it=msg->record_route;it;it=it->sibling) {
 		if (del_lump(msg, it->name.s - buf, it->len, 0) == 0) {
 			LM_ERR("del_lump failed\n");
-			return -1;
+			return TOPOH_MATCH_FAILURE;
 		}
 	}
 
@@ -2017,12 +2041,12 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info)
 			goto err_free_buf;
 		}
 
-		if(parse_uri(head->nameaddr.uri.s, head->nameaddr.uri.len, &fru) < 0) {
+		if (parse_uri(head->nameaddr.uri.s, head->nameaddr.uri.len, &fru) < 0) {
 			LM_ERR("Failed to parse SIP uri\n");
 			goto err_free_head;
 		}
-		if(is_strict(&fru.params))
-			next_strict = 1;
+
+		next_strict = is_strict(&fru.params);
 	}
 
 	if (msg->dst_uri.s && msg->dst_uri.len) {
@@ -2060,40 +2084,51 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info)
 			}
 		}
 
-		if ( rr_buf.len !=0 && rr_buf.s) {
-
-			lmp = anchor_lump(msg,msg->headers->name.s - buf,0);
-			if (lmp == 0) {
-				LM_ERR("failed anchoring new lump\n");
+		if (rr_buf.len != 0 && rr_buf.s) {
+			if (parse_uri(head->nameaddr.uri.s, head->nameaddr.uri.len, &rru) < 0) {
 				goto err_free_head;
 			}
 
-			size = rr_buf.len + ROUTE_LEN + CRLF_LEN;
-			route = pkg_malloc(size+1);
-			if (route == 0) {
-				LM_ERR("no more pkg memory\n");
-				goto err_free_head;
-			}
+			if (check_self(&rru.host, rru.port_no ? rru.port_no : SIP_PORT, 0) == 1) {
+				LM_DBG("Route header is me not adding to message\n");
 
-			memcpy(route,ROUTE_STR,ROUTE_LEN);
-			memcpy(route+ROUTE_LEN,rr_buf.s,rr_buf.len);
-			memcpy(route+ROUTE_LEN+rr_buf.len,CRLF,CRLF_LEN);
+				sock = grep_sock_info(&rru.host, rru.port_no ? rru.port_no : SIP_PORT, 0);
+				if (sock) {
+					msg->force_send_socket = sock;
+				}
+			} else {
+				lmp = anchor_lump(msg,msg->headers->name.s - buf,0);
+				if (lmp == 0) {
+					LM_ERR("failed anchoring new lump\n");
+					goto err_free_head;
+				}
 
-			route[size] = 0;
+				size = rr_buf.len + ROUTE_LEN + CRLF_LEN;
+				route = pkg_malloc(size+1);
+				if (route == 0) {
+					LM_ERR("no more pkg memory\n");
+					goto err_free_head;
+				}
 
-			if ((lmp = insert_new_lump_after(lmp,route,size,HDR_ROUTE_T)) == 0) {
-				LM_ERR("failed inserting new route set\n");
-				goto err_free_route;
-			}
-			msg->msg_flags |= FL_HAS_ROUTE_LUMP;
-			route_buf = rr_buf;
+				memcpy(route,ROUTE_STR,ROUTE_LEN);
+				memcpy(route+ROUTE_LEN,rr_buf.s,rr_buf.len);
+				memcpy(route+ROUTE_LEN+rr_buf.len,CRLF,CRLF_LEN);
 
-			LM_DBG("Setting route  header to <%s> \n",route);
-			LM_DBG("setting dst_uri to <%.*s> \n",head->nameaddr.uri.len,
-					head->nameaddr.uri.s);
+				route[size] = 0;
 
-			if (set_dst_uri(msg,&head->nameaddr.uri) !=0 ) {
-				goto err_free_head;
+				if ((lmp = insert_new_lump_after(lmp,route,size,HDR_ROUTE_T)) == 0) {
+					LM_ERR("failed inserting new route set\n");
+					goto err_free_route;
+				}
+				msg->msg_flags |= FL_HAS_ROUTE_LUMP;
+				route_buf = rr_buf;
+
+				LM_DBG("Setting route  header to <%s> \n",route);
+				LM_DBG("setting dst_uri to <%.*s> \n",head->nameaddr.uri.len,
+						head->nameaddr.uri.s);
+				if (set_dst_uri(msg,&head->nameaddr.uri) != 0) {
+					goto err_free_head;
+				}
 			}
 		}
 	} else {
@@ -2158,7 +2193,7 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info)
 				if (lmp == 0)
 				{
 					LM_ERR("failed anchoring new lump\n");
-					return -1;
+					return TOPOH_MATCH_FAILURE;
 				}
 			}
 
@@ -2211,7 +2246,7 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info)
 		LM_ERR("failed to register TMCB\n");
 	}
 
-	if (bind_buf.len && bind_buf.s) {
+	if (sock == NULL && bind_buf.len && bind_buf.s) {
 		LM_DBG("forcing send socket for req to [%.*s]\n",bind_buf.len,bind_buf.s);
 		if (parse_phostport(bind_buf.s, bind_buf.len, &host.s, &host.len, &port, &proto) != 0) {
 			LM_ERR("bad socket <%.*s>\n", bind_buf.len, bind_buf.s);
@@ -2228,12 +2263,19 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info)
 		free_rr(&head);
 	pkg_free(dec_buf);
 
-	if (!th_no_dlg_one_way_hiding(msg, sock) && topo_no_dlg_encode_contact(msg, flags, NULL, NULL) < 0) {
-		LM_ERR("Failed to encode contact header \n");
-		return -1;
+	if (!th_no_dlg_one_way_hiding(sock)) {
+		if (topo_delete_vias(msg) < 0) {
+			LM_ERR("Failed to remove via headers\n");
+			return TOPOH_MATCH_FAILURE;
+		}
+
+		if (topo_no_dlg_encode_contact(msg, flags, NULL, 0) < 0) {
+			LM_ERR("Failed to encode contact header \n");
+			return TOPOH_MATCH_FAILURE;
+		}
 	}
 
-	return 1;
+	return TOPOH_MATCH_SUCCESS;
 
 err_free_route:
 	if (route)
@@ -2243,5 +2285,5 @@ err_free_head:
 		free_rr(&head);
 err_free_buf:
 	pkg_free(dec_buf);
-	return -1;
+	return TOPOH_MATCH_FAILURE;
 }
