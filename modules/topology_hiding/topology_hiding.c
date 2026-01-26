@@ -29,10 +29,13 @@
 
 #include "topo_hiding_logic.h"
 #include "th_no_dlg_logic.h"
+#include "../compression/compression_api.h"
 
 struct tm_binds tm_api;
 struct dlg_binds dlg_api;
 struct rr_binds rr_api;
+compression_api_t compression_api;
+int compression_api_loaded = -1;
 
 int force_dialog = 0;
 str topo_hiding_ct_params = {0,0};
@@ -194,6 +197,11 @@ static int mod_init(void)
 	if (load_rr_api(&rr_api) != 0) {
 		LM_ERR("failed to load rr API\n");
 		return -1;
+	}
+
+	compression_api_loaded = load_compression_api(&compression_api);
+	if (compression_api_loaded != 0) {
+		LM_WARN("failed to load compression API\n");
 	}
 
 	return 0;

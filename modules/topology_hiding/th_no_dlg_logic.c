@@ -26,9 +26,26 @@
 #include "../tm/tm_load.h"
 #include "../rr/loose.h"
 #include "../rr/api.h"
+#include "../compression/compression_api.h"
+#include <string.h>
+
+#define DEC_BUF_SIZE 1000
+
+#define TOPOH_MATCH_SUCCESS         1
+#define TOPOH_MATCH_FAILURE        -1
+#define TOPOH_MATCH_ONE_WAY_HIDING -2
+
+#define ROUTE_STR "Route: "
+#define ROUTE_LEN (sizeof(ROUTE_STR) - 1)
+#define ROUTE_PREF "Route: <"
+#define ROUTE_PREF_LEN (sizeof(ROUTE_PREF) -1)
+#define ROUTE_SUFF ">\r\n"
+#define ROUTE_SUFF_LEN (sizeof(ROUTE_SUFF) -1)
 
 extern struct tm_binds tm_api;
 extern struct rr_binds rr_api;
+extern compression_api_t compression_api;
+extern int compression_api_loaded;
 
 extern int th_ct_enc_scheme;
 extern str topo_hiding_ct_encode_pw;
@@ -45,17 +62,8 @@ static void th_no_dlg_onrequest(struct cell *t, int type, struct tmcb_params *pa
 static inline int _th_no_dlg_onrequest(struct sip_msg *req, union sockaddr_union *su, int proto, unsigned int flags);
 static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *param);
 static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info);
-
-#define TOPOH_MATCH_SUCCESS         1
-#define TOPOH_MATCH_FAILURE        -1
-#define TOPOH_MATCH_ONE_WAY_HIDING -2
-
-#define ROUTE_STR "Route: "
-#define ROUTE_LEN (sizeof(ROUTE_STR) - 1)
-#define ROUTE_PREF "Route: <"
-#define ROUTE_PREF_LEN (sizeof(ROUTE_PREF) -1)
-#define ROUTE_SUFF ">\r\n"
-#define ROUTE_SUFF_LEN (sizeof(ROUTE_SUFF) -1)
+static inline unsigned char* th_compress_and_encrypt(unsigned char plain_data[static DEC_BUF_SIZE], int plain_len, unsigned long *out_len);
+static inline int th_decrypt_and_decompress(unsigned char enc_data[static DEC_BUF_SIZE], int enc_len, int *out_len) ;
 
 int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_flags) {
 	union sockaddr_union su;
@@ -328,7 +336,8 @@ static void th_no_dlg_onrequest(struct cell *t, int type, struct tmcb_params *pa
 /* Via headers will be restored using the TM module, no need to save anything for them */
 static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsigned int rrs_to_ignore, int *suffix_len, int flags) {
 	short rr_len,ct_len,addr_len,flags_len,enc_len;
-	char *suffix_plain,*suffix_enc,*p,*s;
+	char *suffix_enc,*p,*s;
+	static char suffix_plain[DEC_BUF_SIZE];
 	str rr_set = {NULL, 0};
 	str contact;
 	str flags_str;
@@ -426,11 +435,6 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 		LM_ERR("no more pkg\n");
 		goto error;
 	}
-	suffix_plain = pkg_malloc(local_len+1);
-	if (!suffix_plain) {
-		LM_ERR("no more pkg\n");
-		goto error;
-	}
 
 	p = suffix_plain;
 	memcpy(p,&rr_len,sizeof(short));
@@ -453,8 +457,20 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 	p+= sizeof(short);
 	memcpy(p,msg->rcv.bind_address->sock_str.s,msg->rcv.bind_address->sock_str.len);
 	p+= msg->rcv.bind_address->sock_str.len;
-	for (i=0;i<(int)(p-suffix_plain);i++)
-		suffix_plain[i] ^= topo_hiding_ct_encode_pw.s[i%topo_hiding_ct_encode_pw.len];
+
+	/* Compress and encrypt the plain data */
+	int plain_len = p - suffix_plain;
+	unsigned long compressed_len;
+	unsigned char *compressed = th_compress_and_encrypt((unsigned char*)suffix_plain,
+	                                                     plain_len, &compressed_len);
+	if (!compressed) {
+		LM_ERR("failed to compress and encrypt\n");
+		goto error;
+	}
+
+	/* Recalculate enc_len based on actual compressed size */
+	enc_len = th_ct_enc_scheme == ENC_BASE64 ?
+		calc_word64_encode_len(compressed_len) : calc_word32_encode_len(compressed_len);
 
 	s = suffix_enc;
 	*s++ = ';';
@@ -462,9 +478,10 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 	s+= th_contact_encode_param.len;
 	*s++ = '=';
 	if (th_ct_enc_scheme == ENC_BASE64)
-		word64encode((unsigned char*)s,(unsigned char *)suffix_plain,p-suffix_plain);
+		word64encode((unsigned char*)s, compressed, compressed_len);
 	else
-		word32encode((unsigned char*)s,(unsigned char *)suffix_plain,p-suffix_plain);
+		word32encode((unsigned char*)s, compressed, compressed_len);
+
 	s = s+enc_len;
 
 	if (th_param_list) {
@@ -494,8 +511,7 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 
 	if (rr_set.s && !routes)
 		pkg_free(rr_set.s);
-	pkg_free(suffix_plain);
-	*suffix_len = total_len;
+	*suffix_len = s - suffix_enc;
 	return suffix_enc;
 error:
 	if (rr_set.s)
@@ -720,7 +736,8 @@ static inline int topo_no_dlg_strict_route(struct sip_msg *msg, const str rr_buf
 }
 
 static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
-	int max_size, dec_len, i, size;
+	static char dec_buf_static[DEC_BUF_SIZE];
+	int max_size, dec_len = 0, i, size;
 	unsigned int flags;
 	char *dec_buf, *p, *route=NULL, *remote_contact;
 	struct hdr_field *it;
@@ -753,11 +770,13 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 	max_size = th_ct_enc_scheme == ENC_BASE64 ?
 		calc_max_word64_decode_len(info->len) :
 		calc_max_word32_decode_len(info->len);
-	dec_buf = pkg_malloc(max_size);
-	if (dec_buf==NULL) {
-		LM_ERR("No more pkg\n");
+	
+	if (max_size > sizeof(dec_buf_static)) {
+		LM_ERR("Decoded buffer too large: %d > %zu\n", max_size, sizeof(dec_buf_static));
 		return -1;
 	}
+	
+	dec_buf = dec_buf_static;
 
 	if (th_ct_enc_scheme == ENC_BASE64)
 		dec_len = word64decode((unsigned char *)dec_buf,
@@ -765,15 +784,24 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 	else
 		dec_len = word32decode((unsigned char *)dec_buf,
 			(unsigned char *)info->s,info->len);
-	for (i=0;i<dec_len;i++)
-		dec_buf[i] ^= topo_hiding_ct_encode_pw.s[i%topo_hiding_ct_encode_pw.len];
+	
+	if (dec_len <= 0) {
+		LM_ERR("Failed to decode\n");
+		return -1;
+	}
+	
+	if (th_decrypt_and_decompress((unsigned char *)dec_buf, dec_len, &dec_len) < 0) {
+		LM_ERR("failed to decrypt and decompress\n");
+		dec_len = 0;
+		return -1;
+	}
 
 	#define __extract_len_and_buf(_p, _len, _s) \
 		do { \
 			(_s).len = *(short *)p;\
 			if ((_s).len<0 || (_s).len>_len) {\
 				LM_ERR("bad length %d in encoded contact\n", (_s).len);\
-				goto err_free_buf;\
+				goto err_fail_early;\
 			}\
 			(_s).s = _p + sizeof(short);\
 			_p += sizeof(short) + (_s).len;\
@@ -793,7 +821,7 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 	if (rr_buf.len) {
 		if (parse_rr_body(rr_buf.s,rr_buf.len,&head) != 0) {
 			LM_ERR("failed parsing route set\n");
-			goto err_free_buf;
+			goto err_fail_early;
 		}
 
 		if (parse_uri(head->nameaddr.uri.s, head->nameaddr.uri.len, &fru) < 0) {
@@ -891,7 +919,7 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 				}
 				msg->msg_flags |= FL_HAS_ROUTE_LUMP;
 			} else if (route_rc == RR_FAILURE) {
-				goto err_free_buf;
+				goto err_fail_early;
 		    } else if (route_rc == RR_FREE_HEAD) {
 				goto err_free_head;
 			} else {
@@ -939,7 +967,6 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 
 	if (rr_buf.len)
 		free_rr(&head);
-	pkg_free(dec_buf);
 
 	if (!th_no_dlg_one_way_hiding(sock)) {
 		if (topo_delete_vias(msg) < 0) {
@@ -961,8 +988,7 @@ err_free_route:
 err_free_head:
 	if (rr_buf.len)
 		free_rr(&head);
-err_free_buf:
-	pkg_free(dec_buf);
+err_fail_early:
 	return TOPOH_MATCH_FAILURE;
 }
 
@@ -978,4 +1004,86 @@ static inline int th_no_dlg_one_way_hiding(struct socket_info *socket) {
 	}
 
 	return one_way_hiding;
+}
+
+static inline unsigned char* th_compress_and_encrypt(unsigned char plain_data[static DEC_BUF_SIZE], int plain_len, unsigned long *out_len) {
+	unsigned long compressed_len = 0;
+	static char result[DEC_BUF_SIZE];
+	str compressed_str = {result, DEC_BUF_SIZE};
+	int i, rc;
+
+	// TODO reassign a function ptr at load time instead of checking here
+	if (compression_api_loaded == -1) {
+		*out_len = plain_len;
+		memcpy(result, plain_data, plain_len);
+		goto xor_encrypt;
+	}
+
+	rc = compression_api.compress(plain_data,
+								  plain_len, 
+								  &compressed_str,
+	                              &compressed_len,
+								  compression_api.level,
+								  STATIC_MEM);
+	if (rc != 0 || compression_api.check_rc(rc) != 0) {
+		LM_ERR("compression failed with rc=%d\n", rc);
+		return NULL;
+	}
+
+	if (compressed_len >= plain_len) {
+		LM_DBG("Compression didn't help (%lu >= %d), using uncompressed\n", 
+		       compressed_len, plain_len);
+		
+		memcpy(result, plain_data, plain_len);
+		*out_len = plain_len;
+	} else {
+		memcpy(result, compressed_str.s, compressed_len);
+		*out_len = compressed_len;
+		
+		LM_DBG("Compressed %d bytes to %lu bytes (%.1f%%)\n", 
+		       plain_len, compressed_len, (compressed_len * 100.0) / plain_len);
+	}
+
+xor_encrypt:
+	for (i = 0; i < (int)*out_len; i++)
+		result[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
+
+	return (unsigned char*) result;
+}
+
+static inline int th_decrypt_and_decompress(unsigned char enc_data[static DEC_BUF_SIZE], int enc_len, int *out_len) {
+	unsigned long decompressed_len = 0;
+	static char decompressed_buf[DEC_BUF_SIZE];
+	str decompressed_str = {decompressed_buf, DEC_BUF_SIZE};
+	int i, rc;
+
+	for (i = 0; i < enc_len; i++)
+		enc_data[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
+
+	// TODO reassign a function ptr at load time instead of checking here
+	if (compression_api_loaded == -1) {
+		*out_len = enc_len;
+		return 0;
+	}
+
+	rc = compression_api.decompress(enc_data, 
+									enc_len,
+									&decompressed_str,
+									&decompressed_len,
+									STATIC_MEM);
+
+	if (rc == 0 && compression_api.check_rc(rc) == 0 && 
+		decompressed_len < DEC_BUF_SIZE) {
+		*out_len = decompressed_len;
+
+		memcpy(enc_data, decompressed_str.s, decompressed_len);
+		
+		LM_DBG(" %d bytes to %d bytes\n", enc_len, *out_len);
+
+		return 0;
+	}
+
+	*out_len = enc_len;
+	LM_DBG("Using uncompressed data (%d bytes)\n", enc_len);
+	return 0;
 }

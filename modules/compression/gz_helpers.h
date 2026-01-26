@@ -24,7 +24,9 @@
 #define GZ_HELPERS
 
 #include "compression.h"
+#include "compression_helpers.h"
+#include "compression_api.h"
 
-int gzip_compress(unsigned char* in, unsigned long ilen, str* out, unsigned long* olen, int level);
-int gzip_uncompress(unsigned char* in, unsigned long ilen, str* out, unsigned long* olen);
+int gzip_compress(unsigned char* in, unsigned long ilen, str* out, unsigned long* olen, int level, str_buffer_type buffer_type);
+int gzip_uncompress(unsigned char* in, unsigned long ilen, str* out, unsigned long* olen, str_buffer_type buffer_type);
 #endif
