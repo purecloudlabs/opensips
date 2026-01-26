@@ -27,8 +27,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-
 #include "topo_hiding_logic.h"
+#include "th_no_dlg_logic.h"
 
 struct tm_binds tm_api;
 struct dlg_binds dlg_api;
@@ -262,7 +262,7 @@ int w_topology_hiding_match(struct sip_msg *req, void *seq_match_mode_val)
 		mm = (int)(long)seq_match_mode_val;
 
 	if (!dlg_api.match_dialog || dlg_api.match_dialog(req, mm) < 0)
-		return topology_hiding_match(req);
+		return topo_hiding_match_no_dlg(req);
 	else
 		/* we went to the dlg module, which triggered us back, all good */
 		return 1;
