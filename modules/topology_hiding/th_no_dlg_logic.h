@@ -29,5 +29,6 @@ enum encode_scheme {ENC_BASE64, ENC_BASE32};
 
 int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_flags);
 int topo_hiding_match_no_dlg(struct sip_msg *msg);
+int topo_hiding_load_compression_api_no_dlg(int use_compression_api);
 
 #endif

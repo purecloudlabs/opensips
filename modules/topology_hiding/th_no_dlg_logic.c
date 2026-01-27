@@ -44,8 +44,7 @@
 
 extern struct tm_binds tm_api;
 extern struct rr_binds rr_api;
-extern compression_api_t compression_api;
-extern int compression_api_loaded;
+static compression_api_t compression_api;
 
 extern int th_ct_enc_scheme;
 extern str topo_hiding_ct_encode_pw;
@@ -55,15 +54,23 @@ extern str th_internal_trusted_tag;
 extern struct th_ct_params *th_param_list;
 extern struct th_ct_params *th_hdr_param_list;
 
+typedef unsigned char* (*encode_t)(unsigned char plain_data[static DEC_BUF_SIZE], unsigned long plain_len, unsigned long *out_len);
+typedef unsigned char* (*decode_t)(unsigned char enc_data[static DEC_BUF_SIZE], unsigned long enc_len, unsigned long *out_len);
+
+encode_t _compress_and_encode = NULL;
+decode_t _decode_and_decompress = NULL;
+
 static inline int th_no_dlg_one_way_hiding(struct socket_info *socket);
-static int topo_no_dlg_encode_contact(struct sip_msg *msg, unsigned int flags, str *routes, unsigned int rrs_to_ignore);
+static int th_no_dlg_encode_contact(struct sip_msg *msg, unsigned int flags, str *routes, unsigned int rrs_to_ignore);
 static int th_no_dlg_rebuild_record_routes(size_t route_sets_size, str *routes[static route_sets_size], struct lump* lmp);
 static void th_no_dlg_onrequest(struct cell *t, int type, struct tmcb_params *param);
 static inline int _th_no_dlg_onrequest(struct sip_msg *req, union sockaddr_union *su, int proto, unsigned int flags);
 static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *param);
-static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info);
-static inline unsigned char* th_compress_and_encrypt(unsigned char plain_data[static DEC_BUF_SIZE], int plain_len, unsigned long *out_len);
-static inline int th_decrypt_and_decompress(unsigned char enc_data[static DEC_BUF_SIZE], int enc_len, int *out_len) ;
+static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info);
+static inline unsigned char* th_no_dlg_compress_and_encode(unsigned char plain_data[static DEC_BUF_SIZE], unsigned long plain_len, unsigned long *out_len);
+static inline unsigned char* th_no_dlg_decode_and_decompress(unsigned char enc_data[static DEC_BUF_SIZE], unsigned long enc_len, unsigned long *out_len);
+static inline unsigned char* th_no_dlg_encode(unsigned char input_data[static DEC_BUF_SIZE], unsigned long input_len, unsigned long *out_len);
+static inline unsigned char* th_no_dlg_decode(unsigned char input_data[static DEC_BUF_SIZE], unsigned long input_len, unsigned long *out_len);
 
 int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_flags) {
 	union sockaddr_union su;
@@ -124,7 +131,7 @@ int topo_hiding_match_no_dlg(struct sip_msg *msg) {
 				LM_DBG("We found param in R-URI with value of %.*s\n",
 					r_uri->u_val[i].len,r_uri->u_val[i].s);
 				/* pass the param value to the matching funcs */
-				return topo_no_dlg_seq_handling(msg, &r_uri->u_val[i]);
+				return th_no_dlg_seq_handling(msg, &r_uri->u_val[i]);
 			}
 		}
 	} else if (msg->route != NULL) {
@@ -153,6 +160,22 @@ int topo_hiding_match_no_dlg(struct sip_msg *msg) {
 
 	LM_DBG("Topology hiding did not match\n");
 	return TOPOH_MATCH_FAILURE;
+}
+
+int topo_hiding_load_compression_api_no_dlg(int use_compression_api) {
+	if (use_compression_api == 0) {
+		_compress_and_encode = th_no_dlg_encode;
+		_decode_and_decompress = th_no_dlg_decode;
+
+		LM_DBG("Not using the compression API\n");
+
+		return 0;
+	} else {
+		_compress_and_encode = th_no_dlg_compress_and_encode;
+		_decode_and_decompress = th_no_dlg_decode_and_decompress;
+
+		return load_compression_api(&compression_api);
+	}
 }
 
 static int th_no_dlg_rebuild_record_routes(size_t route_sets_size, str *routes[static route_sets_size], struct lump* lmp) {
@@ -277,7 +300,7 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 
 	if (!one_way_hiding) {
 		if (!(rpl->REPLY_STATUS >= 300 && rpl->REPLY_STATUS < 400) ) {
-			if (topo_no_dlg_encode_contact(rpl, flags, route_s, no_req_rrs) < 0) {
+			if (th_no_dlg_encode_contact(rpl, flags, route_s, no_req_rrs) < 0) {
 				LM_ERR("Failed to encode contact header \n");
 				return;
 			}
@@ -289,6 +312,16 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 	}
 
 	return;
+}
+
+static void th_no_dlg_onrequest(struct cell *t, int type, struct tmcb_params *param) {
+	struct sip_msg *req = param->req;
+	struct ua_client *uac = t->uac;
+	unsigned int flags = param->flags;
+
+	if (_th_no_dlg_onrequest(req, &uac->request.dst.to, uac->request.dst.proto, flags) < 0) {
+		LM_ERR("Failed to do topology_hiding on request\n");
+	}
 }
 
 static inline int _th_no_dlg_onrequest(struct sip_msg *req, union sockaddr_union *su, int proto, unsigned int flags) {
@@ -310,7 +343,7 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, union sockaddr_union
 				return -1;
 			}
 
-			if (topo_no_dlg_encode_contact(req, flags, NULL, 0) < 0) {
+			if (th_no_dlg_encode_contact(req, flags, NULL, 0) < 0) {
 				LM_ERR("Failed to encode contact header \n");
 				return -1;
 			}
@@ -322,15 +355,8 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, union sockaddr_union
 	return 1;
 }
 
-static void th_no_dlg_onrequest(struct cell *t, int type, struct tmcb_params *param) {
-	struct sip_msg *req = param->req;
-	struct ua_client *uac = t->uac;
-	unsigned int flags = param->flags;
-
-	if (_th_no_dlg_onrequest(req, &uac->request.dst.to, uac->request.dst.proto, flags) < 0) {
-		LM_ERR("Failed to do topology_hiding on request\n");
-	}
-}
+#define HAS_NO_CONTACT_BODY(_m) (((contact_body_t *) ((_m)->contact->parsed))->contacts == NULL || \
+                              ((contact_body_t *) ((_m)->contact->parsed))->contacts->next != NULL)
 
 /* We encode the RR headers, the actual Contact and the socket str for this leg */
 /* Via headers will be restored using the TM module, no need to save anything for them */
@@ -338,6 +364,7 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 	short rr_len,ct_len,addr_len,flags_len,enc_len;
 	char *suffix_enc,*p,*s;
 	static char suffix_plain[DEC_BUF_SIZE];
+	unsigned char *encoded;
 	str rr_set = {NULL, 0};
 	str contact;
 	str flags_str;
@@ -345,7 +372,8 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 	struct sip_uri ctu;
 	struct th_ct_params* el;
 	param_t *it;
-	int is_req = (msg->first_line.type==SIP_REQUEST)?1:0;
+	unsigned long plain_len, encoded_len;
+	int is_req = (msg->first_line.type == SIP_REQUEST)?1:0;
 	int local_len = sizeof(short) /* RR length */ +
 			sizeof(short) /* Contact length */ +
 			sizeof(short) /* Flags length */ +
@@ -371,13 +399,15 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 		rr_len = 0;
 	}
 
-	if ( parse_contact(msg->contact)<0 ||
-	((contact_body_t *)msg->contact->parsed)->contacts==NULL ||
-	((contact_body_t *)msg->contact->parsed)->contacts->next!=NULL ) {
+	if (parse_contact(msg->contact) < 0 || HAS_NO_CONTACT_BODY(msg)) {
 		LM_ERR("bad Contact HDR\n");
 		goto error;
 	} else {
 		contact = ((contact_body_t *)msg->contact->parsed)->contacts->uri;
+		if (parse_uri(contact.s, contact.len, &ctu) < 0) {
+			LM_ERR("Bad Contact URI\n");
+			goto error;
+		} 
 		ct_len = (short)contact.len;
 	}
 
@@ -395,37 +425,20 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 		1 /* > */;
 
 	if (th_param_list) {
-		if ( parse_contact(msg->contact)<0 ||
-			((contact_body_t *)msg->contact->parsed)->contacts==NULL ||
-			((contact_body_t *)msg->contact->parsed)->contacts->next!=NULL ) {
-			LM_ERR("bad Contact HDR\n");
-		} else {
-			contact = ((contact_body_t *)msg->contact->parsed)->contacts->uri;
-			if(parse_uri(contact.s, contact.len, &ctu) < 0) {
-				LM_ERR("Bad Contact URI\n");
-			} else {
-				for (el=th_param_list;el;el=el->next) {
-					/* we just iterate over the unknown params */
-					for (i=0;i<ctu.u_params_no;i++) {
-						if (str_match(&el->param_name, &ctu.u_name[i]))
-							total_len += topo_ct_param_len(&ctu.u_name[i], &ctu.u_val[i], 0);
-					}
-				}
+		for (el = th_param_list; el; el = el->next) {
+			/* we just iterate over the unknown params */
+			for (i = 0; i < ctu.u_params_no; i++) {
+				if (str_match(&el->param_name, &ctu.u_name[i]))
+					total_len += topo_ct_param_len(&ctu.u_name[i], &ctu.u_val[i], 0);
 			}
 		}
 	}
 
 	if (th_hdr_param_list) {
-		if ( parse_contact(msg->contact)<0 ||
-			((contact_body_t *)msg->contact->parsed)->contacts==NULL ||
-			((contact_body_t *)msg->contact->parsed)->contacts->next!=NULL ) {
-			LM_ERR("bad Contact HDR\n");
-		} else {
-			for (el=th_hdr_param_list;el;el=el->next) {
-				for (it=((contact_body_t *)msg->contact->parsed)->contacts->params;it;it=it->next) {
-					if (str_match(&el->param_name, &it->name))
-						total_len += topo_ct_param_len(&it->name, &it->body, 1);
-				}
+		for (el = th_hdr_param_list; el; el = el->next) {
+			for (it = ((contact_body_t *)msg->contact->parsed)->contacts->params; it; it = it->next) {
+				if (str_match(&el->param_name, &it->name))
+					total_len += topo_ct_param_len(&it->name, &it->body, 1);
 			}
 		}
 	}
@@ -458,19 +471,16 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 	memcpy(p,msg->rcv.bind_address->sock_str.s,msg->rcv.bind_address->sock_str.len);
 	p+= msg->rcv.bind_address->sock_str.len;
 
-	/* Compress and encrypt the plain data */
-	int plain_len = p - suffix_plain;
-	unsigned long compressed_len;
-	unsigned char *compressed = th_compress_and_encrypt((unsigned char*)suffix_plain,
-	                                                     plain_len, &compressed_len);
-	if (!compressed) {
-		LM_ERR("failed to compress and encrypt\n");
+	plain_len = p - suffix_plain;
+	encoded = _compress_and_encode((unsigned char*)suffix_plain,
+	                               plain_len, &encoded_len);
+	if (!encoded) {
+		LM_ERR("failed to compress and encode\n");
 		goto error;
 	}
 
-	/* Recalculate enc_len based on actual compressed size */
 	enc_len = th_ct_enc_scheme == ENC_BASE64 ?
-		calc_word64_encode_len(compressed_len) : calc_word32_encode_len(compressed_len);
+		calc_word64_encode_len(encoded_len) : calc_word32_encode_len(encoded_len);
 
 	s = suffix_enc;
 	*s++ = ';';
@@ -478,16 +488,16 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 	s+= th_contact_encode_param.len;
 	*s++ = '=';
 	if (th_ct_enc_scheme == ENC_BASE64)
-		word64encode((unsigned char*)s, compressed, compressed_len);
+		word64encode((unsigned char*)s, encoded, encoded_len);
 	else
-		word32encode((unsigned char*)s, compressed, compressed_len);
+		word32encode((unsigned char*)s, encoded, encoded_len);
 
 	s = s+enc_len;
 
 	if (th_param_list) {
-		for (el=th_param_list;el;el=el->next) {
+		for (el = th_param_list; el; el = el->next) {
 			/* we just iterate over the unknown params */
-			for (i=0;i<ctu.u_params_no;i++) {
+			for (i = 0; i < ctu.u_params_no; i++) {
 				if (str_match(&el->param_name, &ctu.u_name[i]))
 					s = topo_ct_param_copy(s, &ctu.u_name[i], &ctu.u_val[i], 0);
 			}
@@ -495,16 +505,10 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 	}
 	*s++ = '>';
 	if (th_hdr_param_list) {
-		if ( parse_contact(msg->contact)<0 ||
-			((contact_body_t *)msg->contact->parsed)->contacts==NULL ||
-			((contact_body_t *)msg->contact->parsed)->contacts->next!=NULL ) {
-			LM_ERR("bad Contact HDR\n");
-		} else {
-			for (el=th_hdr_param_list;el;el=el->next) {
-				for (it=((contact_body_t *)msg->contact->parsed)->contacts->params;it;it=it->next) {
-					if (str_match(&el->param_name, &it->name))
-						s = topo_ct_param_copy(s, &it->name, &it->body, 1);
-				}
+		for (el = th_hdr_param_list; el; el = el->next) {
+			for (it = ((contact_body_t *)msg->contact->parsed)->contacts->params; it; it = it->next) {
+				if (str_match(&el->param_name, &it->name))
+					s = topo_ct_param_copy(s, &it->name, &it->body, 1);
 			}
 		}
 	}
@@ -519,7 +523,7 @@ error:
 	return NULL;
 }
 
-static int topo_no_dlg_encode_contact(struct sip_msg *msg, unsigned int flags, str *routes, unsigned int rrs_to_ignore) {
+static int th_no_dlg_encode_contact(struct sip_msg *msg, unsigned int flags, str *routes, unsigned int rrs_to_ignore) {
 	struct lump* lump;
 	char *prefix=NULL,*suffix=NULL,*ct_username=NULL;
 	int prefix_len,suffix_len = 0,ct_username_len=0;
@@ -735,9 +739,9 @@ static inline int topo_no_dlg_strict_route(struct sip_msg *msg, const str rr_buf
 	return RR_SUCCESS;
 }
 
-static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
+static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 	static char dec_buf_static[DEC_BUF_SIZE];
-	int max_size, dec_len = 0, i, size;
+	int max_size, size;
 	unsigned int flags;
 	char *dec_buf, *p, *route=NULL, *remote_contact;
 	struct hdr_field *it;
@@ -752,6 +756,7 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 	struct socket_info *sock = NULL;
 	str *route_s = NULL, route_buf = {0, 0};
 	int route_rc;
+	unsigned long dec_len = 0;
 
 	/* parse all headers to be sure that all RR and Contact hdrs are found */
 	if (parse_headers(msg, HDR_EOH_F, 0)< 0) {
@@ -790,7 +795,7 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 		return -1;
 	}
 	
-	if (th_decrypt_and_decompress((unsigned char *)dec_buf, dec_len, &dec_len) < 0) {
+	if (_decode_and_decompress((unsigned char *)dec_buf, dec_len, &dec_len) < 0) {
 		LM_ERR("failed to decrypt and decompress\n");
 		dec_len = 0;
 		return -1;
@@ -974,7 +979,7 @@ static int topo_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 			return TOPOH_MATCH_FAILURE;
 		}
 
-		if (topo_no_dlg_encode_contact(msg, flags, NULL, 0) < 0) {
+		if (th_no_dlg_encode_contact(msg, flags, NULL, 0) < 0) {
 			LM_ERR("Failed to encode contact header \n");
 			return TOPOH_MATCH_FAILURE;
 		}
@@ -1006,18 +1011,23 @@ static inline int th_no_dlg_one_way_hiding(struct socket_info *socket) {
 	return one_way_hiding;
 }
 
-static inline unsigned char* th_compress_and_encrypt(unsigned char plain_data[static DEC_BUF_SIZE], int plain_len, unsigned long *out_len) {
-	unsigned long compressed_len = 0;
+static inline unsigned char* th_no_dlg_encode(unsigned char input_data[static DEC_BUF_SIZE], unsigned long input_len, unsigned long *out_len) {
+	int i;
+
+	for (i = 0; i < input_len; i++)
+		input_data[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
+
+	if (out_len != NULL)
+		*out_len = input_len;
+
+	return input_data;
+}
+
+static inline unsigned char* th_no_dlg_compress_and_encode(unsigned char plain_data[static DEC_BUF_SIZE], unsigned long plain_len, unsigned long *out_len) {
 	static char result[DEC_BUF_SIZE];
 	str compressed_str = {result, DEC_BUF_SIZE};
-	int i, rc;
-
-	// TODO reassign a function ptr at load time instead of checking here
-	if (compression_api_loaded == -1) {
-		*out_len = plain_len;
-		memcpy(result, plain_data, plain_len);
-		goto xor_encrypt;
-	}
+	unsigned long compressed_len = 0;
+	int rc;
 
 	rc = compression_api.compress(plain_data,
 								  plain_len, 
@@ -1025,45 +1035,47 @@ static inline unsigned char* th_compress_and_encrypt(unsigned char plain_data[st
 	                              &compressed_len,
 								  compression_api.level,
 								  STATIC_MEM);
-	if (rc != 0 || compression_api.check_rc(rc) != 0) {
-		LM_ERR("compression failed with rc=%d\n", rc);
-		return NULL;
-	}
 
-	if (compressed_len >= plain_len) {
-		LM_DBG("Compression didn't help (%lu >= %d), using uncompressed\n", 
-		       compressed_len, plain_len);
+	if (compressed_len >= plain_len || compression_api.check_rc(rc) != 0) {
+		LM_DBG("Compressed len=%lu plain len=%lu, compress rc=%d\n", 
+		       compressed_len, plain_len, rc);
 		
-		memcpy(result, plain_data, plain_len);
+		compressed_str.s = (char*) plain_data;
 		*out_len = plain_len;
 	} else {
-		memcpy(result, compressed_str.s, compressed_len);
 		*out_len = compressed_len;
 		
-		LM_DBG("Compressed %d bytes to %lu bytes (%.1f%%)\n", 
+		LM_DBG("Compressed %lu bytes to %lu bytes (%.1f%%)\n", 
 		       plain_len, compressed_len, (compressed_len * 100.0) / plain_len);
 	}
 
-xor_encrypt:
-	for (i = 0; i < (int)*out_len; i++)
-		result[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
-
-	return (unsigned char*) result;
+	return th_no_dlg_encode((unsigned char*) compressed_str.s, *out_len, NULL);
 }
 
-static inline int th_decrypt_and_decompress(unsigned char enc_data[static DEC_BUF_SIZE], int enc_len, int *out_len) {
+static inline unsigned char* th_no_dlg_decode(unsigned char input_data[static DEC_BUF_SIZE], unsigned long input_len, unsigned long *out_len) {
+	int i;
+
+	if (input_len == 0) {
+		LM_ERR("Input length is 0\n");
+		return NULL;
+	}
+
+	for (i = 0; i < input_len; i++)
+		input_data[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
+
+	*out_len = input_len;
+
+	return input_data;
+}
+
+static inline unsigned char* th_no_dlg_decode_and_decompress(unsigned char enc_data[static DEC_BUF_SIZE], unsigned long enc_len, unsigned long *out_len) {
 	unsigned long decompressed_len = 0;
 	static char decompressed_buf[DEC_BUF_SIZE];
 	str decompressed_str = {decompressed_buf, DEC_BUF_SIZE};
-	int i, rc;
+	int rc;
 
-	for (i = 0; i < enc_len; i++)
-		enc_data[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
-
-	// TODO reassign a function ptr at load time instead of checking here
-	if (compression_api_loaded == -1) {
-		*out_len = enc_len;
-		return 0;
+	if (th_no_dlg_decode(enc_data, enc_len, out_len) == NULL) {
+		return NULL;
 	}
 
 	rc = compression_api.decompress(enc_data, 
@@ -1072,18 +1084,16 @@ static inline int th_decrypt_and_decompress(unsigned char enc_data[static DEC_BU
 									&decompressed_len,
 									STATIC_MEM);
 
-	if (rc == 0 && compression_api.check_rc(rc) == 0 && 
-		decompressed_len < DEC_BUF_SIZE) {
+	if (compression_api.check_rc(rc) == 0 && decompressed_len < DEC_BUF_SIZE) {
 		*out_len = decompressed_len;
 
 		memcpy(enc_data, decompressed_str.s, decompressed_len);
 		
-		LM_DBG(" %d bytes to %d bytes\n", enc_len, *out_len);
+		LM_DBG("Decompression successful - decompressed len %lu\n", decompressed_len);
 
-		return 0;
+		return enc_data;
 	}
 
-	*out_len = enc_len;
-	LM_DBG("Using uncompressed data (%d bytes)\n", enc_len);
-	return 0;
+	LM_DBG("Decompression failed with rc=%d - using original encoded data\n", rc);
+	return enc_data;
 }

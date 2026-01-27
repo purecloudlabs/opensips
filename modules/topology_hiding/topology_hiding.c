@@ -29,15 +29,13 @@
 
 #include "topo_hiding_logic.h"
 #include "th_no_dlg_logic.h"
-#include "../compression/compression_api.h"
 
 struct tm_binds tm_api;
 struct dlg_binds dlg_api;
 struct rr_binds rr_api;
-compression_api_t compression_api;
-int compression_api_loaded = -1;
 
 int force_dialog = 0;
+int th_no_dlg_use_compression = 0;
 str topo_hiding_ct_params = {0,0};
 str topo_hiding_ct_hdr_params = {0,0};
 str topo_hiding_prefix = str_init("DLGCH_");
@@ -77,6 +75,7 @@ static const param_export_t params[] = {
 	{ "th_contact_encode_param",     STR_PARAM, &th_contact_encode_param.s   },
 	{ "th_contact_encode_scheme",    STR_PARAM, &th_contact_encode_scheme.s  },
 	{ "th_internal_trusted_tag",     STR_PARAM, &th_internal_trusted_tag.s   },
+	{ "th_no_dlg_use_compression",   INT_PARAM, &th_no_dlg_use_compression   },
 	{0, 0, 0}
 };
 
@@ -86,14 +85,24 @@ static const pv_export_t pvars[] = {
 	{ {0, 0}, 0, 0, 0, 0, 0, 0, 0 }
 };
 
-static module_dependency_t *get_deps_dialog(const param_export_t *param)
+static inline module_dependency_t *get_deps_module(const param_export_t *param, char *mod_name)
 {
-	int force = *(int *)param->param_pointer;
+	int load_module = *(int *)param->param_pointer;
 
-	if (force == 0)
+	if (load_module == 0)
 		return NULL;
 
-	return alloc_module_dep(MOD_TYPE_DEFAULT, "dialog", DEP_ABORT);
+	return alloc_module_dep(MOD_TYPE_DEFAULT, mod_name, DEP_ABORT);
+}
+
+static module_dependency_t *get_deps_dialog(const param_export_t *param)
+{
+	return get_deps_module(param, "dialog");
+}
+
+static module_dependency_t *get_deps_compression(const param_export_t *param)
+{
+	return get_deps_module(param, "compression");
 }
 
 static const dep_export_t deps = {
@@ -103,7 +112,8 @@ static const dep_export_t deps = {
 		{ MOD_TYPE_NULL, NULL, 0 },
 	},
 	{ /* modparam dependencies */
-		{ "force_dialog",		get_deps_dialog },
+		{ "force_dialog",		            get_deps_dialog },
+		{ "th_no_dlg_use_compression",		get_deps_compression },
 		{ NULL, NULL },
 	},
 };
@@ -199,9 +209,8 @@ static int mod_init(void)
 		return -1;
 	}
 
-	compression_api_loaded = load_compression_api(&compression_api);
-	if (compression_api_loaded != 0) {
-		LM_WARN("failed to load compression API\n");
+	if (topo_hiding_load_compression_api_no_dlg(th_no_dlg_use_compression) != 0) {
+		return -1;
 	}
 
 	return 0;
