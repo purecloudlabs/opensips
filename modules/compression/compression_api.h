@@ -25,16 +25,11 @@
 
 #include "../../sr_module.h"
 
-typedef enum {
-	SH_MEM,
-	PKG_MEM,
-	STATIC_MEM
-} str_buffer_type;
 
 typedef int (*compress_t)(unsigned char* in, unsigned long ilen, str* out,
-		unsigned long* olen, int level, str_buffer_type buffer_type);
+		unsigned long* olen, int level);
 typedef int (*decompress_t)(unsigned char* in, unsigned long ilen, str* out,
-		unsigned long* olen, str_buffer_type buffer_type);
+		unsigned long* olen);
 typedef int (*check_rc_t)(int rc);
 
 typedef struct compression_api {

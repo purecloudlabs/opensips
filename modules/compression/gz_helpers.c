@@ -25,21 +25,13 @@
 #include <string.h>
 #include "zlib.h"
 
-#include "gz_helpers.h"
+#include "compression_helpers.h"
 #include "../../ut.h"
-
-static inline int is_gzip_compressed(int len, unsigned char data[static len]) {
-    if (len < 3)
-        return 0;
-
-    return (data[0] == 0x1f && data[1] == 0x8b && data[2] == 0x08);
-}
-
 
 /*
  *
  */
-int gzip_compress(unsigned char* in, unsigned long ilen, str* out, unsigned long* olen, int level, str_buffer_type buffer_type)
+int gzip_compress(unsigned char* in, unsigned long ilen, str* out, unsigned long* olen, int level)
 {
 	z_stream zlibStream;
 	int rc, neededSize;
@@ -85,19 +77,15 @@ int gzip_compress(unsigned char* in, unsigned long ilen, str* out, unsigned long
 	neededSize = (int)((float)ilen * 1.1 + 12);
 
 	if (!out->s) {
-		if (buffer_type != STATIC_MEM) {
-			out->s = buffer_type == PKG_MEM ? pkg_malloc(neededSize) : shm_malloc(neededSize);
-			out->len = neededSize;
-			if (!out->s)
-				goto memerr;
-		}
+		out->s = pkg_malloc(neededSize);
+		out->len = neededSize;
+		if (!out->s)
+			goto memerr;
 	} else if (ilen > out->len) {
-		if (buffer_type != STATIC_MEM) {
-			out->s = buffer_type == PKG_MEM ? pkg_realloc(out->s, neededSize) : shm_realloc(out->s, neededSize);
-			out->len = neededSize;
-			if (!out->s)
-				goto memerr;
-		}
+		out->s = pkg_realloc(out->s, neededSize);
+		out->len = neededSize;
+		if (!out->s)
+			goto memerr;
 	}
 
 	do {
@@ -117,14 +105,22 @@ int gzip_compress(unsigned char* in, unsigned long ilen, str* out, unsigned long
 
 	return Z_OK;
 memerr:
-	LM_ERR("no more mem\n");
+	LM_ERR("no more pkg mem\n");
 	return -1;
+}
+
+static inline int is_gzip_compressed(unsigned char *data, int len)
+{
+    if (len < 3)
+        return 0;
+    
+    return (data[0] == 0x1f && data[1] == 0x8b && data[2] == 0x08);
 }
 
 /*
  *
  */
-int gzip_uncompress(unsigned char* in, unsigned long ilen, str* out, unsigned long* olen, str_buffer_type buffer_type)
+int gzip_uncompress(unsigned char* in, unsigned long ilen, str* out, unsigned long* olen)
 {
 	z_stream zlibStream;
 	int rc, neededSize;
@@ -134,8 +130,8 @@ int gzip_uncompress(unsigned char* in, unsigned long ilen, str* out, unsigned lo
 		return -1;
 	}
 
-	if (is_gzip_compressed(ilen, in) != 1) {
-		LM_ERR("Not compressed by gzip\n");
+	if (is_gzip_compressed(in, ilen) != 1) {
+		LM_ERR("Not gzip decompressable\n");
 		return -1;
 	}
 
@@ -161,25 +157,15 @@ int gzip_uncompress(unsigned char* in, unsigned long ilen, str* out, unsigned lo
 		return rc;
 
 	if (!out->s) {
-		if (buffer_type != STATIC_MEM) {
-			out->s = buffer_type == PKG_MEM ? pkg_malloc(neededSize) : shm_malloc(neededSize);
-			out->len = neededSize;
-			if (!out->s)
-				goto memerr;
-		} else {
-			LM_ERR("Static buffer is NULL\n");
-			return -1;
-		}
-	} else if (ilen > out->len) {
-		if (buffer_type != STATIC_MEM) {
-			out->s = buffer_type == PKG_MEM ? pkg_realloc(out->s, neededSize) : shm_realloc(out->s, neededSize);
-			out->len = neededSize;
-			if (!out->s)
-				goto memerr;
-		} else {
-			LM_ERR("Static buffer is not large enough input len %lu greater than static buffer %d\n", ilen, out->len);
-			return -1;
-		}
+		out->s = pkg_malloc(neededSize);
+		out->len = neededSize;
+		if (!out->s)
+			goto memerr;
+	} else if (*olen > out->len) {
+		out->s = pkg_realloc(out->s, neededSize);
+		out->len = neededSize;
+		if (!out->s)
+			goto memerr;
 	}
 
 	zlibStream.avail_in = ilen;
@@ -207,6 +193,6 @@ int gzip_uncompress(unsigned char* in, unsigned long ilen, str* out, unsigned lo
 	return Z_OK;
 memerr:
 	inflateEnd(&zlibStream);
-	LM_ERR("no more mem\n");
+	LM_ERR("no more pkg mem\n");
 	return -1;
 }

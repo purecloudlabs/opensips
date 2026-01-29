@@ -403,7 +403,7 @@ int unpack_hepv3(char *buf, int len, struct hep_desc *h)
 						(h3.payload_chunk.chunk.length - sizeof(hep_chunk_t));
 
 				rc=compression_api.decompress(compressed_payload, compress_len,
-								&decompressed_payload, &decompress_len, PKG_MEM);
+								&decompressed_payload, &decompress_len);
 
 
 				if (compression_api.check_rc(rc)) {
@@ -1073,7 +1073,7 @@ static trace_message create_hep3_message(union sockaddr_union* from_su, union so
 		} else {
 		/* compress the payload if requested */
 			rc=compression_api.compress((unsigned char*)payload->s, (unsigned long)payload->len,
-					&compressed_payload, &compress_len, compression_api.level, PKG_MEM);
+					&compressed_payload, &compress_len, compression_api.level);
 			if (compression_api.check_rc(rc)==0) {
 				payload->len = (int)compress_len;
 				/* we don't need the payload pointer in this function */

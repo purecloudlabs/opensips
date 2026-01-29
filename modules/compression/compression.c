@@ -1340,8 +1340,7 @@ only_body:
 					(unsigned long)buf2compress.len,
 					&body_out,
 					&temp,
-					mc_level,
-				    STATIC_MEM);
+					mc_level);
 
 			if (check_zlib_rc(rc)) {
 				LM_ERR("Body compression failed\n");
@@ -1358,8 +1357,7 @@ only_body:
 					(unsigned long)hdr_buf2compress.len,
 					&hdr_out,
 					&temp,
-					mc_level,
-					STATIC_MEM);
+					mc_level);
 
 			if (check_zlib_rc(rc)) {
 				LM_ERR("Header compression failed\n");
@@ -1855,8 +1853,7 @@ static int mc_decompress(struct sip_msg* msg)
 					(unsigned char*)hdr_b64_decode.s,
 					(unsigned long)hdr_b64_decode.len,
 					&hdr_out,
-					&temp,
-					STATIC_MEM);
+					&temp);
 
 			if (check_zlib_rc(rc)) {
 				LM_ERR("header decompression failed\n");
@@ -1896,8 +1893,7 @@ static int mc_decompress(struct sip_msg* msg)
 					(unsigned char*)b64_decode.s,
 					(unsigned long)b64_decode.len,
 					&body_out,
-					&temp,
-					STATIC_MEM);
+					&temp);
 
 			if (check_zlib_rc(rc)) {
 				LM_ERR("body decompression failed\n");

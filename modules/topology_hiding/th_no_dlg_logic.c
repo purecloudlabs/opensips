@@ -29,7 +29,13 @@
 #include "../compression/compression_api.h"
 #include <string.h>
 
-#define DEC_BUF_SIZE 1000
+#define START_THINFO_BUF_SZ 1000
+#define THINFO_MAX_BUFFER_SIZE 10000
+
+typedef struct {
+	str input;
+	str output;
+} topology_buffer;
 
 #define TOPOH_MATCH_SUCCESS         1
 #define TOPOH_MATCH_FAILURE        -1
@@ -46,31 +52,31 @@ extern struct tm_binds tm_api;
 extern struct rr_binds rr_api;
 static compression_api_t compression_api;
 
+static int compression_enabled;
+static topology_buffer th_buffer;
+
 extern int th_ct_enc_scheme;
 extern str topo_hiding_ct_encode_pw;
 extern str th_contact_encode_param;
 extern str th_internal_trusted_tag;
+extern str th_is_self_socket_tag;
 
 extern struct th_ct_params *th_param_list;
 extern struct th_ct_params *th_hdr_param_list;
 
-typedef unsigned char* (*encode_t)(unsigned char plain_data[static DEC_BUF_SIZE], unsigned long plain_len, unsigned long *out_len);
-typedef unsigned char* (*decode_t)(unsigned char enc_data[static DEC_BUF_SIZE], unsigned long enc_len, unsigned long *out_len);
+/* compression API support function signatures start */
+static inline unsigned char* th_no_dlg_compress_and_encode(topology_buffer th_buffer[static 1], unsigned long input_len, unsigned long *out_len);
+static inline unsigned char* th_no_dlg_decode_and_decompress(topology_buffer th_buffer[static 1], unsigned long input_len, unsigned long *out_len);
+/* compression API support function signatures end */
 
-encode_t _compress_and_encode = NULL;
-decode_t _decode_and_decompress = NULL;
-
-static inline int th_no_dlg_one_way_hiding(struct socket_info *socket);
 static int th_no_dlg_encode_contact(struct sip_msg *msg, unsigned int flags, str *routes, unsigned int rrs_to_ignore);
 static int th_no_dlg_rebuild_record_routes(size_t route_sets_size, str *routes[static route_sets_size], struct lump* lmp);
 static void th_no_dlg_onrequest(struct cell *t, int type, struct tmcb_params *param);
 static inline int _th_no_dlg_onrequest(struct sip_msg *req, union sockaddr_union *su, int proto, unsigned int flags);
 static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *param);
 static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info);
-static inline unsigned char* th_no_dlg_compress_and_encode(unsigned char plain_data[static DEC_BUF_SIZE], unsigned long plain_len, unsigned long *out_len);
-static inline unsigned char* th_no_dlg_decode_and_decompress(unsigned char enc_data[static DEC_BUF_SIZE], unsigned long enc_len, unsigned long *out_len);
-static inline unsigned char* th_no_dlg_encode(unsigned char input_data[static DEC_BUF_SIZE], unsigned long input_len, unsigned long *out_len);
-static inline unsigned char* th_no_dlg_decode(unsigned char input_data[static DEC_BUF_SIZE], unsigned long input_len, unsigned long *out_len);
+static inline int th_no_dlg_one_way_hiding(struct socket_info *socket);
+static inline int th_no_dlg_check_self_socket_tag(struct socket_info *socket);
 
 int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_flags) {
 	union sockaddr_union su;
@@ -122,7 +128,8 @@ int topo_hiding_match_no_dlg(struct sip_msg *msg) {
 
 	r_uri = &msg->parsed_uri;
 
-	if (check_self(&r_uri->host,r_uri->port_no ? r_uri->port_no : SIP_PORT, 0) == 1 && msg->route == NULL) {
+	if ((th_no_dlg_check_self_socket_tag(msg->rcv.bind_address) ||
+		 check_self(&r_uri->host,r_uri->port_no ? r_uri->port_no : SIP_PORT, 0)) && msg->route == NULL) {
 		/* topology_hiding_match with thinfo and request domain is us
 		 * needs to have a thinfo to continue otherwise we cannot match */
 		for (i = 0; i < r_uri->u_params_no; i++) {
@@ -145,7 +152,7 @@ int topo_hiding_match_no_dlg(struct sip_msg *msg) {
 					return TOPOH_MATCH_FAILURE;
 				}
 
-				if (check_self(&rr_uri.host, rr_uri.port_no ? rr_uri.port_no : SIP_PORT, 0) == 0) {
+				if (!check_self(&rr_uri.host, rr_uri.port_no ? rr_uri.port_no : SIP_PORT, 0)) {
 					LM_DBG("Route header not us, skip checking the next one\n");
 					return TOPOH_MATCH_FAILURE;
 				}
@@ -162,20 +169,37 @@ int topo_hiding_match_no_dlg(struct sip_msg *msg) {
 	return TOPOH_MATCH_FAILURE;
 }
 
-int topo_hiding_load_compression_api_no_dlg(int use_compression_api) {
-	if (use_compression_api == 0) {
-		_compress_and_encode = th_no_dlg_encode;
-		_decode_and_decompress = th_no_dlg_decode;
+int topo_hiding_init_no_dlg(int use_compression_api) {
+	th_buffer.input.s = pkg_malloc(START_THINFO_BUF_SZ);
+	th_buffer.output.s = pkg_malloc(START_THINFO_BUF_SZ);
 
+	if (th_buffer.input.s == NULL || th_buffer.output.s == NULL) {
+		LM_ERR("Error creating thinfo input/output buffer\n");
+		return -1;
+	}
+
+	th_buffer.input.len = START_THINFO_BUF_SZ;
+	th_buffer.output.len = START_THINFO_BUF_SZ;
+
+	if (use_compression_api == 0) {
 		LM_DBG("Not using the compression API\n");
 
 		return 0;
 	} else {
-		_compress_and_encode = th_no_dlg_compress_and_encode;
-		_decode_and_decompress = th_no_dlg_decode_and_decompress;
-
-		return load_compression_api(&compression_api);
+		compression_enabled = load_compression_api(&compression_api) == 0;
 	}
+
+	return compression_enabled;
+}
+
+int topo_hiding_destroy_no_dlg(void) {
+	if (th_buffer.input.s)
+		pkg_free(th_buffer.input.s);
+
+	if (th_buffer.output.s)
+		pkg_free(th_buffer.output.s);
+
+	return 0;
 }
 
 static int th_no_dlg_rebuild_record_routes(size_t route_sets_size, str *routes[static route_sets_size], struct lump* lmp) {
@@ -332,7 +356,7 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, union sockaddr_union
 	/* parse all headers to be sure that all RR and Contact hdrs are found */
 	if (parse_headers(req, HDR_EOH_F, 0) >= 0) {
 		send_sock = get_send_socket(req, su, proto);
-		if (th_no_dlg_one_way_hiding(send_sock) == 0) {
+		if (!th_no_dlg_one_way_hiding(send_sock)) {
 			if (topo_delete_record_routes(req) < 0) {
 				LM_ERR("Failed to remove Record Route header \n");
 				return -1;
@@ -355,46 +379,65 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, union sockaddr_union
 	return 1;
 }
 
+static inline int th_no_dlg_realloc_input_buffer(topology_buffer topology_buffer[static 1], int new_size) {
+	char *new_buf;
+
+	if (new_size > THINFO_MAX_BUFFER_SIZE) {
+		LM_ERR("Buffer to be realloc'd from %d larger than max size allowed %d\n", 
+		       new_size, THINFO_MAX_BUFFER_SIZE);
+		return -1;
+	}
+
+	new_buf = pkg_realloc(topology_buffer->input.s, new_size);
+	if (new_buf == NULL) {
+		LM_ERR("failed to reallocate buffer to %d bytes\n", new_size);
+		return -1;
+	}
+
+	topology_buffer->input.s = new_buf;
+	topology_buffer->input.len = new_size;
+
+	return 0;
+}
+
 #define HAS_NO_CONTACT_BODY(_m) (((contact_body_t *) ((_m)->contact->parsed))->contacts == NULL || \
                               ((contact_body_t *) ((_m)->contact->parsed))->contacts->next != NULL)
 
 /* We encode the RR headers, the actual Contact and the socket str for this leg */
 /* Via headers will be restored using the TM module, no need to save anything for them */
 static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsigned int rrs_to_ignore, int *suffix_len, int flags) {
-	short rr_len,ct_len,addr_len,flags_len,enc_len;
-	char *suffix_enc,*p,*s;
-	static char suffix_plain[DEC_BUF_SIZE];
+	short rr_len, ct_len, addr_len, flags_len, enc_len;
+	char *suffix_enc = NULL, *p, *s;
+	char *encoding_buffer = th_buffer.input.s;
 	unsigned char *encoded;
-	str rr_set = {NULL, 0};
-	str contact;
-	str flags_str;
-	int i,total_len;
+	str rr_set = STR_NULL, contact = STR_NULL, flags_str = STR_NULL;
+	int i, total_len = 0, params_len = 0;
 	struct sip_uri ctu;
 	struct th_ct_params* el;
 	param_t *it;
-	unsigned long plain_len, encoded_len;
-	int is_req = (msg->first_line.type == SIP_REQUEST)?1:0;
+	unsigned long plain_len, compressed_encoded_len;
+	int is_req = (msg->first_line.type == SIP_REQUEST) ? 1 : 0;
 	int local_len = sizeof(short) /* RR length */ +
-			sizeof(short) /* Contact length */ +
-			sizeof(short) /* Flags length */ +
-			sizeof(short) /* bind addr */;
+					sizeof(short) /* Contact length */ +
+					sizeof(short) /* Flags length */ +
+					sizeof(short) /* bind addr */;
 
 	/* parse all headers as we can have multiple
 	   RR headers in the same message */
-	if( parse_headers(msg,HDR_EOH_F,0)<0 ){
+	if (parse_headers(msg,HDR_EOH_F, 0)<0 ){
 		LM_ERR("failed to parse all headers\n");
 		return NULL;
 	}
 
 	if (routes) {
 		rr_set = *routes;
-		rr_len = (short)routes->len;
-	} else if(msg->record_route){
+		rr_len = (short) routes->len;
+	} else if(msg->record_route) {
 		if (print_rr_body(msg->record_route, &rr_set, !is_req, 0, &rrs_to_ignore) != 0){
 			LM_ERR("failed to print route records \n");
 			return NULL;
 		}
-		rr_len = (short)rr_set.len;
+		rr_len = (short) rr_set.len;
 	} else {
 		rr_len = 0;
 	}
@@ -412,24 +455,19 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 	}
 
 	flags_str.s = int2str(flags, &flags_str.len);
-	flags_len = (short)flags_str.len;
+	flags_len = (short) flags_str.len;
 	
-	addr_len = (short)msg->rcv.bind_address->sock_str.len;
+	addr_len = (short) msg->rcv.bind_address->sock_str.len;
 	local_len += rr_len + ct_len + flags_len + addr_len;
 	enc_len = th_ct_enc_scheme == ENC_BASE64 ?
 		calc_word64_encode_len(local_len) : calc_word32_encode_len(local_len);
-	total_len = enc_len +
-		1 /* ; */ +
-		th_contact_encode_param.len +
-		1 /* = */  +
-		1 /* > */;
 
 	if (th_param_list) {
 		for (el = th_param_list; el; el = el->next) {
 			/* we just iterate over the unknown params */
 			for (i = 0; i < ctu.u_params_no; i++) {
 				if (str_match(&el->param_name, &ctu.u_name[i]))
-					total_len += topo_ct_param_len(&ctu.u_name[i], &ctu.u_val[i], 0);
+					params_len += topo_ct_param_len(&ctu.u_name[i], &ctu.u_val[i], 0);
 			}
 		}
 	}
@@ -438,61 +476,79 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 		for (el = th_hdr_param_list; el; el = el->next) {
 			for (it = ((contact_body_t *)msg->contact->parsed)->contacts->params; it; it = it->next) {
 				if (str_match(&el->param_name, &it->name))
-					total_len += topo_ct_param_len(&it->name, &it->body, 1);
+					params_len += topo_ct_param_len(&it->name, &it->body, 1);
 			}
 		}
 	}
 
-	suffix_enc = pkg_malloc(total_len+1);
-	if (!suffix_enc) {
-		LM_ERR("no more pkg\n");
+	if (local_len > th_buffer.input.len || th_no_dlg_realloc_input_buffer(&th_buffer, local_len) == -1) {
 		goto error;
 	}
 
-	p = suffix_plain;
-	memcpy(p,&rr_len,sizeof(short));
-	p+= sizeof(short);
+	encoding_buffer = th_buffer.input.s;
+
+	p = encoding_buffer;
+	memcpy(p, &rr_len, sizeof(short));
+	p += sizeof(short);
 	if (rr_len) {
-		memcpy(p,rr_set.s,rr_set.len);
+		memcpy(p, rr_set.s, rr_set.len);
 		p+= rr_set.len;
 	}
-	memcpy(p,&ct_len,sizeof(short));
-	p+= sizeof(short);
+
+	memcpy(p, &ct_len, sizeof(short));
+	p += sizeof(short);
 	if (ct_len) {
-		memcpy(p,contact.s,contact.len);
+		memcpy(p, contact.s, contact.len);
 		p+= contact.len;
 	}
-	memcpy(p,&flags_len,sizeof(short));
-	p+= sizeof(short);
-	memcpy(p,flags_str.s, flags_str.len);
-	p+= flags_str.len;
-	memcpy(p,&addr_len,sizeof(short));
-	p+= sizeof(short);
-	memcpy(p,msg->rcv.bind_address->sock_str.s,msg->rcv.bind_address->sock_str.len);
-	p+= msg->rcv.bind_address->sock_str.len;
 
-	plain_len = p - suffix_plain;
-	encoded = _compress_and_encode((unsigned char*)suffix_plain,
-	                               plain_len, &encoded_len);
+	memcpy(p, &flags_len, sizeof(short));
+	p += sizeof(short);
+
+	memcpy(p,flags_str.s, flags_str.len);
+	p += flags_str.len;
+
+	memcpy(p, &addr_len, sizeof(short));
+	p += sizeof(short);
+
+	memcpy(p, msg->rcv.bind_address->sock_str.s, msg->rcv.bind_address->sock_str.len);
+	p += msg->rcv.bind_address->sock_str.len;
+
+	plain_len = p - encoding_buffer;
+	encoded = th_no_dlg_compress_and_encode(&th_buffer, plain_len, &compressed_encoded_len);
 	if (!encoded) {
 		LM_ERR("failed to compress and encode\n");
 		goto error;
 	}
 
 	enc_len = th_ct_enc_scheme == ENC_BASE64 ?
-		calc_word64_encode_len(encoded_len) : calc_word32_encode_len(encoded_len);
+		calc_word64_encode_len(compressed_encoded_len) : calc_word32_encode_len(compressed_encoded_len);
+
+	total_len = enc_len +
+				params_len +
+			    1 /* ; */ +
+				th_contact_encode_param.len +
+				1 /* = */  +
+				1 /* > */;
+
+	suffix_enc = pkg_malloc(total_len + 1);
+	if (!suffix_enc) {
+		LM_ERR("no more pkg\n");
+		goto error;
+	}
 
 	s = suffix_enc;
 	*s++ = ';';
-	memcpy(s,th_contact_encode_param.s,th_contact_encode_param.len);
+	memcpy(s, th_contact_encode_param.s, th_contact_encode_param.len);
 	s+= th_contact_encode_param.len;
 	*s++ = '=';
-	if (th_ct_enc_scheme == ENC_BASE64)
-		word64encode((unsigned char*)s, encoded, encoded_len);
-	else
-		word32encode((unsigned char*)s, encoded, encoded_len);
 
-	s = s+enc_len;
+	if (th_ct_enc_scheme == ENC_BASE64)
+		word64encode((unsigned char*)s, encoded, compressed_encoded_len);
+	else
+		word32encode((unsigned char*)s, encoded, compressed_encoded_len);
+
+	s = s + enc_len;
 
 	if (th_param_list) {
 		for (el = th_param_list; el; el = el->next) {
@@ -503,6 +559,7 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 			}
 		}
 	}
+
 	*s++ = '>';
 	if (th_hdr_param_list) {
 		for (el = th_hdr_param_list; el; el = el->next) {
@@ -515,27 +572,30 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 
 	if (rr_set.s && !routes)
 		pkg_free(rr_set.s);
+
 	*suffix_len = s - suffix_enc;
 	return suffix_enc;
 error:
-	if (rr_set.s)
+	if (rr_set.s && !routes)
 		pkg_free(rr_set.s);
+	if (suffix_enc)
+		pkg_free(suffix_enc);
 	return NULL;
 }
 
 static int th_no_dlg_encode_contact(struct sip_msg *msg, unsigned int flags, str *routes, unsigned int rrs_to_ignore) {
 	struct lump* lump;
-	char *prefix=NULL,*suffix=NULL,*ct_username=NULL;
-	int prefix_len,suffix_len = 0,ct_username_len=0;
+	char *prefix = NULL,*suffix = NULL,*ct_username = NULL;
+	int prefix_len, suffix_len = 0, ct_username_len = 0;
 	struct sip_uri ctu;
 	str contact;
 
-	if(!msg->contact) {
+	if (!msg->contact) {
 		if(parse_headers(msg, HDR_CONTACT_F, 0)< 0) {
 			LM_ERR("Failed to parse headers\n");
 			return -1;
 		}
-		if(!msg->contact)
+		if (!msg->contact)
 			return 0;
 	}
 
@@ -548,13 +608,11 @@ static int th_no_dlg_encode_contact(struct sip_msg *msg, unsigned int flags, str
 
 	prefix_len = 5; /* <sip: */
 	if (flags & TOPOH_KEEP_USER) {
-		if ( parse_contact(msg->contact)<0 ||
-			((contact_body_t *)msg->contact->parsed)->contacts==NULL ||
-			((contact_body_t *)msg->contact->parsed)->contacts->next!=NULL ) {
-				LM_ERR("bad Contact HDR\n");
+		if (parse_contact(msg->contact)  <0 || HAS_NO_CONTACT_BODY(msg)) {
+			LM_ERR("bad Contact HDR\n");
 		} else {
 			contact = ((contact_body_t *)msg->contact->parsed)->contacts->uri;
-			if(parse_uri(contact.s, contact.len, &ctu) < 0) {
+			if (parse_uri(contact.s, contact.len, &ctu) < 0) {
 				LM_ERR("Bad Contact URI\n");
 			} else {
 				ct_username = ctu.user.s;
@@ -578,7 +636,7 @@ static int th_no_dlg_encode_contact(struct sip_msg *msg, unsigned int flags, str
 		prefix[prefix_len-1] = '@';
 	}
 
-	if (!(lump = insert_new_lump_after(lump,prefix,prefix_len,0))) {
+	if (!(lump = insert_new_lump_after(lump, prefix, prefix_len,0))) {
 		LM_ERR("failed inserting '<sip:'\n");
 		goto error;
 	}
@@ -595,7 +653,7 @@ static int th_no_dlg_encode_contact(struct sip_msg *msg, unsigned int flags, str
 		goto error;
 	}
 
-	if (!(lump = insert_new_lump_after(lump,suffix,suffix_len,0))) {
+	if (!(lump = insert_new_lump_after(lump, suffix,suffix_len, 0))) {
 		LM_ERR("failed inserting '<sip:'\n");
 		goto error;
 	}
@@ -713,13 +771,13 @@ static inline int topo_no_dlg_strict_route(struct sip_msg *msg, const str rr_buf
 			return RR_FREE_HEAD;
 		}
 
-		memcpy(route,ROUTE_STR,ROUTE_LEN);
-		memcpy(route+ROUTE_LEN, hdrs, rr_buf->len - head->len-1);
-		memcpy(route + ROUTE_LEN + rr_buf->len - head->len-1, CRLF, CRLF_LEN);
+		memcpy(route, ROUTE_STR, ROUTE_LEN);
+		memcpy(route + ROUTE_LEN, hdrs, rr_buf->len - head->len - 1);
+		memcpy(route + ROUTE_LEN + rr_buf->len - head->len - 1, CRLF, CRLF_LEN);
 
 		LM_DBG("Adding Route header : [%.*s] \n",size,route);
 
-		if ((lmp = insert_new_lump_after(lmp,route,size,HDR_ROUTE_T)) == 0) {
+		if ((lmp = insert_new_lump_after(lmp, route,size, HDR_ROUTE_T)) == 0) {
 			LM_ERR("failed inserting new route set\n");
 			return RR_FREE_ROUTE;
 		}
@@ -729,7 +787,7 @@ static inline int topo_no_dlg_strict_route(struct sip_msg *msg, const str rr_buf
 	}
 
 	if (lmp == NULL) {
-		lmp = anchor_lump(msg,msg->headers->name.s - buf,0);
+		lmp = anchor_lump(msg, msg->headers->name.s - buf,0);
 		if (lmp == 0) {
 			LM_ERR("failed anchoring new lump\n");
 			return RR_FAILURE;
@@ -740,23 +798,17 @@ static inline int topo_no_dlg_strict_route(struct sip_msg *msg, const str rr_buf
 }
 
 static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
-	static char dec_buf_static[DEC_BUF_SIZE];
-	int max_size, size;
-	unsigned int flags;
-	char *dec_buf, *p, *route=NULL, *remote_contact;
+	int i, max_size, size, route_rc, port, proto, next_strict = 0;
+	char *p = NULL, *route = NULL, *remote_contact = NULL, *decode_buffer = NULL, *msg_buf = NULL;
+	str rr_buf, ct_buf, flags_buf, bind_buf, host, route_buf;
 	struct hdr_field *it;
-	str rr_buf, ct_buf, flags_buf, bind_buf;
 	rr_t *head = NULL;
-	int next_strict = 0;
 	struct sip_uri fru;
-	char* buf = msg->buf;
 	struct lump* lmp = NULL;
-	str host;
-	int port, proto;
 	struct socket_info *sock = NULL;
-	str *route_s = NULL, route_buf = {0, 0};
-	int route_rc;
+	str *route_s = NULL;
 	unsigned long dec_len = 0;
+	unsigned int flags;
 
 	/* parse all headers to be sure that all RR and Contact hdrs are found */
 	if (parse_headers(msg, HDR_EOH_F, 0)< 0) {
@@ -764,9 +816,11 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 		return TOPOH_MATCH_FAILURE;
 	}
 
+	msg_buf = msg->buf;
+
 	/* delete record route, shouldn't have a record-route here anyway */
-	for (it=msg->record_route;it;it=it->sibling) {
-		if (del_lump(msg, it->name.s - buf, it->len, 0) == 0) {
+	for (it = msg->record_route; it; it = it->sibling) {
+		if (del_lump(msg, it->name.s - msg_buf, it->len, 0) == 0) {
 			LM_ERR("del_lump failed\n");
 			return TOPOH_MATCH_FAILURE;
 		}
@@ -776,30 +830,24 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 		calc_max_word64_decode_len(info->len) :
 		calc_max_word32_decode_len(info->len);
 	
-	if (max_size > sizeof(dec_buf_static)) {
-		LM_ERR("Decoded buffer too large: %d > %zu\n", max_size, sizeof(dec_buf_static));
+	LM_DBG("Max Size of decoded length %d\n", max_size);
+	if (max_size > th_buffer.input.len && th_no_dlg_realloc_input_buffer(&th_buffer, max_size) != 0) {
 		return -1;
 	}
-	
-	dec_buf = dec_buf_static;
 
 	if (th_ct_enc_scheme == ENC_BASE64)
-		dec_len = word64decode((unsigned char *)dec_buf,
-			(unsigned char *)info->s,info->len);
+		dec_len = word64decode((unsigned char *) th_buffer.input.s,
+			(unsigned char *)info->s, info->len);
 	else
-		dec_len = word32decode((unsigned char *)dec_buf,
-			(unsigned char *)info->s,info->len);
+		dec_len = word32decode((unsigned char *) th_buffer.input.s,
+			(unsigned char *)info->s, info->len);
 	
 	if (dec_len <= 0) {
 		LM_ERR("Failed to decode\n");
 		return -1;
 	}
 	
-	if (_decode_and_decompress((unsigned char *)dec_buf, dec_len, &dec_len) < 0) {
-		LM_ERR("failed to decrypt and decompress\n");
-		dec_len = 0;
-		return -1;
-	}
+	decode_buffer = (char *) th_no_dlg_decode_and_decompress(&th_buffer, dec_len, &dec_len);
 
 	#define __extract_len_and_buf(_p, _len, _s) \
 		do { \
@@ -813,7 +861,7 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 			_len -= sizeof(short) + (_s).len;\
 		} while(0)
 
-	p = dec_buf;
+	p = decode_buffer;
 	size = dec_len;
 	__extract_len_and_buf(p, size, rr_buf);
 	__extract_len_and_buf(p, size, ct_buf);
@@ -821,7 +869,7 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 	__extract_len_and_buf(p, size, bind_buf);
 
 	LM_DBG("extracted routes [%.*s] , ct [%.*s] , flags [%.*s] and bind [%.*s]\n",
-		rr_buf.len,rr_buf.s,ct_buf.len,ct_buf.s,flags_buf.len,flags_buf.s,bind_buf.len,bind_buf.s);
+		rr_buf.len, rr_buf.s, ct_buf.len, ct_buf.s, flags_buf.len, flags_buf.s, bind_buf.len, bind_buf.s);
 
 	if (rr_buf.len) {
 		if (parse_rr_body(rr_buf.s,rr_buf.len,&head) != 0) {
@@ -866,7 +914,7 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 			for (it = msg->route; it; it = it->sibling) {
 				if (it->parsed && ((rr_t*)it->parsed)->deleted)
 					continue;
-				if ((lmp = del_lump(msg,it->name.s - buf,it->len,HDR_ROUTE_T)) == 0) {
+				if ((lmp = del_lump(msg,it->name.s - msg_buf,it->len,HDR_ROUTE_T)) == 0) {
 					LM_ERR("del_lump failed \n");
 					goto err_free_head;
 				}
@@ -888,10 +936,10 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 	} else {
 		LM_DBG("Fixing message. Next hop is Strict router\n");
 		if (msg->route) {
-			for (it=msg->route;it;it=it->sibling) {
+			for (it = msg->route; it; it = it->sibling) {
 				if (it->parsed && ((rr_t*)it->parsed)->deleted)
 					continue;
-				if ((lmp = del_lump(msg,it->name.s - buf,it->len,HDR_ROUTE_T)) == 0) {
+				if ((lmp = del_lump(msg,it->name.s - msg_buf,it->len,HDR_ROUTE_T)) == 0) {
 					LM_ERR("del_lump failed \n");
 					goto err_free_head;
 				}
@@ -909,15 +957,15 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 					goto err_free_head;
 				}
 
-				memcpy(remote_contact,ROUTE_PREF,ROUTE_PREF_LEN);
-				memcpy(remote_contact+ROUTE_PREF_LEN,ct_buf.s,ct_buf.len);
-				memcpy(remote_contact+ROUTE_PREF_LEN+ct_buf.len,
-						ROUTE_SUFF,ROUTE_SUFF_LEN);
+				memcpy(remote_contact, ROUTE_PREF,ROUTE_PREF_LEN);
+				memcpy(remote_contact + ROUTE_PREF_LEN, ct_buf.s, ct_buf.len);
+				memcpy(remote_contact + ROUTE_PREF_LEN + ct_buf.len,
+						ROUTE_SUFF, ROUTE_SUFF_LEN);
 
 				LM_DBG("Adding remote contact route header : [%.*s]\n",
 						size,remote_contact);
 
-				if (insert_new_lump_after(lmp,remote_contact,size,HDR_ROUTE_T) == 0) {
+				if (insert_new_lump_after(lmp, remote_contact, size, HDR_ROUTE_T) == 0) {
 					LM_ERR("failed inserting remote contact route\n");
 					pkg_free(remote_contact);
 					goto err_free_head;
@@ -942,12 +990,8 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 		}
 	}
 
-	if (flags_buf.len && flags_buf.s) {
-		if (str2int(&flags_buf, &flags) < 0) {
-			LM_WARN("Failed to convert string to integer, default to no flags\n");
-			flags = 0;
-		}
-	} else {
+	if (str2int(&flags_buf, &flags) < 0) {
+		LM_WARN("Failed to convert string to integer, default to no flags\n");
 		flags = 0;
 	}
 
@@ -955,14 +999,17 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 	/* register tm callback for response in  */
 	if (tm_api.register_tmcb(msg, 0, TMCB_RESPONSE_FWDED, th_no_dlg_onreply, route_s, topo_no_dlg_seq_free) < 0) {
 		LM_ERR("failed to register TMCB\n");
+		goto err_free_route;
 	}
+
+	route_s = NULL;
 
 	if (sock == NULL && bind_buf.len && bind_buf.s) {
 		LM_DBG("forcing send socket for req to [%.*s]\n",bind_buf.len,bind_buf.s);
 		if (parse_phostport(bind_buf.s, bind_buf.len, &host.s, &host.len, &port, &proto) != 0) {
 			LM_ERR("bad socket <%.*s>\n", bind_buf.len, bind_buf.s);
 		} else {
-			sock = grep_sock_info( &host, (unsigned short)port, proto);
+			sock = grep_sock_info(&host, (unsigned short) port, proto);
 			if (!sock) {
 				LM_WARN("non-local socket <%.*s>...ignoring\n", bind_buf.len, bind_buf.s);
 			}
@@ -990,6 +1037,8 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info) {
 err_free_route:
 	if (route)
 		pkg_free(route);
+	if (route_s)
+		shm_free(route_s);
 err_free_head:
 	if (rr_buf.len)
 		free_rr(&head);
@@ -997,103 +1046,90 @@ err_fail_early:
 	return TOPOH_MATCH_FAILURE;
 }
 
-static inline int th_no_dlg_one_way_hiding(struct socket_info *socket) {
-	int one_way_hiding = 0;
-
-	if (socket != NULL && socket->tag.len > 0) {
-		one_way_hiding = socket->tag.len == th_internal_trusted_tag.len
-						 && strncmp(socket->tag.s, th_internal_trusted_tag.s, th_internal_trusted_tag.len) == 0;
-
-		LM_DBG("Socket with tag %.*s has one way hiding: %s\n", 
-			socket->tag.len, socket->tag.s, one_way_hiding == 0 ? "false" : "true");
-	}
-
-	return one_way_hiding;
-}
-
-static inline unsigned char* th_no_dlg_encode(unsigned char input_data[static DEC_BUF_SIZE], unsigned long input_len, unsigned long *out_len) {
+static inline unsigned char* th_no_dlg_encode(unsigned long input_len, unsigned char input_buffer[static input_len]) {
 	int i;
 
 	for (i = 0; i < input_len; i++)
-		input_data[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
+		input_buffer[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
 
-	if (out_len != NULL)
-		*out_len = input_len;
-
-	return input_data;
+	return input_buffer;
 }
 
-static inline unsigned char* th_no_dlg_compress_and_encode(unsigned char plain_data[static DEC_BUF_SIZE], unsigned long plain_len, unsigned long *out_len) {
-	static char result[DEC_BUF_SIZE];
-	str compressed_str = {result, DEC_BUF_SIZE};
+static inline unsigned char* th_no_dlg_compress_and_encode(topology_buffer th_buffer[static 1], unsigned long input_len, unsigned long *out_len) {
+	unsigned char *plain_data = (unsigned char*) th_buffer->input.s;
+	unsigned char *out_data = plain_data;
 	unsigned long compressed_len = 0;
 	int rc;
 
-	rc = compression_api.compress(plain_data,
-								  plain_len, 
-								  &compressed_str,
-	                              &compressed_len,
-								  compression_api.level,
-								  STATIC_MEM);
-
-	if (compressed_len >= plain_len || compression_api.check_rc(rc) != 0) {
-		LM_DBG("Compressed len=%lu plain len=%lu, compress rc=%d\n", 
-		       compressed_len, plain_len, rc);
-		
-		compressed_str.s = (char*) plain_data;
-		*out_len = plain_len;
-	} else {
-		*out_len = compressed_len;
-		
-		LM_DBG("Compressed %lu bytes to %lu bytes (%.1f%%)\n", 
-		       plain_len, compressed_len, (compressed_len * 100.0) / plain_len);
-	}
-
-	return th_no_dlg_encode((unsigned char*) compressed_str.s, *out_len, NULL);
-}
-
-static inline unsigned char* th_no_dlg_decode(unsigned char input_data[static DEC_BUF_SIZE], unsigned long input_len, unsigned long *out_len) {
-	int i;
-
-	if (input_len == 0) {
-		LM_ERR("Input length is 0\n");
-		return NULL;
-	}
-
-	for (i = 0; i < input_len; i++)
-		input_data[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
-
 	*out_len = input_len;
 
-	return input_data;
+	if (compression_enabled) {
+		rc = compression_api.compress(plain_data,
+									  input_len, 
+								  	  &th_buffer->output,
+	                              	  &compressed_len,
+								      compression_api.level);
+
+		if (compressed_len < input_len && compression_api.check_rc(rc) == 0) {
+			LM_DBG("Compressed successful\n");
+
+			*out_len = compressed_len;
+			out_data = (unsigned char*) th_buffer->output.s;
+		}
+	}
+
+	return th_no_dlg_encode(*out_len, out_data);
 }
 
-static inline unsigned char* th_no_dlg_decode_and_decompress(unsigned char enc_data[static DEC_BUF_SIZE], unsigned long enc_len, unsigned long *out_len) {
+static inline unsigned char* th_no_dlg_decode(unsigned long input_len, unsigned char input_buffer[static input_len]) {
+	int i;
+
+	for (i = 0; i < input_len; i++)
+		input_buffer[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
+
+	return input_buffer;
+}
+
+static inline unsigned char* th_no_dlg_decode_and_decompress(topology_buffer th_buffer[static 1], unsigned long input_len, unsigned long *out_len) {
+	unsigned char *input_data = (unsigned char*) th_buffer->input.s;
+	unsigned char *out_data = input_data;
 	unsigned long decompressed_len = 0;
-	static char decompressed_buf[DEC_BUF_SIZE];
-	str decompressed_str = {decompressed_buf, DEC_BUF_SIZE};
 	int rc;
 
-	if (th_no_dlg_decode(enc_data, enc_len, out_len) == NULL) {
-		return NULL;
+	input_data = th_no_dlg_decode(input_len, input_data);
+	*out_len = input_len;
+
+	if (compression_enabled) {
+		rc = compression_api.decompress(input_data, 
+										input_len,
+										&th_buffer->output,
+										&decompressed_len);
+
+		if (compression_api.check_rc(rc) == 0) {
+			*out_len = decompressed_len;
+			
+			LM_DBG("Decompression successful - decompressed len %lu\n", decompressed_len);
+
+			out_data = (unsigned char*) th_buffer->output.s;
+		}
 	}
 
-	rc = compression_api.decompress(enc_data, 
-									enc_len,
-									&decompressed_str,
-									&decompressed_len,
-									STATIC_MEM);
+	return out_data;
+}
 
-	if (compression_api.check_rc(rc) == 0 && decompressed_len < DEC_BUF_SIZE) {
-		*out_len = decompressed_len;
-
-		memcpy(enc_data, decompressed_str.s, decompressed_len);
-		
-		LM_DBG("Decompression successful - decompressed len %lu\n", decompressed_len);
-
-		return enc_data;
+static inline int th_no_dlg_match_socket_tag(struct socket_info *socket, str socket_tag_to_match[static 1]) {
+	if (socket != NULL && socket->tag.len > 0) {
+		return socket->tag.len == socket_tag_to_match->len && 
+		       strncmp(socket->tag.s, socket_tag_to_match->s, socket_tag_to_match->len) == 0;
 	}
 
-	LM_DBG("Decompression failed with rc=%d - using original encoded data\n", rc);
-	return enc_data;
+	return 0;
+}
+
+static inline int th_no_dlg_one_way_hiding(struct socket_info *socket) {
+	return th_no_dlg_match_socket_tag(socket, &th_internal_trusted_tag);
+}
+
+static inline int th_no_dlg_check_self_socket_tag(struct socket_info *socket) {
+	return th_no_dlg_match_socket_tag(socket, &th_is_self_socket_tag);
 }

@@ -44,6 +44,7 @@ str topo_hiding_ct_encode_pw = str_init("ToPoCtPaSS");
 str th_contact_encode_param = str_init("thinfo");
 str th_contact_encode_scheme = str_init("base64");
 str th_internal_trusted_tag = STR_NULL;
+str th_is_self_socket_tag = STR_NULL;
 
 int th_ct_enc_scheme;
 
@@ -75,7 +76,8 @@ static const param_export_t params[] = {
 	{ "th_contact_encode_param",     STR_PARAM, &th_contact_encode_param.s   },
 	{ "th_contact_encode_scheme",    STR_PARAM, &th_contact_encode_scheme.s  },
 	{ "th_internal_trusted_tag",     STR_PARAM, &th_internal_trusted_tag.s   },
-	{ "th_no_dlg_use_compression",   INT_PARAM, &th_no_dlg_use_compression   },
+	{ "th_is_self_socket_tag",       STR_PARAM, &th_is_self_socket_tag.s     },
+	{ "th_no_dlg_use_compression",  INT_PARAM, &th_no_dlg_use_compression   },
 	{0, 0, 0}
 };
 
@@ -168,8 +170,13 @@ static int mod_init(void)
 			"Use 'base64' or 'base32'\n");
 		goto error;
 	}
+
 	if (th_internal_trusted_tag.s) {
 		th_internal_trusted_tag.len = strlen(th_internal_trusted_tag.s);
+	}
+
+	if (th_is_self_socket_tag.s) {
+		th_is_self_socket_tag.len = strlen(th_is_self_socket_tag.s);
 	}
 
 	/* loading dependencies */
@@ -209,7 +216,7 @@ static int mod_init(void)
 		return -1;
 	}
 
-	if (topo_hiding_load_compression_api_no_dlg(th_no_dlg_use_compression) != 0) {
+	if (topo_hiding_init_no_dlg(th_no_dlg_use_compression) < 0) {
 		return -1;
 	}
 
@@ -220,6 +227,7 @@ error:
 
 static void mod_destroy(void)
 {
+	topo_hiding_destroy_no_dlg();
 	return;
 }
 
