@@ -29,7 +29,7 @@ enum encode_scheme {ENC_BASE64, ENC_BASE32};
 
 int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_flags);
 int topo_hiding_match_no_dlg(struct sip_msg *msg);
-int topo_hiding_init_no_dlg(int use_compression_api);
+int topo_hiding_init_no_dlg(int use_rr_api, int use_compression_api);
 int topo_hiding_destroy_no_dlg(void);
 
 #endif

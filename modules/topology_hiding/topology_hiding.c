@@ -32,10 +32,10 @@
 
 struct tm_binds tm_api;
 struct dlg_binds dlg_api;
-struct rr_binds rr_api;
 
 int force_dialog = 0;
-int th_no_dlg_use_compression = 0;
+int th_use_compression = 0;
+int th_use_rr = 0;
 str topo_hiding_ct_params = {0,0};
 str topo_hiding_ct_hdr_params = {0,0};
 str topo_hiding_prefix = str_init("DLGCH_");
@@ -77,7 +77,8 @@ static const param_export_t params[] = {
 	{ "th_contact_encode_scheme",    STR_PARAM, &th_contact_encode_scheme.s  },
 	{ "th_internal_trusted_tag",     STR_PARAM, &th_internal_trusted_tag.s   },
 	{ "th_is_self_socket_tag",       STR_PARAM, &th_is_self_socket_tag.s     },
-	{ "th_no_dlg_use_compression",  INT_PARAM, &th_no_dlg_use_compression   },
+	{ "th_use_compression",          INT_PARAM, &th_use_compression          },
+	{ "th_use_rr",                   INT_PARAM, &th_use_rr                   },
 	{0, 0, 0}
 };
 
@@ -87,35 +88,26 @@ static const pv_export_t pvars[] = {
 	{ {0, 0}, 0, 0, 0, 0, 0, 0, 0 }
 };
 
-static inline module_dependency_t *get_deps_module(const param_export_t *param, char *mod_name)
-{
-	int load_module = *(int *)param->param_pointer;
-
-	if (load_module == 0)
-		return NULL;
-
-	return alloc_module_dep(MOD_TYPE_DEFAULT, mod_name, DEP_ABORT);
-}
-
 static module_dependency_t *get_deps_dialog(const param_export_t *param)
 {
-	return get_deps_module(param, "dialog");
-}
+	int force = *(int *)param->param_pointer;
 
-static module_dependency_t *get_deps_compression(const param_export_t *param)
-{
-	return get_deps_module(param, "compression");
+	if (force == 0)
+		return NULL;
+
+	return alloc_module_dep(MOD_TYPE_DEFAULT, "dialog", DEP_ABORT);
 }
 
 static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
-		{ MOD_TYPE_DEFAULT, "tm", DEP_ABORT },
-		{ MOD_TYPE_DEFAULT, "dialog", DEP_SILENT },
+		{ MOD_TYPE_DEFAULT, "tm",          DEP_ABORT  },
+		{ MOD_TYPE_DEFAULT, "dialog",      DEP_SILENT },
+		{ MOD_TYPE_DEFAULT, "rr",          DEP_SILENT },
+		{ MOD_TYPE_DEFAULT, "compression", DEP_SILENT },
 		{ MOD_TYPE_NULL, NULL, 0 },
 	},
 	{ /* modparam dependencies */
-		{ "force_dialog",		            get_deps_dialog },
-		{ "th_no_dlg_use_compression",		get_deps_compression },
+		{ "force_dialog", get_deps_dialog },
 		{ NULL, NULL },
 	},
 };
@@ -211,12 +203,7 @@ static int mod_init(void)
 					"restart\n");
 
 
-	if (load_rr_api(&rr_api) != 0) {
-		LM_ERR("failed to load rr API\n");
-		return -1;
-	}
-
-	if (topo_hiding_init_no_dlg(th_no_dlg_use_compression) < 0) {
+	if (topo_hiding_init_no_dlg(th_use_rr, th_use_compression) < 0) {
 		return -1;
 	}
 

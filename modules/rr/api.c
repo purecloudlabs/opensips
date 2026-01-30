@@ -37,6 +37,7 @@
 #include "rr_cb.h"
 
 extern int append_fromtag;
+extern int enable_double_rr;
 
 int load_rr( struct rr_binds *rrb )
 {
@@ -50,6 +51,7 @@ int load_rr( struct rr_binds *rrb )
 	rrb->loose_route       = loose_route;
 	rrb->record_route      = record_route;
 	rrb->append_fromtag    = append_fromtag;
+	rrb->enable_double_rr  = enable_double_rr;
 
 	return 1;
 }
