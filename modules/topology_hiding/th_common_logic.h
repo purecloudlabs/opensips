@@ -33,6 +33,9 @@ struct th_ct_params {
     struct th_ct_params *next;
 };
 
+int topo_delete_route_uris(struct sip_msg *msg, int delete_count);
+int topo_delete_record_route_uris(struct sip_msg *msg, int delete_count);
+
 int topo_parse_passed_params(str *params,struct th_ct_params **lst);
 int topo_delete_record_routes(struct sip_msg *req);
 int topo_delete_vias(struct sip_msg *req);

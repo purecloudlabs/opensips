@@ -24,12 +24,25 @@
 #include "../../str.h"
 #include "../tm/t_hooks.h"
 #include "th_common_logic.h"
+#include "../../context.h"
 
 enum encode_scheme {ENC_BASE64, ENC_BASE32};
 
+// Need to think about the flags so they don't clash with dlg flags
+#define TOPOH_USE_BINARY_ENCODING (1 << 7)
+
+/* Decoded routes buffer - shared between topology_hiding.c and th_no_dlg_logic.c */
+extern str decoded_route_set[12];
+extern int decoded_route_set_count;
+extern int ctx_decoded_routes_valid_idx;
+
+#define ctx_decoded_routes_set_valid() \
+	context_put_int(CONTEXT_GLOBAL, current_processing_ctx, ctx_decoded_routes_valid_idx, 1)
+
+#define ctx_decoded_routes_is_valid() \
+	context_get_int(CONTEXT_GLOBAL, current_processing_ctx, ctx_decoded_routes_valid_idx)
+
 int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_flags);
 int topo_hiding_match_no_dlg(struct sip_msg *msg);
-int topo_hiding_init_no_dlg(int use_rr_api, int use_compression_api);
-int topo_hiding_destroy_no_dlg(void);
 
 #endif

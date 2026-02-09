@@ -34,8 +34,6 @@ struct tm_binds tm_api;
 struct dlg_binds dlg_api;
 
 int force_dialog = 0;
-int th_use_compression = 0;
-int th_use_rr = 0;
 str topo_hiding_ct_params = {0,0};
 str topo_hiding_ct_hdr_params = {0,0};
 str topo_hiding_prefix = str_init("DLGCH_");
@@ -43,10 +41,28 @@ str topo_hiding_seed = str_init("OpenSIPS");
 str topo_hiding_ct_encode_pw = str_init("ToPoCtPaSS");
 str th_contact_encode_param = str_init("thinfo");
 str th_contact_encode_scheme = str_init("base64");
+str topo_hiding_ct_encode_pw_legacy = str_init("ToPoCtPaSS");
+str th_contact_encode_param_legacy = str_init("thinfol");
+str th_contact_encode_scheme_legacy = str_init("base64");
 str th_internal_trusted_tag = STR_NULL;
-str th_is_self_socket_tag = STR_NULL;
+int auto_route_on_trusted_socket = 1;
 
 int th_ct_enc_scheme;
+int th_ct_enc_scheme_legacy;
+
+/* Global buffer for decoded routes */
+str decoded_route_set[12];
+int decoded_route_set_count = 0;
+
+/* Context flag to track if decoded routes are valid for current message */
+int ctx_decoded_routes_valid_idx = -1;
+
+/* Route field IDs for nested property access */
+#define TH_ROUTE_FULL    0  // Full URI (default)
+#define TH_ROUTE_HOST    1  // Host part
+#define TH_ROUTE_PORT    2  // Port part
+#define TH_ROUTE_USER    3  // User part
+#define TH_ROUTE_PARAMS  4  // Parameters
 
 static int mod_init(void);
 static void mod_destroy(void);
@@ -54,6 +70,10 @@ static int fixup_mmode(void **param);
 int w_topology_hiding(struct sip_msg *req, str *flags_s);
 int w_topology_hiding_match(struct sip_msg *req, void *seq_match_mode_val);
 static int pv_topo_callee_callid(struct sip_msg *msg, pv_param_t *param, pv_value_t *res);
+static int pv_get_th_decoded_routes(struct sip_msg *msg, pv_param_t *param, pv_value_t *res);
+static int pv_get_th_decoded_routes_count(struct sip_msg *msg, pv_param_t *param, pv_value_t *res);
+static int pv_get_th_decoded_contact(struct sip_msg *msg, pv_param_t *param, pv_value_t *res);
+static int pv_parse_th_route_name(pv_spec_p sp, const str *in);
 
 static const cmd_export_t cmds[]={
 	{"topology_hiding",(cmd_function)w_topology_hiding, {
@@ -75,16 +95,23 @@ static const param_export_t params[] = {
 	{ "th_contact_encode_passwd",    STR_PARAM, &topo_hiding_ct_encode_pw.s  },
 	{ "th_contact_encode_param",     STR_PARAM, &th_contact_encode_param.s   },
 	{ "th_contact_encode_scheme",    STR_PARAM, &th_contact_encode_scheme.s  },
+	{ "th_contact_encode_passwd_legacy",    STR_PARAM, &topo_hiding_ct_encode_pw_legacy.s  },
+	{ "th_contact_encode_param_legacy",     STR_PARAM, &th_contact_encode_param_legacy.s   },
+	{ "th_contact_encode_scheme_legacy",    STR_PARAM, &th_contact_encode_scheme_legacy.s  },
 	{ "th_internal_trusted_tag",     STR_PARAM, &th_internal_trusted_tag.s   },
-	{ "th_is_self_socket_tag",       STR_PARAM, &th_is_self_socket_tag.s     },
-	{ "th_use_compression",          INT_PARAM, &th_use_compression          },
-	{ "th_use_rr",                   INT_PARAM, &th_use_rr                   },
+	{ "th_auto_route_on_trusted_socket",                INT_PARAM, &auto_route_on_trusted_socket                },
 	{0, 0, 0}
 };
 
 static const pv_export_t pvars[] = {
 	{ {"TH_callee_callid",  sizeof("TH_callee_callid")-1}, 1000,
 		pv_topo_callee_callid,0,0, 0, 0, 0},
+	{ {"th_decoded_routes", sizeof("th_decoded_routes")-1}, 1001,
+		pv_get_th_decoded_routes, 0, pv_parse_th_route_name, pv_parse_index, 0, 0},
+	{ {"th_decoded_routes_count", sizeof("th_decoded_routes_count")-1}, 1002,
+		pv_get_th_decoded_routes_count, 0, 0, 0, 0, 0},
+	{ {"th_decoded_contact", sizeof("th_decoded_contact")-1}, 1003,
+		pv_get_th_decoded_contact, 0, pv_parse_th_route_name, 0, 0, 0},
 	{ {0, 0}, 0, 0, 0, 0, 0, 0, 0 }
 };
 
@@ -102,8 +129,6 @@ static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "tm",          DEP_ABORT  },
 		{ MOD_TYPE_DEFAULT, "dialog",      DEP_SILENT },
-		{ MOD_TYPE_DEFAULT, "rr",          DEP_SILENT },
-		{ MOD_TYPE_DEFAULT, "compression", DEP_SILENT },
 		{ MOD_TYPE_NULL, NULL, 0 },
 	},
 	{ /* modparam dependencies */
@@ -139,11 +164,16 @@ static int mod_init(void)
 {
 	LM_INFO("initializing...\n");
 
+	/* Register context for decoded routes validity flag */
+	ctx_decoded_routes_valid_idx = context_register_int(CONTEXT_GLOBAL, NULL);
+
 	/* param handling */
 	topo_hiding_prefix.len = strlen(topo_hiding_prefix.s);
 	topo_hiding_seed.len = strlen(topo_hiding_seed.s);
 	th_contact_encode_param.len = strlen(th_contact_encode_param.s);
 	topo_hiding_ct_encode_pw.len = strlen(topo_hiding_ct_encode_pw.s);
+	th_contact_encode_param_legacy.len = strlen(th_contact_encode_param_legacy.s);
+	topo_hiding_ct_encode_pw_legacy.len = strlen(topo_hiding_ct_encode_pw_legacy.s);
 	if (topo_hiding_ct_params.s) {
 		topo_hiding_ct_params.len = strlen(topo_hiding_ct_params.s);
 		topo_parse_passed_ct_params(&topo_hiding_ct_params);
@@ -162,13 +192,20 @@ static int mod_init(void)
 			"Use 'base64' or 'base32'\n");
 		goto error;
 	}
+	
+	th_contact_encode_scheme_legacy.len = strlen(th_contact_encode_scheme_legacy.s);
+	if (!str_strcmp(&th_contact_encode_scheme_legacy, const_str("base64")))
+		th_ct_enc_scheme_legacy = ENC_BASE64;
+	else if (!str_strcmp(&th_contact_encode_scheme_legacy, const_str("base32")))
+		th_ct_enc_scheme_legacy = ENC_BASE32;
+	else {
+		LM_ERR("Unsupported value for 'th_contact_encode_scheme_legacy' modparam!"
+			"Use 'base64' or 'base32'\n");
+		goto error;
+	}
 
 	if (th_internal_trusted_tag.s) {
 		th_internal_trusted_tag.len = strlen(th_internal_trusted_tag.s);
-	}
-
-	if (th_is_self_socket_tag.s) {
-		th_is_self_socket_tag.len = strlen(th_is_self_socket_tag.s);
 	}
 
 	/* loading dependencies */
@@ -203,10 +240,6 @@ static int mod_init(void)
 					"restart\n");
 
 
-	if (topo_hiding_init_no_dlg(th_use_rr, th_use_compression) < 0) {
-		return -1;
-	}
-
 	return 0;
 error:
 	return -1;
@@ -214,7 +247,6 @@ error:
 
 static void mod_destroy(void)
 {
-	topo_hiding_destroy_no_dlg();
 	return;
 }
 
@@ -255,6 +287,10 @@ int w_topology_hiding(struct sip_msg *req, str *flags_s)
 					flags |= TOPOH_KEEP_ADV_B;
 					LM_DBG("Will store advertised contact for calllee\n");
 					break;
+				case 'b':
+					flags |= TOPOH_USE_BINARY_ENCODING;
+					LM_DBG("Will encode thinfo using compact binary encoding\n");
+					break;
 				default:
 					LM_DBG("unknown topology_hiding flag : [%c] . Skipping\n",*p);
 			}
@@ -282,6 +318,31 @@ int w_topology_hiding_match(struct sip_msg *req, void *seq_match_mode_val)
 
 static char *callid_buf=NULL;
 static int callid_buf_len=0;
+
+static int pv_parse_th_route_name(pv_spec_p sp, const str *in)
+{
+	if (sp == NULL || in == NULL || in->s == NULL || in->len == 0)
+		return -1;
+
+	sp->pvp.pvn.type = PV_NAME_INTSTR;
+	sp->pvp.pvn.u.isname.type = 0;
+
+	if (in->len == 4 && strncasecmp(in->s, "host", 4) == 0) {
+		sp->pvp.pvn.u.isname.name.n = TH_ROUTE_HOST;
+	} else if (in->len == 4 && strncasecmp(in->s, "port", 4) == 0) {
+		sp->pvp.pvn.u.isname.name.n = TH_ROUTE_PORT;
+	} else if (in->len == 4 && strncasecmp(in->s, "user", 4) == 0) {
+		sp->pvp.pvn.u.isname.name.n = TH_ROUTE_USER;
+	} else if (in->len == 6 && strncasecmp(in->s, "params", 6) == 0) {
+		sp->pvp.pvn.u.isname.name.n = TH_ROUTE_PARAMS;
+	} else {
+		LM_ERR("unsupported route field <%.*s>\n", in->len, in->s);
+		return -1;
+	}
+
+	return 0;
+}
+
 static int pv_topo_callee_callid(struct sip_msg *msg, pv_param_t *param, pv_value_t *res)
 {
 	struct dlg_cell *dlg;
@@ -320,4 +381,147 @@ static int pv_topo_callee_callid(struct sip_msg *msg, pv_param_t *param, pv_valu
 	res->flags = PV_VAL_STR;
 
 	return 0;
+}
+
+static int pv_get_th_decoded_routes(struct sip_msg *msg, pv_param_t *param, pv_value_t *res)
+{
+	int idx, idxf;
+	int field_id = 0;
+	struct sip_uri uri;
+
+	if (msg == NULL || res == NULL)
+		return -1;
+
+	if (!ctx_decoded_routes_is_valid()) {
+		return pv_get_null(msg, param, res);
+	}
+
+	if (decoded_route_set_count <= 1)
+		return pv_get_null(msg, param, res);
+
+	if (pv_get_spec_index(msg, param, &idx, &idxf) != 0) {
+		LM_ERR("invalid index\n");
+		return -1;
+	}
+
+	if (param->pvn.type == PV_NAME_INTSTR) {
+		field_id = param->pvn.u.isname.name.n;
+	}
+
+	if (idx < 0) {
+		idx = (decoded_route_set_count - 1) + idx;
+	}
+
+	if (idx < 0 || idx >= (decoded_route_set_count - 1))
+		return pv_get_null(msg, param, res);
+
+	/* Adjust index: route 0 is at decoded_route_set[1], contact is at [0] */
+	idx = idx + 1;
+
+	/* Return full URI if no field specified */
+	if (field_id == TH_ROUTE_FULL) {
+		return pv_get_strval(msg, param, res, &decoded_route_set[idx]);
+	}
+
+	/* Parse URI for field access */
+	if (parse_uri(decoded_route_set[idx].s, decoded_route_set[idx].len, &uri) < 0) {
+		LM_ERR("Bad Route URI\n");
+		return -1;
+	}
+
+	/* Return specific field from parsed URI */
+	switch (field_id) {
+		case TH_ROUTE_HOST:
+			if (uri.host.len == 0)
+				return pv_get_null(msg, param, res);
+			return pv_get_strval(msg, param, res, &uri.host);
+
+		case TH_ROUTE_PORT:
+			return pv_get_uintval(msg, param, res, uri.port_no);
+
+		case TH_ROUTE_USER:
+			if (uri.user.len == 0)
+				return pv_get_null(msg, param, res);
+			return pv_get_strval(msg, param, res, &uri.user);
+
+		case TH_ROUTE_PARAMS:
+			if (uri.params.len == 0)
+				return pv_get_null(msg, param, res);
+			return pv_get_strval(msg, param, res, &uri.params);
+
+		default:
+			LM_ERR("unknown route field %d\n", field_id);
+			return pv_get_null(msg, param, res);
+	}
+}
+
+static int pv_get_th_decoded_routes_count(struct sip_msg *msg, pv_param_t *param, pv_value_t *res)
+{
+	if (msg == NULL || res == NULL)
+		return -1;
+
+	/* Check if decoded routes are valid for this message context */
+	if (!ctx_decoded_routes_is_valid()) {
+		return pv_get_sintval(msg, param, res, 0);
+	}
+
+	return pv_get_sintval(msg, param, res, decoded_route_set_count - 1);
+}
+
+static int pv_get_th_decoded_contact(struct sip_msg *msg, pv_param_t *param, pv_value_t *res)
+{
+	int field_id = 0;
+	struct sip_uri uri;
+
+	if (msg == NULL || res == NULL)
+		return -1;
+
+	/* Check if decoded routes are valid for this message context */
+	if (!ctx_decoded_routes_is_valid()) {
+		return pv_get_null(msg, param, res);
+	}
+
+	/* check if we have any decoded data (need at least contact) */
+	if (decoded_route_set_count == 0)
+		return pv_get_null(msg, param, res);
+
+	/* Check if a field was specified */
+	if (param->pvn.type == PV_NAME_INTSTR) {
+		field_id = param->pvn.u.isname.name.n;
+	}
+
+	/* Return full URI if no field specified */
+	if (field_id == TH_ROUTE_FULL) {
+		return pv_get_strval(msg, param, res, &decoded_route_set[0]);
+	}
+
+	/* Parse URI for field access */
+	if (parse_uri(decoded_route_set[0].s, decoded_route_set[0].len, &uri) < 0) {
+		LM_ERR("Bad Contact URI\n");
+		return -1;
+	}
+
+	switch (field_id) {
+		case TH_ROUTE_HOST:
+			if (uri.host.len == 0)
+				return pv_get_null(msg, param, res);
+			return pv_get_strval(msg, param, res, &uri.host);
+
+		case TH_ROUTE_PORT:
+			return pv_get_uintval(msg, param, res, uri.port_no);
+
+		case TH_ROUTE_USER:
+			if (uri.user.len == 0)
+				return pv_get_null(msg, param, res);
+			return pv_get_strval(msg, param, res, &uri.user);
+
+		case TH_ROUTE_PARAMS:
+			if (uri.params.len == 0)
+				return pv_get_null(msg, param, res);
+			return pv_get_strval(msg, param, res, &uri.params);
+
+		default:
+			LM_ERR("unknown route field %d\n", field_id);
+			return pv_get_null(msg, param, res);
+	}
 }
