@@ -28,6 +28,8 @@
 #include <stdlib.h>
 #include <curl/curl.h>
 
+#include <sys/resource.h>
+
 #include "../../async.h"
 #include "../../sr_module.h"
 #include "../../dprint.h"
@@ -39,9 +41,11 @@
 #include "../tls_mgm/api.h"
 #include "rest_client.h"
 #include "rest_methods.h"
+#include "rest_sockets.h"
 #include "../../ssl_init_tweaks.h"
 #include "../../pt.h"
 #include "../../redact_pii.h"
+#include "../../globals.h"
 
 /*
  * Module parameters
@@ -50,9 +54,12 @@ long connection_timeout = 20; /* s */
 long connect_poll_interval = 20; /* ms */
 long connection_timeout_ms;
 int max_async_transfers = 100;
+long max_connections = 100;
+long max_host_connections = 0;
 long curl_timeout = 20;
 char *ssl_capath;
 unsigned int max_transfer_size = 10240; /* KB (10MB) */
+int share_connections = 0;
 
 /*
  * curl_multi_perform() may indicate a "try again" response even
@@ -72,10 +79,16 @@ int enable_expect_100;
 
 struct tls_mgm_binds tls_api;
 
+static preconnect_urls *precon_urls = 0;
+static int total_cons = 0;
+
 /* trace parameters for this module */
 int rest_proto_id;
 trace_proto_t tprot;
 char* rest_id_s = "rest";
+
+/* file descriptor limits */
+struct rlimit lim;
 
 /*
  * Module initialization and cleanup
@@ -101,6 +114,16 @@ static int w_async_rest_post(struct sip_msg *msg, async_ctx *ctx,
 			str *url, str *body, str *_ctype, pv_spec_t *body_pv,
 			pv_spec_t *ctype_pv, pv_spec_t *code_pv);
 static int w_async_rest_put(struct sip_msg *msg, async_ctx *ctx,
+			str *url, str *body, str *_ctype, pv_spec_t *body_pv,
+			pv_spec_t *ctype_pv, pv_spec_t *code_pv);
+
+// Temporary to expose in script
+static int w_async_rest_get_v2(struct sip_msg *msg, async_ctx *ctx, str *url,
+				pv_spec_t *body_pv, pv_spec_t *ctype_pv, pv_spec_t *code_pv);
+static int w_async_rest_post_v2(struct sip_msg *msg, async_ctx *ctx,
+			str *url, str *body, str *_ctype, pv_spec_t *body_pv,
+			pv_spec_t *ctype_pv, pv_spec_t *code_pv);
+static int w_async_rest_put_v2(struct sip_msg *msg, async_ctx *ctx,
 			str *url, str *body, str *_ctype, pv_spec_t *body_pv,
 			pv_spec_t *ctype_pv, pv_spec_t *code_pv);
 
@@ -139,6 +162,25 @@ static const acmd_export_t acmds[] = {
 		{CMD_PARAM_VAR,0,0},
 		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0},
 		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}}},
+	{"rest_get_v2",(acmd_function)w_async_rest_get_v2, {
+		{CMD_PARAM_STR,0,0},
+		{CMD_PARAM_VAR,0,0},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}}},
+	{"rest_post_v2",(acmd_function)w_async_rest_post_v2, {
+		{CMD_PARAM_STR,0,0},
+		{CMD_PARAM_STR,0,0},
+		{CMD_PARAM_STR|CMD_PARAM_OPT,0,0},
+		{CMD_PARAM_VAR,0,0},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}}},
+	{"rest_put_v2",(acmd_function)w_async_rest_put_v2, {
+		{CMD_PARAM_STR,0,0},
+		{CMD_PARAM_STR,0,0},
+		{CMD_PARAM_STR|CMD_PARAM_OPT,0,0},
+		{CMD_PARAM_VAR,0,0},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}}},
 	{0,0,{{0,0,0}}}
 };
 
@@ -169,6 +211,28 @@ static const cmd_export_t cmds[] = {
 		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0},
 		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}},
 		ALL_ROUTES},
+	{"rest_get_v2",(cmd_function)w_rest_get, {
+		{CMD_PARAM_STR,0,0},
+		{CMD_PARAM_VAR,0,0},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}},
+		ALL_ROUTES},
+	{"rest_post_v2",(cmd_function)w_rest_post, {
+		{CMD_PARAM_STR,0,0},
+		{CMD_PARAM_STR,0,0},
+		{CMD_PARAM_STR|CMD_PARAM_OPT,0,0},
+		{CMD_PARAM_VAR,0,0},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}},
+		ALL_ROUTES},
+	{"rest_put_v2",(cmd_function)w_rest_put, {
+		{CMD_PARAM_STR,0,0},
+		{CMD_PARAM_STR,0,0},
+		{CMD_PARAM_STR|CMD_PARAM_OPT,0,0},
+		{CMD_PARAM_VAR,0,0},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0},
+		{CMD_PARAM_VAR|CMD_PARAM_OPT,0,0}, {0,0,0}},
+		ALL_ROUTES},
 	{"rest_append_hf",(cmd_function)w_rest_append_hf, {
 		{CMD_PARAM_STR,0,0}, {0,0,0}},
 		ALL_ROUTES},
@@ -190,6 +254,76 @@ static const trans_export_t trans[] = {
 	{{0,0},0,0}
 };
 
+static int warm_pool_urls(modparam_t type, void *val) {
+	unsigned int num_conns;
+	char *mod_param, *delim, *host = NULL;
+	size_t delim_index, string_end;
+	preconnect_urls *tmp = NULL;
+	str num_conns_s;
+
+	if (!share_connections) {
+		goto done;
+	}
+
+	mod_param = (char*) val;
+
+	if ((delim = strchr(mod_param, ',')) == NULL) {
+        goto error;
+	}
+
+	delim_index = (size_t)(delim - mod_param);
+	if (delim_index == 0) {
+		goto error;
+	}
+	
+	host = (char*) pkg_malloc(delim_index + 1);
+	if (host == NULL) {
+		goto error;
+	}
+
+	strncpy(host, mod_param, delim_index);
+	host[delim_index + 1] = '\0';
+	
+	string_end = strlen(mod_param + delim_index + 1);
+	if (string_end == 0) {
+		goto error;
+	}
+
+	num_conns_s.s = mod_param + delim_index + 1;
+	num_conns_s.len = string_end;
+	if (str2int(&num_conns_s, &num_conns) != 0) {
+		goto error;
+	}
+    
+	tmp = (preconnect_urls*) pkg_malloc(sizeof(preconnect_urls));
+	if (tmp == NULL) {
+		goto error;
+	}
+
+	tmp->url = host;
+	tmp->connections = (long) num_conns;
+	tmp->next = 0;
+
+	if (precon_urls != NULL) {
+		tmp->next = precon_urls;
+	}
+
+	precon_urls = tmp;
+	total_cons += num_conns;
+done:
+	return 0;
+error:
+	if (host != NULL) {
+		pkg_free(host);
+	}
+
+	if (tmp != NULL) {
+		pkg_free(tmp);
+	}
+
+	return -1;
+}
+
 /*
  * Exported parameters
  */
@@ -206,6 +340,12 @@ static const param_export_t params[] = {
 	{ "enable_expect_100",	INT_PARAM, &enable_expect_100	},
 	{ "no_concurrent_connects",	INT_PARAM, &no_concurrent_connects	},
 	{ "curl_conn_lifetime",	INT_PARAM, &curl_conn_lifetime	},
+	{ "use_multi_socket_api",	INT_PARAM, &use_multi_socket_api	},
+	{ "share_connections",	INT_PARAM, &share_connections	},
+	{ "max_connections",	INT_PARAM, &max_connections	},
+	{ "max_host_connections",	INT_PARAM, &max_host_connections	},
+	{ "warm_pool_urls",		STR_PARAM|USE_FUNC_PARAM,
+		(void*)&warm_pool_urls },
 	{ 0, 0, 0 }
 };
 
@@ -277,6 +417,18 @@ static int mod_init(void)
 		return -1;
 	}
 
+	if (max_connections <= 0) {
+		LM_WARN("Bad max_connections value (%ld), setting to default of 100\n", max_connections);
+		max_connections = 100;
+	}
+
+	if (max_host_connections < 0) {
+		LM_WARN("Bad max_host_connections value (%ld), setting to max_connections value (%ld)\n",
+			max_host_connections, max_connections);
+
+		max_host_connections = max_connections;
+	}
+
 	LM_INFO("Module initialized!\n");
 
 	return 0;
@@ -298,12 +450,44 @@ static int cfg_validate(void)
 	return 1;
 }
 
+static int get_fd_limit(void) {
+	if (getrlimit(RLIMIT_NOFILE, &lim) < 0) {
+		LM_ERR("cannot get the maximum number of file descriptors: %s\n",
+			strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
 
 static int child_init(int rank)
 {
 	if (init_sync_handle() != 0) {
 		LM_ERR("failed to init sync handle\n");
 		return -1;
+	}
+
+	if (get_fd_limit() != 0) {
+		LM_WARN("Could not get file descriptor limits\n");
+		return 0;
+	}
+
+	if (init_process_limits(lim.rlim_cur) != 0) {
+		LM_WARN("Could not set file descriptor limits\n");
+		return 0;
+	}
+
+	if (pt[process_no].type != TYPE_UDP && pt[process_no].type != TYPE_TCP) {
+		return 0;
+	}
+
+	if (precon_urls == NULL) {
+		return 0;
+	}
+
+	if (connect_only(precon_urls, total_cons) != 0) {
+		LM_WARN("Could not create warm pool\n");
 	}
 
 	return 0;
@@ -773,4 +957,174 @@ static int w_rest_append_hf(struct sip_msg *msg, str *hfv)
 static int w_rest_init_client_tls(struct sip_msg *msg, str *tls_client_dom)
 {
 	return rest_init_client_tls(msg, tls_client_dom);
+}
+
+// Temporary duplication for feature toggle in script
+int async_rest_method_v2(enum rest_client_method method, struct sip_msg *msg,
+                      char *url, str *body, str *ctype, async_ctx *ctx,
+                      pv_spec_p body_pv, pv_spec_p ctype_pv, pv_spec_p code_pv)
+{
+	rest_async_param *param;
+	pv_value_t val;
+	long http_rc;
+	char *host;
+	int read_fd, rc, lrc = RCL_OK;
+
+	param = pkg_malloc(sizeof *param);
+	if (!param) {
+		LM_ERR("no more shm\n");
+		return RCL_INTERNAL_ERR;
+	}
+	memset(param, '\0', sizeof *param);
+
+	if (no_concurrent_connects && (lrc=rcl_acquire_url(url, &host)) < RCL_OK)
+		return lrc;
+
+	rc = start_async_http_req_v2(msg, method, url, body, ctype,
+			param, &param->body, ctype_pv ? &param->ctype : NULL, &read_fd);
+
+	/* error occurred; no transfer done */
+	if (read_fd == ASYNC_NO_IO) {
+		ctx->resume_param = NULL;
+		ctx->resume_f = NULL;
+		if (code_pv) {
+			val.flags = PV_VAL_INT|PV_TYPE_INT;
+			val.ri = 0;
+			if (pv_set_value(msg, (pv_spec_p)code_pv, 0, &val) != 0)
+				LM_ERR("failed to set output code pv\n");
+		}
+
+		/* keep default async status of NO_IO */
+		pkg_free(param);
+		return rc;
+
+	/* no need for async - transfer already completed! */
+	} else if (read_fd == ASYNC_SYNC) {
+		if (code_pv) {
+			curl_easy_getinfo(param->handle, CURLINFO_RESPONSE_CODE, &http_rc);
+			LM_DBG("HTTP response code: %ld\n", http_rc);
+
+			val.flags = PV_VAL_INT|PV_TYPE_INT;
+			val.ri = (int)http_rc;
+			if (pv_set_value(msg, (pv_spec_p)code_pv, 0, &val) != 0) {
+				LM_ERR("failed to set output code pv\n");
+				return RCL_INTERNAL_ERR;
+			}
+		}
+
+		val.flags = PV_VAL_STR;
+		val.rs = param->body;
+		if (pv_set_value(msg, (pv_spec_p)body_pv, 0, &val) != 0) {
+			LM_ERR("failed to set output body pv\n");
+			return RCL_INTERNAL_ERR;
+		}
+
+		if (ctype_pv) {
+			val.rs = param->ctype;
+			if (pv_set_value(msg, (pv_spec_p)ctype_pv, 0, &val) != 0) {
+				LM_ERR("failed to set output ctype pv\n");
+				return RCL_INTERNAL_ERR;
+			}
+		}
+
+		pkg_free(param->body.s);
+		if (ctype_pv && param->ctype.s)
+			pkg_free(param->ctype.s);
+		curl_easy_cleanup(param->handle);
+		pkg_free(param);
+
+		async_status = ASYNC_SYNC;
+		return rc;
+	}
+
+	/* the TCP connection is established, async started with success */
+
+	if (lrc == RCL_OK_LOCKED)
+		rcl_release_url(host, rc == RCL_OK);
+
+	ctx->resume_f = resume_async_http_req_v2;
+	ctx->timeout_s = curl_timeout;
+	ctx->timeout_f = time_out_async_http_req_v2;
+
+	param->method = method;
+	param->body_pv = (pv_spec_p)body_pv;
+	param->ctype_pv = (pv_spec_p)ctype_pv;
+	param->code_pv = (pv_spec_p)code_pv;
+	ctx->resume_param = param;
+
+	async_status = read_fd;
+	return 1;
+}
+
+static int w_async_rest_get_v2(struct sip_msg *msg, async_ctx *ctx, str *url,
+				pv_spec_t *body_pv, pv_spec_t *ctype_pv, pv_spec_t *code_pv)
+{
+	str url_nt;
+	int rc;
+
+	if (pkg_nt_str_dup(&url_nt, url) < 0) {
+		LM_ERR("No more pkg memory\n");
+		return RCL_INTERNAL_ERR;
+	}
+
+	LM_DBG("async rest get %.*s %p %p %p\n", url->len, url->s,
+			body_pv, ctype_pv, code_pv);
+
+	rc = async_rest_method_v2(REST_CLIENT_GET, msg, url_nt.s, NULL, NULL, ctx,
+				body_pv, ctype_pv, code_pv);
+
+	pkg_free(url_nt.s);
+	return rc;
+}
+
+static int w_async_rest_post_v2(struct sip_msg *msg, async_ctx *ctx,
+			str *url, str *body, str *_ctype, pv_spec_t *body_pv,
+			pv_spec_t *ctype_pv, pv_spec_t *code_pv)
+{
+	str ctype = { NULL, 0 };
+	str url_nt;
+	int rc;
+
+	if (pkg_nt_str_dup(&url_nt, url) < 0) {
+		LM_ERR("No more pkg memory\n");
+		return RCL_INTERNAL_ERR;
+	}
+
+	if (_ctype)
+		ctype = *_ctype;
+
+	LM_DBG("async rest post '%.*s' %p %p %p\n", url->len, url->s,
+			body_pv, ctype_pv, code_pv);
+
+	rc = async_rest_method_v2(REST_CLIENT_POST, msg, url_nt.s, body, &ctype, ctx,
+							body_pv, ctype_pv, code_pv);
+
+	pkg_free(url_nt.s);
+	return rc;
+}
+
+static int w_async_rest_put_v2(struct sip_msg *msg, async_ctx *ctx,
+			str *url, str *body, str *_ctype, pv_spec_t *body_pv,
+			pv_spec_t *ctype_pv, pv_spec_t *code_pv)
+{
+	str ctype = { NULL, 0 };
+	str url_nt;
+	int rc;
+
+	if (pkg_nt_str_dup(&url_nt, url) < 0) {
+		LM_ERR("No more pkg memory\n");
+		return RCL_INTERNAL_ERR;
+	}
+
+	if (_ctype)
+		ctype = *_ctype;
+
+	LM_DBG("async rest put '%.*s' %p %p %p\n",
+		url->len, url->s, body_pv, ctype_pv, code_pv);
+
+	rc = async_rest_method_v2(REST_CLIENT_PUT, msg, url_nt.s, body, &ctype, ctx,
+						body_pv, ctype_pv, code_pv);
+
+	pkg_free(url_nt.s);
+	return rc;
 }
