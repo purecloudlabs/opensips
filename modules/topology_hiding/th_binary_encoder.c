@@ -334,7 +334,7 @@ int encode_dual_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct si
 }
 
 
-int encode_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri, int param_count, str params_to_skip[static param_count]) {
+int encode_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri, int param_count, str *params_to_skip) {
     unsigned char *p, *props_ptr, *param_len_ptr;
     uint16_t props;
     char tmp[256];
@@ -411,7 +411,12 @@ int encode_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri, int param_count
     }
 
     if (uri->params.len > 0 && uri->params.len <= UINT8_MAX) {
-        memcpy(extra_params, params_to_skip, param_count * sizeof(params_to_skip[0]));
+        if (params_to_skip != NULL && param_count > 0) {
+            memcpy(extra_params, params_to_skip, param_count * sizeof(params_to_skip[0]));
+        } else if (params_to_skip == NULL && param_count > 0) {
+            LM_WARN("params_to_skip is null but param_count is greater than 0\n");
+            extra_param_count = 0;
+        }
         extra_params[extra_param_count++] = str_init("transport");
         extra_params[extra_param_count++] = str_init("lr");
 

@@ -46,7 +46,7 @@ typedef struct {
     int pos;
 } encoded_uri_t;
 
-int encode_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri, int param_count, str params_to_skip[static param_count]);
+int encode_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri, int param_count, str *params_to_skip);
 int encode_dual_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct sip_uri *uri2);
 int encode_socket(encoded_uri_t *encoding_uri, const struct socket_info *si);
 

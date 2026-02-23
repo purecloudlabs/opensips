@@ -95,7 +95,6 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *, uint16_t);
 static void th_no_dlg_onreply(struct cell *, int, struct tmcb_params *);
 static int th_no_dlg_seq_handling(struct sip_msg *, str *, decode_info_fn);
 static inline int th_no_dlg_one_way_hiding(const struct socket_info *);
-static inline int topo_no_dlg_classify_route(rr_t [static 1]);
 static int th_no_dlg_add_auto_record_route(struct sip_msg *, int, char []);
 static int th_no_dlg_match_record_route_or_route_uris(struct sip_msg *, struct sip_msg *, hdr_types_t);
 
@@ -150,7 +149,7 @@ static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_rout
 
 	if (dec_len <= 0) {
 		LM_ERR("Failed to decode\n");
-		return -1;
+		return TOPOH_MATCH_FAILURE;
 	}
 
 	LM_DBG("Size of base64 decoded length %d and size of param len %d\n", dec_len, thinfo->len);
@@ -160,7 +159,7 @@ static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_rout
 
 	if (get_uri_count(&decoded_uri_buf) != 0) {
 		LM_ERR("Encoded URI count is invalid, can only be 0 in auto Route\n");
-		return -1;
+		return TOPOH_MATCH_FAILURE;
 	}
 
 	flags = get_flags(&decoded_uri_buf);
@@ -186,17 +185,17 @@ static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_rout
 
 	if (topo_delete_record_route_uris(msg, 0) < 0) {
 		LM_ERR("Failed to remove Record Route header \n");
-		return -1;
+		return TOPOH_MATCH_FAILURE;
 	}
 
 	if (topo_delete_vias(msg) < 0) {
 		LM_ERR("Failed to remove via headers\n");
-		return -1;
+		return TOPOH_MATCH_FAILURE;
 	}
 
 	if (th_no_dlg_encode_contact(msg, flags, NULL, 0) < 0) {
 		LM_ERR("Failed to encode contact header\n");
-		return -1;
+		return TOPOH_MATCH_FAILURE;
 	}
 
 	after_auto = auto_route->next;
@@ -208,7 +207,7 @@ static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_rout
 
 	if (after_auto != NULL && set_dst_uri(msg, &after_auto->nameaddr.uri) !=0) {
 		LM_ERR("Error set_dst_uri\n");
-		return -1;
+		return TOPOH_MATCH_FAILURE;
 	}
 
 	tm_api.set_tmcb_flags(flags);
@@ -926,38 +925,12 @@ static inline void topo_no_dlg_seq_free(void *p) {
 		shm_free(p);
 }
 
-static inline int topo_no_dlg_classify_route(rr_t *head) {
-	struct sip_uri rr_uri;
-	int flags = 0;
-
-	if (parse_uri(head->nameaddr.uri.s, head->nameaddr.uri.len, &rr_uri) < 0) {
-		LM_ERR("Failed to parse SIP uri\n");
-		return -1;
-	}
-
-	if (!is_strict(&rr_uri.params)) {
-		flags |= ROUTE_LOOSE;
-	} else {
-		flags |= ROUTE_STRICT;
-	}
-
-	// TODO refactor this
-	if (check_self(&rr_uri.host, rr_uri.port_no ? rr_uri.port_no : SIP_PORT, 0) == 1) {
-		flags |= ROUTE_SELF;
-	}
-
-	if (is_2rr(&rr_uri.params)) {
-		flags |= ROUTE_DOUBLE_RR;
-	}
-
-	return flags;
-}
-
 static inline int topo_no_dlg_route(struct sip_msg *msg, str rr_buf[static 1]) {
 	rr_t *head = NULL, *rrp = NULL;
+	struct sip_uri rr_uri;
 	char *route = NULL, *hdrs = NULL;
 	int size = 0, start_index = 0;
-	int route_flags;
+	int route_flags = 0;
 	struct lump *lmp = NULL;
 
 	if (parse_rr_body(rr_buf->s, rr_buf->len, &head) != 0) {
@@ -967,7 +940,21 @@ static inline int topo_no_dlg_route(struct sip_msg *msg, str rr_buf[static 1]) {
 	}
 
 	rrp = head;
-	route_flags = topo_no_dlg_classify_route(rrp);
+
+	if (parse_uri(head->nameaddr.uri.s, head->nameaddr.uri.len, &rr_uri) < 0) {
+		LM_ERR("Failed to parse SIP uri\n");
+		return -1;
+	}
+
+	if (!is_strict(&rr_uri.params)) {
+		route_flags |= ROUTE_LOOSE;
+	} else {
+		route_flags |= ROUTE_STRICT;
+	}
+
+	if (is_2rr(&rr_uri.params)) {
+		route_flags |= ROUTE_DOUBLE_RR;
+	}
 
 	if (route_flags & (ROUTE_STRICT | ROUTE_SELF)) {
 		LM_DBG("First Route header is a strict router\n");
@@ -1026,8 +1013,9 @@ cleanup:
 	return route_flags;
 }
 
-static inline int topo_no_dlg_rewrite_contact_as_next_route(struct sip_msg *msg, const str contact_buf[static 1], struct lump lmp[static 1]) {
+static inline int topo_no_dlg_rewrite_contact_as_next_route(struct sip_msg *msg, const str contact_buf[static 1]) {
 	char *remote_contact = NULL;
+	struct lump *lmp = NULL;
 	int size = 0;
 
 	size = contact_buf->len + ROUTE_PREF_LEN + ROUTE_SUFF_LEN;
@@ -1044,6 +1032,8 @@ static inline int topo_no_dlg_rewrite_contact_as_next_route(struct sip_msg *msg,
 
 	LM_DBG("Adding remote contact route header : [%.*s]\n",
 			size, remote_contact);
+
+	lmp = anchor_lump(msg, msg->headers->name.s - msg->buf, HDR_ROUTE_T);
 
 	if (insert_new_lump_after(lmp, remote_contact, size, HDR_ROUTE_T) == 0) {
 		LM_ERR("failed inserting remote contact route\n");
@@ -1261,29 +1251,27 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info, decode_info_fn
 		return -1;
 	}
 
-	if (rr_buf.len) {
+	if (rr_buf.s && rr_buf.len) {
 		route_flags = topo_no_dlg_route(msg, &rr_buf);
 		if (route_flags & ROUTE_FAILURE) {
 			LM_ERR("Failure to Route\n");
 			goto err_fail_early;
 		}
-	}
 
-	if (!(route_flags & ROUTE_FAILURE) && !(route_flags & ROUTE_STRICT) && ct_buf.len && ct_buf.s) {
-		LM_DBG("Setting new URI to  <%.*s> \n", ct_buf.len, ct_buf.s);
+		if (!(route_flags & ROUTE_FAILURE) && !(route_flags & ROUTE_STRICT)) {
+			LM_DBG("Setting new URI to  <%.*s> \n", ct_buf.len, ct_buf.s);
 
-		if (set_ruri(msg, &ct_buf) != 0) {
-			LM_ERR("failed setting ruri\n");
-			goto err_fail_early;
+			if (set_ruri(msg, &ct_buf) != 0) {
+				LM_ERR("failed setting ruri\n");
+				goto err_fail_early;
+			}
+		} else if (!(route_flags & ROUTE_FAILURE) && (route_flags & ROUTE_STRICT)) {
+			if (topo_no_dlg_rewrite_contact_as_next_route(msg, &ct_buf) != 1) {
+				LM_ERR("Failure to rewrite Contact header as next Route\n");
+				goto err_fail_early;
+			}
 		}
-	} else if (!(route_flags & ROUTE_FAILURE) && (route_flags & ROUTE_STRICT) && ct_buf.len && ct_buf.s) {
-		// if (topo_no_dlg_rewrite_contact_as_next_route(msg, &ct_buf, lmp) != 1) {
-		// 	LM_ERR("Failure to rewrite Contact header as next Route\n");
-		// 	goto err_fail_early;
-		// }
-	}
 
-	if (rr_buf.s && rr_buf.len) {
 		route_s = shm_malloc(sizeof *route_s + rr_buf.len);
 		if (route_s) {
 			route_s->s = (char *)(route_s + 1);
@@ -1332,7 +1320,7 @@ err_fail_early:
 
 static inline int th_no_dlg_match_socket_tag(const struct socket_info *socket, str socket_tag_to_match[static 1]) {
 	if (socket != NULL && socket->tag.len > 0) {
-		LM_DBG("Socket tag %.*s tag to match %.s\n", socket->tag.len, socket->tag.s, socket_tag_to_match->len, socket_tag_to_match->s);
+		LM_DBG("Socket tag %.*s tag to match %.*s\n", socket->tag.len, socket->tag.s, socket_tag_to_match->len, socket_tag_to_match->s);
 
 		return socket->tag.len == socket_tag_to_match->len && 
 		       strncmp(socket->tag.s, socket_tag_to_match->s, socket_tag_to_match->len) == 0;
