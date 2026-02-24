@@ -133,8 +133,6 @@ static const char *TRANSPORT_STRINGS[] = {
 };
 
 static str dual_uri_skip_params[] = {
-    str_init("transport"),
-    str_init("lr"),
     str_init("r2")
 };
 
@@ -173,9 +171,7 @@ static uint8_t encode_params(unsigned char *p, uint16_t *uri_properties, str *pa
             LM_DBG("Checking param [%.*s]\n", params_to_skip[i].len, params_to_skip[i].s);
             if (param_len_current >= params_to_skip[i].len && strncmp(src, params_to_skip[i].s, params_to_skip[i].len) == 0) {
                 /* Setting some flags in case of lr or r2 params which will be encoded into the uri properties */
-                if (param_len_current == r2_on.len && memcmp(src, r2_on.s, r2_on.len) == 0) {
-                    *uri_properties |= URI2_HAS_R2;
-                } else if ((param_len_current == lr.len && memcmp(src, lr.s, lr.len) == 0) ||
+                if ((param_len_current == lr.len && memcmp(src, lr.s, lr.len) == 0) ||
                          (param_len_current == lr_on.len && memcmp(src, lr_on.s, lr_on.len) == 0)) {
                     *uri_properties |= HAS_LR;
                 }
@@ -206,13 +202,27 @@ static uint8_t encode_params(unsigned char *p, uint16_t *uri_properties, str *pa
     return param_len;
 }
 
-int encode_dual_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct sip_uri *uri2) {
+#define ENCODE_URI_FIELD(_uri, _field, _flag_expr, _props, _p) \
+    do { \
+        if ((_uri)->_field.len > 0 && (_uri)->_field.len <= UINT8_MAX) { \
+            (_props) = (_flag_expr); \
+            *(_p)++ = (uint8_t)(_uri)->_field.len; \
+            memcpy((_p), (_uri)->_field.s, (_uri)->_field.len); \
+            (_p) += (_uri)->_field.len; \
+        } else if ((_uri)->_field.len > UINT8_MAX) { \
+            LM_WARN("URI " #_field " length '%d' larger than 255\n", (_uri)->_field.len); \
+        } \
+    } while(0)
+
+static int encode_uris(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct sip_uri *uri2, int param_count, str *params_to_skip) {
     unsigned char *p, *props_ptr, *param_len_ptr, *uri2_props_ptr;
-    uint16_t props;
+    uint16_t props = 0;
     uint8_t uri2_props;
     char tmp[256];
     uint8_t param_len;
     size_t start_pos;
+    str extra_params[param_count + 2];
+    int extra_param_count = param_count;
     
     if (encoding_uri->len + MAX_ENCODED_URI_SIZE * 2 > MAX_THINFO_BUFFER_SIZE) {
         return -1;
@@ -228,11 +238,12 @@ int encode_dual_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct si
     
     start_pos = p - encoding_uri->buf;
     
-    // Initialize URI1 properties with IS_DUAL_URI flag
-    props = IS_DUAL_URI;
+    if (uri2 != NULL) {
+        props = IS_DUAL_URI;
+    }
+
     props_ptr = p;
     p += 2;
-
     props |= SCHEMES[uri1->type];
     if (uri1->proto >= PROTO_UDP && uri1->proto <= PROTO_WSS) {
         props = (props & ~TRANSPORT_MASK) | TRANSPORTS[uri1->proto];
@@ -240,19 +251,9 @@ int encode_dual_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct si
         props = (props & ~TRANSPORT_MASK) | TRANSPORTS[PROTO_UDP];
     }
 
-    if (uri1->user.len > 0 && uri1->user.len <= UINT8_MAX) {
-        props |= HAS_USERNAME;
-        *p++ = (uint8_t)uri1->user.len;
-        memcpy(p, uri1->user.s, uri1->user.len);
-        p += uri1->user.len;
-    }
-
-    if (uri1->passwd.len > 0 && uri1->passwd.len <= UINT8_MAX) {
-        props |= HAS_PASSWORD;
-        *p++ = (uint8_t)uri1->passwd.len;
-        memcpy(p, uri1->passwd.s, uri1->passwd.len);
-        p += uri1->passwd.len;
-    }
+    ENCODE_URI_FIELD(uri1, user, props | HAS_USERNAME, props, p);
+    
+    ENCODE_URI_FIELD(uri1, passwd, props | HAS_PASSWORD, props, p);
 
     if (uri1->host.len > 0 && uri1->host.len < sizeof(tmp)) {
         memcpy(tmp, uri1->host.s, uri1->host.len);
@@ -265,10 +266,7 @@ int encode_dual_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct si
             props = (props & ~DOMAIN_MASK) | DOMAIN_IPV6;
             p += 16;
         } else if (uri1->host.len <= UINT8_MAX) {
-            props = (props & ~DOMAIN_MASK) | DOMAIN_FQDN;
-            *p++ = (uint8_t)uri1->host.len;
-            memcpy(p, uri1->host.s, uri1->host.len);
-            p += uri1->host.len;
+            ENCODE_URI_FIELD(uri1, host, (props & ~DOMAIN_MASK) | DOMAIN_FQDN, props, p);
         } else {
             return -1;
         }
@@ -282,31 +280,40 @@ int encode_dual_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct si
         *p++ = uri1->port_no & 0xFF;
     }
 
-    uri2_props = 0;
-    uri2_props_ptr = p;
-    p += 1;
+    if (uri2 != NULL) {
+        uri2_props = 0;
+        uri2_props_ptr = p;
+        p += 1;
 
-    uri2_props |= SCHEMES[uri2->type] & URI2_SCHEME_MASK;
-    if (uri2->proto >= PROTO_UDP && uri2->proto <= PROTO_WSS) {
-        // TRANSPORTS values are already in bits 3-5 format (0x00, 0x08, 0x10, 0x18, 0x20, 0x28)
-        // Just mask to fit in URI2 byte
-        uri2_props |= TRANSPORTS[uri2->proto] & URI2_TRANSPORT_MASK;
-    }
+        uri2_props |= SCHEMES[uri2->type] & URI2_SCHEME_MASK;
+        if (uri2->proto >= PROTO_UDP && uri2->proto <= PROTO_WSS) {
+            // TRANSPORTS values are already in bits 3-5 format (0x00, 0x08, 0x10, 0x18, 0x20, 0x28)
+            // Just mask to fit in URI2 byte
+            uri2_props |= TRANSPORTS[uri2->proto] & URI2_TRANSPORT_MASK;
+        }
 
-    if (uri2->port_no > 0) {
-        uri2_props |= URI2_HAS_PORT;
-        *p++ = (uri2->port_no >> 8) & 0xFF;
-        *p++ = uri2->port_no & 0xFF;
+        if (uri2->port_no > 0) {
+            uri2_props |= URI2_HAS_PORT;
+            *p++ = (uri2->port_no >> 8) & 0xFF;
+            *p++ = uri2->port_no & 0xFF;
+        }
+        uri2_props |= URI2_HAS_R2;
+        *uri2_props_ptr = uri2_props;
     }
 
     if (uri1->params.len > 0 && uri1->params.len <= UINT8_MAX) {
-        param_len_ptr = p++;
-        param_len = encode_params(p, &props, &uri1->params, dual_uri_skip_params_count, dual_uri_skip_params);
-
-        if (props & URI2_HAS_R2) {
-            uri2_props |= URI2_HAS_R2;
-            props &= ~URI2_HAS_R2;  // Clear it from props since it belongs in uri2_props
+        if (params_to_skip != NULL && param_count > 0) {
+            memcpy(extra_params, params_to_skip, param_count * sizeof(params_to_skip[0]));
+        } else if (params_to_skip == NULL && param_count > 0) {
+            LM_WARN("params_to_skip is null but param_count is greater than 0\n");
+            extra_param_count = 0;
         }
+
+        extra_params[extra_param_count++] = str_init("transport");
+        extra_params[extra_param_count++] = str_init("lr");
+
+        param_len_ptr = p++;
+        param_len = encode_params(p, &props, &uri1->params, extra_param_count, extra_params);
 
         if (param_len > 0) {
             *param_len_ptr = param_len;
@@ -317,140 +324,23 @@ int encode_dual_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct si
         }
     }
 
-    if (uri1->headers.len > 0 && uri1->headers.len <= UINT8_MAX) {
-        props |= HAS_HEADERS;
-        *p++ = (uint8_t)uri1->headers.len;
-        memcpy(p, uri1->headers.s, uri1->headers.len);
-        p += uri1->headers.len;
-    }
+    ENCODE_URI_FIELD(uri1, headers, props | HAS_HEADERS, props, p);
 
     props_ptr[0] = (props >> 8) & 0xFF;
     props_ptr[1] = props & 0xFF;
-
-    *uri2_props_ptr = uri2_props;
     
     encoding_uri->len = p - encoding_uri->buf;
     return p - (encoding_uri->buf + start_pos);
 }
 
+int encode_dual_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct sip_uri *uri2) {
+    return encode_uris(encoding_uri, uri1, uri2, dual_uri_skip_params_count, dual_uri_skip_params);
+}
 
 int encode_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri, int param_count, str *params_to_skip) {
-    unsigned char *p, *props_ptr, *param_len_ptr;
-    uint16_t props;
-    char tmp[256];
-    uint8_t param_len;
-    size_t start_pos;
-    str extra_params[param_count + 2];
-    int extra_param_count = param_count;
-    
-    if (encoding_uri->len + MAX_ENCODED_URI_SIZE > MAX_THINFO_BUFFER_SIZE) {
-        return -1;
-    }
-    
-    if (encoding_uri->len == 0) {
-        p = encoding_uri->buf + 3;
-        encoding_uri->len = 3;
-        encoding_uri->pos = 0;
-    } else {
-        p = encoding_uri->buf + encoding_uri->len;
-    }
-    
-    start_pos = p - encoding_uri->buf;
-    props = 0;
-    props_ptr = p;
-    p += 2;
-    
-    props = (props & ~SCHEME_MASK) | SCHEMES[uri->type];
-    
-    if (uri->user.len > 0 && uri->user.len <= UINT8_MAX) {
-        props |= HAS_USERNAME;
-        *p++ = (uint8_t)uri->user.len;
-        memcpy(p, uri->user.s, uri->user.len);
-        p += uri->user.len;
-    }
-    
-    if (uri->passwd.len > 0 && uri->passwd.len <= UINT8_MAX) {
-        props |= HAS_PASSWORD;
-        *p++ = (uint8_t)uri->passwd.len;
-        memcpy(p, uri->passwd.s, uri->passwd.len);
-        p += uri->passwd.len;
-    }
-    
-    if (uri->host.len > 0 && uri->host.len < sizeof(tmp)) {
-        memcpy(tmp, uri->host.s, uri->host.len);
-        tmp[uri->host.len] = '\0';
-        
-        if (inet_pton(AF_INET, tmp, p) == 1) {
-            props = (props & ~DOMAIN_MASK) | DOMAIN_IPV4;
-            p += 4;
-        } else if (inet_pton(AF_INET6, tmp, p) == 1) {
-            props = (props & ~DOMAIN_MASK) | DOMAIN_IPV6;
-            p += 16;
-        } else if (uri->host.len <= UINT8_MAX) {
-            props = (props & ~DOMAIN_MASK) | DOMAIN_FQDN;
-            *p++ = (uint8_t)uri->host.len;
-            memcpy(p, uri->host.s, uri->host.len);
-            p += uri->host.len;
-        } else {
-            return -1;
-        }
-    } else {
-        return -1;
-    }
-    
-    if (uri->port_no > 0) {
-        props |= HAS_PORT;
-        *p++ = (uri->port_no >> 8) & 0xFF;
-        *p++ = uri->port_no & 0xFF;
-    }
-    
-    if (uri->proto >= PROTO_UDP && uri->proto <= PROTO_WSS) {
-        props = (props & ~TRANSPORT_MASK) | TRANSPORTS[uri->proto];
-    } else {
-        props = (props & ~TRANSPORT_MASK) | TRANSPORTS[PROTO_UDP];
-    }
-
-    if (uri->params.len > 0 && uri->params.len <= UINT8_MAX) {
-        if (params_to_skip != NULL && param_count > 0) {
-            memcpy(extra_params, params_to_skip, param_count * sizeof(params_to_skip[0]));
-        } else if (params_to_skip == NULL && param_count > 0) {
-            LM_WARN("params_to_skip is null but param_count is greater than 0\n");
-            extra_param_count = 0;
-        }
-        extra_params[extra_param_count++] = str_init("transport");
-        extra_params[extra_param_count++] = str_init("lr");
-
-        param_len_ptr = p++;
-        param_len = encode_params(p, &props, &uri->params, extra_param_count, extra_params);
-        
-        if (param_len > 0) {
-            *param_len_ptr = param_len;
-            props |= HAS_PARAMS;
-            p += param_len;
-        } else {
-            p = param_len_ptr;  // Rewind if no params left
-        }
-    }
-
-    if (uri->headers.len > 0 && uri->headers.len <= UINT8_MAX) {
-        props |= HAS_HEADERS;
-        *p++ = (uint8_t)uri->headers.len;
-        memcpy(p, uri->headers.s, uri->headers.len);
-        p += uri->headers.len;
-    }
-
-	LM_ERR("ENCODE URI: props=0x%04x, buffer_pos=%ld, bytes_written=%ld\n",
-    	props, (long)(props_ptr - encoding_uri->buf), (long)(p - props_ptr));
-    
-    props_ptr[0] = (props >> 8) & 0xFF;
-    props_ptr[1] = props & 0xFF;
-    
-    encoding_uri->len = p - encoding_uri->buf;
-    return p - (encoding_uri->buf + start_pos);
+    return encode_uris(encoding_uri, uri, NULL, param_count, params_to_skip);
 }
 
-
-// Socket encoding/decoding functions
 int encode_socket(encoded_uri_t *encoding_uri, const struct socket_info *si) {
     unsigned char *p;
     uint8_t flags = 0;
@@ -484,9 +374,7 @@ int encode_socket(encoded_uri_t *encoding_uri, const struct socket_info *si) {
     } else {
         return -1;
     }
-    
-    // Check if port is non-standard (not default for protocol)
-    // For now, always encode port - can optimize later
+
     has_port = (si->port_no > 0) ? 1 : 0;
     if (has_port) {
         flags |= SOCKET_HAS_PORT;
@@ -546,8 +434,7 @@ int decode_socket(encoded_uri_t *encoded_uri, int *proto, str *ip, unsigned shor
 
     ip_type = flags & SOCKET_IP_MASK;
     has_port = (flags & SOCKET_HAS_PORT) ? 1 : 0;
-    
-    // Read IP address
+
     if (ip_type == SOCKET_IPV4) {
         if (remaining < (4 + (has_port ? 2 : 0))) return -1;  // Need 4 bytes for IP + optional 2 for port
         inet_ntop(AF_INET, p, ip_str, INET_ADDRSTRLEN);
@@ -622,9 +509,6 @@ int decode_uris(encoded_uri_t *encoded_uri, char decoded_uri_str[static MAX_ENCO
         props = (p[0] << 8) | p[1];
         p += 2;
 
-        LM_ERR("DECODE URI[%d]: props=0x%04x, HAS_LR=%d, IS_DUAL=%d, buffer_pos=%ld\n",
-            uri_idx, props, !!(props & HAS_LR), !!(props & IS_DUAL_URI), (long)(p - encoded_uri->buf));
-        
         // Validate magic bits - detect garbage data
         // Must check exact values, not just bit patterns
         scheme = props & SCHEME_MASK;
@@ -881,10 +765,6 @@ int decode_uris(encoded_uri_t *encoded_uri, char decoded_uri_str[static MAX_ENCO
                     *s++ = ',';
                     *s++ = ' ';
                 }
-                
-                LM_ERR("DEBUG decode_uris[%d]: s=%p, len=%d, content=[%.*s]\n",
-                    uri_idx, uris[uri_idx].s, uris[uri_idx].len, 
-                    uris[uri_idx].len, uris[uri_idx].s);
             }
             
             // Dual URI: we decoded 2 URIs, so increment uri_idx by 2
