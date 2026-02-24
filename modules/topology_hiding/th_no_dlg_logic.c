@@ -362,7 +362,6 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 
 static void th_no_dlg_onrequest(struct cell *t, int type, struct tmcb_params *param) {
 	struct sip_msg *req = param->req;
-	struct ua_client *uac = t->uac;
 	unsigned int flags = param->flags;
 
 	if (_th_no_dlg_onrequest(req, flags) < 0) {
@@ -418,8 +417,9 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, uint16_t flags) {
 }
 
 // TODO check star as well
-#define HAS_NO_CONTACT_BODY(_m) (((contact_body_t *) ((_m)->contact->parsed))->contacts == NULL || \
-                              ((contact_body_t *) ((_m)->contact->parsed))->contacts->next != NULL)
+#define HAS_NO_CONTACT_BODY(_m) (((contact_body_t *) ((_m)->contact->parsed))->star == 1 || \
+							    ((contact_body_t *) ((_m)->contact->parsed))->contacts == NULL || \
+                                ((contact_body_t *) ((_m)->contact->parsed))->contacts->next != NULL)
 
 static char* build_encoded_contact_suffix_legacy(struct sip_msg* msg, str *routes, unsigned int rrs_to_ignore, int *suffix_len, int flags) {
 	short rr_len,ct_len,addr_len,flags_len,enc_len;
@@ -637,7 +637,6 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 	str contact = STR_NULL;
     str rr_set = STR_NULL;
 	const struct socket_info *rr_sock = NULL;
-	contact_body_t *contact_body = NULL;
 	int is_req = (msg->first_line.type == SIP_REQUEST) ? 1 : 0;
 	str ct_uri_params_skip[URI_MAX_U_PARAMS];
 	int param_count = 0;
@@ -731,20 +730,32 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 				encoded_uris++;
 			} else {
 				next = next->next;
-				if (next != NULL && parse_uri(next->nameaddr.uri.s, next->nameaddr.uri.len, &rr_uri_r2) < 0) {
-					LM_ERR("Failed to parse SIP uri\n");
-					goto error;
+				if (next != NULL) {
+					if (parse_uri(next->nameaddr.uri.s, next->nameaddr.uri.len, &rr_uri_r2) < 0) {
+						LM_ERR("Failed to parse SIP uri\n");
+						goto error;
+					}
+				} else {
+					LM_WARN("Previous Route has r2=on but no next Route\n");
+					encoded_uris++;
+					continue;
 				}
 
-				// TODO refactor to be permissive here and allow the second one to have no r2 and also check hosts
-				if (!is_2rr(&rr_uri_r2.params)) {
-					LM_ERR("Second SIP uri is not r2=on when the first one is\n");
-					goto error;
-				}
+				if (is_2rr(&rr_uri_r2.params) && str_match(&rr_uri.host, &rr_uri_r2.host)) {
+					if (encode_dual_uri(&encoded_uri_buf, &rr_uri, &rr_uri_r2) == -1) {
+						LM_ERR("Error encoding Route URI\n");
+						goto error;
+					}
+				} else {
+					if (encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL) == -1) {
+						LM_ERR("Error encoding Route URI\n");
+						goto error;
+					}
 
-				if (encode_dual_uri(&encoded_uri_buf, &rr_uri, &rr_uri_r2) == -1) {
-					LM_ERR("Error encoding Route URI\n");
-					goto error;
+					if (encode_uri(&encoded_uri_buf, &rr_uri_r2, 0, NULL) == -1) {
+						LM_ERR("Error encoding Route URI\n");
+						goto error;
+					}
 				}
 
 				encoded_uris += 2;
