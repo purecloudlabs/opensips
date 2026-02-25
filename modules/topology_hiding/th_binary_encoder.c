@@ -481,18 +481,95 @@ uint16_t get_flags(encoded_uri_t *encoded_uri) {
     return (encoded_uri->buf[0] << 8) | encoded_uri->buf[1];
 }
 
+#define BUILD_URI_STRING(scheme_val, transport_val, port_val) \
+    do { \
+        *s++ = '<'; \
+        uri_start = s; \
+        memcpy(s, SCHEME_STRINGS[scheme_val].s, SCHEME_STRINGS[scheme_val].len); \
+        s += SCHEME_STRINGS[scheme_val].len; \
+        *s++ = ':'; \
+        if (username.len > 0) { \
+            memcpy(s, username.s, username.len); \
+            s += username.len; \
+            if (password.len > 0) { \
+                *s++ = ':'; \
+                memcpy(s, password.s, password.len); \
+                s += password.len; \
+            } \
+            *s++ = '@'; \
+        } \
+        if (domain_type == DOMAIN_IPV6) *s++ = '['; \
+        memcpy(s, host.s, host.len); \
+        s += host.len; \
+        if (domain_type == DOMAIN_IPV6) *s++ = ']'; \
+        if (port_val > 0) { \
+            s += sprintf(s, ":%u", port_val); \
+        } \
+        if (transport_val != TRANSPORT_UDP) { \
+            if (transport_val < sizeof(TRANSPORT_STRINGS)/sizeof(TRANSPORT_STRINGS[0]) && \
+                TRANSPORT_STRINGS[transport_val] != NULL) { \
+                *s++ = ';'; \
+                t_len = strlen(TRANSPORT_STRINGS[transport_val]); \
+                memcpy(s, TRANSPORT_STRINGS[transport_val], t_len); \
+                s += t_len; \
+            } \
+        } \
+        if (props & HAS_LR) { \
+            memcpy(s, ";lr", 3); \
+            s += 3; \
+        } \
+        if (has_r2) { \
+            memcpy(s, ";r2=on", 6); \
+            s += 6; \
+        } \
+        if (params.len > 0) { \
+            *s++ = ';'; \
+            memcpy(s, params.s, params.len); \
+            s += params.len; \
+        } \
+        if (headers.len > 0) { \
+            *s++ = '?'; \
+            memcpy(s, headers.s, headers.len); \
+            s += headers.len; \
+        } \
+        *s++ = '>'; \
+        uris[uri_idx].s = uri_start - 1; \
+        uris[uri_idx].len = s - uris[uri_idx].s; \
+        if (uri_idx < uri_count - 1) { \
+            *s++ = ','; \
+            if (is_dual) *s++ = ' '; \
+        } \
+    } while(0)
+
+#define DECODE_STR_FIELD(field, flag) \
+    do { \
+        field.len = 0; \
+        if (props & flag) { \
+            field.len = *p++; \
+            memcpy(field.s, p, field.len); \
+            p += field.len; \
+        } \
+    } while(0)
+
+static char host_buf[UINT8_MAX], params_buf[UINT8_MAX], username_buf[UINT8_MAX], password_buf[UINT8_MAX], headers_buf[UINT8_MAX];
+
 int decode_uris(encoded_uri_t *encoded_uri, char decoded_uri_str[static MAX_ENCODED_URI_SIZE * 3], uint16_t uri_count, str uris[static uri_count]) {
+    uint8_t domain_type, len, uri2_props = 0;
+    uint8_t scheme1 = 0, scheme2 = 0, transport1 = 0, transport2 = 0;
+    uint16_t port1 = 0, port2 = 0;
+    int has_r2 = 0;
+    int is_dual = 0;
     unsigned char *p;
     uint16_t props;
-    uint8_t domain_type, len, scheme, transport_bits;
     char *s, *uri_start;
     int t_len;
     int uri_idx;
-    char host_buf[256];
-    int host_len;
-    char params_buf[256];
-    int params_len;
-    
+    str username = {username_buf, 0};
+    str password = {password_buf, 0};
+    str host = {host_buf, 0};
+    str params = {params_buf, 0};
+    str headers = {headers_buf, 0};
+
     if (!encoded_uri || encoded_uri->len < 3 || uri_count == 0) return -1;
     
     if (encoded_uri->pos == 0) {
@@ -510,377 +587,75 @@ int decode_uris(encoded_uri_t *encoded_uri, char decoded_uri_str[static MAX_ENCO
         p += 2;
 
         // Validate magic bits - detect garbage data
-        // Must check exact values, not just bit patterns
-        scheme = props & SCHEME_MASK;
-        transport_bits = props & TRANSPORT_MASK;
+        scheme1 = props & SCHEME_MASK;
+        transport1 = props & TRANSPORT_MASK;
         domain_type = props & DOMAIN_MASK;
         
-        if (scheme > SCHEME_URN_N || transport_bits > TRANSPORT_WSS || domain_type > DOMAIN_FQDN) {
+        if (scheme1 > SCHEME_URN_N || transport1 > TRANSPORT_WSS || domain_type > DOMAIN_FQDN) {
             LM_ERR("Invalid properties detected: props=0x%04x, scheme=0x%02x, transport=0x%02x, domain=0x%02x (garbage data)\n",
-                props, scheme, transport_bits, domain_type);
+                props, scheme1, transport1, domain_type);
             return -1;
         }
+
+        is_dual = (props & IS_DUAL_URI) ? 1 : 0;
         
-        if (props & IS_DUAL_URI) {
-            // DUAL URI DECODING - New simplified format
-            // Format: [2 bytes URI1 props][shared data][2 bytes port1][1 byte URI2 props][optional 2 bytes port2]
-            
-            uint8_t uri2_props;
-            uint16_t port1 = 0, port2 = 0;
-            uint8_t scheme1, scheme2, transport1, transport2;
-            
-            // Extract URI1 scheme and transport from props
-            scheme1 = props & SCHEME_MASK;
-            transport1 = props & TRANSPORT_MASK;  // Don't shift - TRANSPORT_STRINGS is indexed by the mask value
-            
-            // Decode shared username if present
-            char username_buf[256];
-            int username_len = 0;
-            if (props & HAS_USERNAME) {
-                username_len = *p++;
-                memcpy(username_buf, p, username_len);
-                p += username_len;
-            }
-            
-            // Decode shared password if present
-            char password_buf[256];
-            int password_len = 0;
-            if (props & HAS_PASSWORD) {
-                password_len = *p++;
-                memcpy(password_buf, p, password_len);
-                p += password_len;
-            }
-            
-            // Decode shared host
-            domain_type = (props & DOMAIN_MASK);
-            if (domain_type == DOMAIN_IPV4) {
-                char tmp[INET_ADDRSTRLEN];
-                inet_ntop(AF_INET, p, tmp, sizeof(tmp));
-                host_len = strlen(tmp);
-                memcpy(host_buf, tmp, host_len);
-                p += 4;
-            } else if (domain_type == DOMAIN_IPV6) {
-                char tmp[INET6_ADDRSTRLEN];
-                inet_ntop(AF_INET6, p, tmp, sizeof(tmp));
-                host_len = strlen(tmp);
-                memcpy(host_buf, tmp, host_len);
-                p += 16;
-            } else {
-                len = *p++;
-                host_len = len;
-                memcpy(host_buf, p, len);
-                p += len;
-            }
-            
-            // Decode URI1 port
-            if (props & HAS_PORT) {
-                port1 = (p[0] << 8) | p[1];
-                p += 2;
-            }
-            
-            // Read URI2 properties byte
+        DECODE_STR_FIELD(username, HAS_USERNAME);
+
+        DECODE_STR_FIELD(password, HAS_PASSWORD);
+
+        domain_type = (props & DOMAIN_MASK);
+        host.len = 0;
+        if (domain_type == DOMAIN_IPV4) {
+            inet_ntop(AF_INET, p, host.s, UINT8_MAX);
+            host.len = strlen(host.s);
+            p += 4;
+        } else if (domain_type == DOMAIN_IPV6) {
+            inet_ntop(AF_INET6, p, host.s, UINT8_MAX);
+            host.len = strlen(host.s);
+            p += 16;
+        } else {
+            len = *p++;
+            host.len = len;
+            memcpy(host.s, p, len);
+            p += len;
+        }
+
+        if (props & HAS_PORT) {
+            port1 = (p[0] << 8) | p[1];
+            p += 2;
+        }
+
+        if (is_dual) {
             uri2_props = *p++;
             scheme2 = uri2_props & URI2_SCHEME_MASK;
-            transport2 = uri2_props & URI2_TRANSPORT_MASK;  // Extract transport bits (already in correct position for TRANSPORT_STRINGS)
-            int has_r2 = (uri2_props & URI2_HAS_R2) ? 1 : 0;
-            
-            // Decode URI2 port if present
+            transport2 = uri2_props & URI2_TRANSPORT_MASK;
+            has_r2 = (uri2_props & URI2_HAS_R2) ? 1 : 0;
+
             if (uri2_props & URI2_HAS_PORT) {
                 port2 = (p[0] << 8) | p[1];
                 p += 2;
             }
-            
-            // Decode shared params
-            params_len = 0;
-            if (props & HAS_PARAMS) {
-                params_len = *p++;
-                memcpy(params_buf, p, params_len);
-                p += params_len;
-            }
-            
-            // Decode shared headers
-            char headers_buf[256];
-            int headers_len = 0;
-            if (props & HAS_HEADERS) {
-                headers_len = *p++;
-                memcpy(headers_buf, p, headers_len);
-                p += headers_len;
-            }
-            
-            // Build FIRST URI string
-            *s++ = '<';
-            uri_start = s;
-            memcpy(s, SCHEME_STRINGS[scheme1].s, SCHEME_STRINGS[scheme1].len);
-            s += SCHEME_STRINGS[scheme1].len;
-            *s++ = ':';
-            
-            // Add username/password if present
-            if (username_len > 0) {
-                memcpy(s, username_buf, username_len);
-                s += username_len;
-                if (password_len > 0) {
-                    *s++ = ':';
-                    memcpy(s, password_buf, password_len);
-                    s += password_len;
-                }
-                *s++ = '@';
-            }
-            
-            // Add host
-            if (domain_type == DOMAIN_IPV6) *s++ = '[';
-            memcpy(s, host_buf, host_len);
-            s += host_len;
-            if (domain_type == DOMAIN_IPV6) *s++ = ']';
-            
-            // Add port
-            if (port1 > 0) {
-                s += sprintf(s, ":%u", port1);
-            }
-            
-            // Add transport for URI1 (only if not UDP)
-            if (transport1 != TRANSPORT_UDP) {
-                if (transport1 < sizeof(TRANSPORT_STRINGS)/sizeof(TRANSPORT_STRINGS[0]) && 
-                    TRANSPORT_STRINGS[transport1] != NULL) {
-                    *s++ = ';';
-                    t_len = strlen(TRANSPORT_STRINGS[transport1]);
-                    memcpy(s, TRANSPORT_STRINGS[transport1], t_len);
-                    s += t_len;
-                }
-            }
-            
-            // Add lr flag
-            if (props & HAS_LR) {
-                memcpy(s, ";lr", 3);
-                s += 3;
-            }
-            
-            // Add r2 flag (from URI2 props, not from HAS_R2)
-            if (has_r2) {
-                memcpy(s, ";r2=on", 6);
-                s += 6;
-            }
-            
-            // Add other params
-            if (params_len > 0) {
-                *s++ = ';';
-                memcpy(s, params_buf, params_len);
-                s += params_len;
-            }
-            
-            // Add headers
-            if (headers_len > 0) {
-                *s++ = '?';
-                memcpy(s, headers_buf, headers_len);
-                s += headers_len;
-            }
-            
-            *s++ = '>';
-            
-            uris[uri_idx].s = uri_start - 1;
-            uris[uri_idx].len = s - uris[uri_idx].s;
-            
-            if (uri_idx < uri_count - 1) {
-                *s++ = ',';
-            }
-            
-            LM_ERR("DEBUG decode_uris[%d]: s=%p, len=%d, content=[%.*s]\n",
-                uri_idx, uris[uri_idx].s, uris[uri_idx].len, 
-                uris[uri_idx].len, uris[uri_idx].s);
-            
-            // Build SECOND URI string
-            uri_idx++;
-            if (uri_idx < uri_count) {
-                *s++ = '<';
-                uri_start = s;
-                memcpy(s, SCHEME_STRINGS[scheme2].s, SCHEME_STRINGS[scheme2].len);
-                s += SCHEME_STRINGS[scheme2].len;
-                *s++ = ':';
-                
-                // Add username/password if present (shared)
-                if (username_len > 0) {
-                    memcpy(s, username_buf, username_len);
-                    s += username_len;
-                    if (password_len > 0) {
-                        *s++ = ':';
-                        memcpy(s, password_buf, password_len);
-                        s += password_len;
-                    }
-                    *s++ = '@';
-                }
-                
-                // Add host (shared)
-                if (domain_type == DOMAIN_IPV6) *s++ = '[';
-                memcpy(s, host_buf, host_len);
-                s += host_len;
-                if (domain_type == DOMAIN_IPV6) *s++ = ']';
-                
-                // Add port
-                if (port2 > 0) {
-                    s += sprintf(s, ":%u", port2);
-                }
-                
-                // Add transport for URI2 (only if not UDP)
-                if (transport2 != TRANSPORT_UDP) {
-                    if (transport2 < sizeof(TRANSPORT_STRINGS)/sizeof(TRANSPORT_STRINGS[0]) && 
-                        TRANSPORT_STRINGS[transport2] != NULL) {
-                        *s++ = ';';
-                        t_len = strlen(TRANSPORT_STRINGS[transport2]);
-                        memcpy(s, TRANSPORT_STRINGS[transport2], t_len);
-                        s += t_len;
-                    }
-                }
+        }
 
-                // Add r2 flag (from URI2 props, not from IS_DUAL_URI)
-                if (has_r2) {
-                    memcpy(s, ";r2=on", 6);
-                    s += 6;
-                }
-                
-                // Add lr flag (shared)
-                if (props & HAS_LR) {
-                    memcpy(s, ";lr", 3);
-                    s += 3;
-                }
-                
-                // Add other params (shared)
-                if (params_len > 0) {
-                    *s++ = ';';
-                    memcpy(s, params_buf, params_len);
-                    s += params_len;
-                }
-                
-                // Add headers (shared)
-                if (headers_len > 0) {
-                    *s++ = '?';
-                    memcpy(s, headers_buf, headers_len);
-                    s += headers_len;
-                }
-                
-                *s++ = '>';
-                
-                uris[uri_idx].s = uri_start - 1;
-                uris[uri_idx].len = s - uris[uri_idx].s;
-                
-                if (uri_idx < uri_count - 1) {
-                    *s++ = ',';
-                    *s++ = ' ';
-                }
-            }
+        DECODE_STR_FIELD(params, HAS_PARAMS);
+
+        DECODE_STR_FIELD(headers, HAS_HEADERS);
+        
+        BUILD_URI_STRING(scheme1, transport1, port1);
+        
+        LM_DBG("uri[%d]: s=%p, len=%d, content=[%.*s]\n",
+            uri_idx, uris[uri_idx].s, uris[uri_idx].len, 
+            uris[uri_idx].len, uris[uri_idx].s);
+        
+        uri_idx++;
+
+        if (is_dual && uri_idx < uri_count) {
+            BUILD_URI_STRING(scheme2, transport2, port2);
             
-            // Dual URI: we decoded 2 URIs, so increment uri_idx by 2
-            uri_idx += 2;
-            
-        } else {
-            // SINGLE URI DECODING (existing logic)
-            *s++ = '<';
-            uri_start = s;
-            
-            scheme = props & SCHEME_MASK;
-            memcpy(s, SCHEME_STRINGS[scheme].s, SCHEME_STRINGS[scheme].len);
-            s += SCHEME_STRINGS[scheme].len;
-            *s++ = ':';
-            
-            if (props & HAS_USERNAME) {
-                len = *p++;
-                memcpy(s, p, len);
-                s += len;
-                p += len;
-                
-                if (props & HAS_PASSWORD) {
-                    *s++ = ':';
-                    len = *p++;
-                    memcpy(s, p, len);
-                    s += len;
-                    p += len;
-                }
-                
-                *s++ = '@';
-            } else if (props & HAS_PASSWORD) {
-                len = *p++;
-                p += len;
-            }
-            
-            domain_type = (props & DOMAIN_MASK);
-            
-            if (domain_type == DOMAIN_IPV4) {
-                char tmp[INET_ADDRSTRLEN];
-                inet_ntop(AF_INET, p, tmp, sizeof(tmp));
-                int ip_len = strlen(tmp);
-                memcpy(s, tmp, ip_len);
-                s += ip_len;
-                p += 4;
-            } else if (domain_type == DOMAIN_IPV6) {
-                char tmp[INET6_ADDRSTRLEN];
-                *s++ = '[';
-                inet_ntop(AF_INET6, p, tmp, sizeof(tmp));
-                int ip_len = strlen(tmp);
-                memcpy(s, tmp, ip_len);
-                s += ip_len;
-                *s++ = ']';
-                p += 16;
-            } else {
-                len = *p++;
-                memcpy(s, p, len);
-                s += len;
-                p += len;
-            }
-            
-            if (props & HAS_PORT) {
-                uint16_t port = (p[0] << 8) | p[1];
-                s += sprintf(s, ":%u", port);
-                p += 2;
-            }
-            
-            // Output transport parameter only if not UDP
-            transport_bits = (props & TRANSPORT_MASK);
-            if (transport_bits != TRANSPORT_UDP) {
-                if (transport_bits < sizeof(TRANSPORT_STRINGS)/sizeof(TRANSPORT_STRINGS[0]) && 
-                    TRANSPORT_STRINGS[transport_bits] != NULL) {
-                    *s++ = ';';
-                    t_len = strlen(TRANSPORT_STRINGS[transport_bits]);
-                    memcpy(s, TRANSPORT_STRINGS[transport_bits], t_len);
-                    s += t_len;
-                }
-            }
-            
-            if (props & HAS_LR) {
-                memcpy(s, ";lr", 3);
-                s += 3;
-            }
-            
-            // Note: r2 is NOT decoded from IS_DUAL_URI flag for single URIs
-            // It stays in the params string
-            
-            if (props & HAS_PARAMS) {
-                *s++ = ';';
-                len = *p++;
-                memcpy(s, p, len);
-                s += len;
-                p += len;
-            }
-            
-            if (props & HAS_HEADERS) {
-                *s++ = '?';
-                len = *p++;
-                memcpy(s, p, len);
-                s += len;
-                p += len;
-            }
-            
-            *s++ = '>';
-            
-            uris[uri_idx].s = uri_start - 1;
-            uris[uri_idx].len = s - uris[uri_idx].s;
-            
-            if (uri_idx < uri_count - 1) {
-                *s++ = ',';
-            }
-            
-            LM_ERR("DEBUG decode_uris[%d]: s=%p, len=%d, content=[%.*s]\n",
+            LM_DBG("Dual uri[%d]: s=%p, len=%d, content=[%.*s]\n",
                 uri_idx, uris[uri_idx].s, uris[uri_idx].len, 
                 uris[uri_idx].len, uris[uri_idx].s);
             
-            // Single URI: increment uri_idx by 1
             uri_idx++;
         }
     }

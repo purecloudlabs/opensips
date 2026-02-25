@@ -80,7 +80,7 @@ static inline int topo_delete_record_route_or_route_uris(struct sip_msg *msg, hd
 	rr_t *curr_rr = NULL, *next_rr = NULL;
 	unsigned int offset;
 	int total_delete_count = 0;
-    int delete_count = uris_to_delete > 0 ? uris_to_delete : 0;
+    int delete_count = uris_to_delete > 0 ? uris_to_delete : 64;
 
 	if (hdr_type != HDR_RECORDROUTE_T && hdr_type != HDR_ROUTE_T) {
 		LM_ERR("Header type has to be one of Route or Record-Route\n");
