@@ -32,8 +32,8 @@ enum encode_scheme {ENC_BASE64, ENC_BASE32};
 #define TOPOH_USE_BINARY_ENCODING (1 << 7)
 
 /* Decoded routes buffer - shared between topology_hiding.c and th_no_dlg_logic.c */
-extern str decoded_route_set[12];
-extern int decoded_route_set_count;
+extern str decoded_uris[12];
+extern int decoded_uris_count;
 extern int ctx_decoded_routes_valid_idx;
 
 #define ctx_decoded_routes_set_valid() \
@@ -42,7 +42,7 @@ extern int ctx_decoded_routes_valid_idx;
 #define ctx_decoded_routes_is_valid() \
 	context_get_int(CONTEXT_GLOBAL, current_processing_ctx, ctx_decoded_routes_valid_idx)
 
-int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_flags);
+int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_flags, struct th_params *params);
 int topo_hiding_match_no_dlg(struct sip_msg *msg);
 
 #endif

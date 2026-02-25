@@ -26,7 +26,6 @@
 
 #include "../../ut.h"
 #include "topo_hiding_logic.h"
-#include "th_common_logic.h"
 #include "th_no_dlg_logic.h"
 
 extern int force_dialog;
@@ -111,11 +110,11 @@ int topology_hiding(struct sip_msg *req,int extra_flags, struct th_params *param
 
 			return topo_hiding_with_dlg(req, t, dlg, extra_flags, params);
 		} else {
-			return topo_hiding_no_dlg(req, t, extra_flags);
+			return topo_hiding_no_dlg(req, t, extra_flags, params);
 		}
 	}
 
-	return topo_hiding_no_dlg(req, t, extra_flags);
+	return topo_hiding_no_dlg(req, t, extra_flags, params);
 }
 
 int topo_callid_pre_raw(str *data, struct sip_msg* foo)
@@ -261,12 +260,6 @@ rebuild_rpl:
 error:
 	free_sip_msg(&msg);
 	return -1;
-}
-
-static void shm_free_wrap(void *param)
-{
-	if (param)
-		shm_free(param);
 }
 
 /* Internal dialog topology hiding functionality */

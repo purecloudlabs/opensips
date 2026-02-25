@@ -62,6 +62,7 @@ static encoded_uri_t decoded_uri_buf = { 0 };
 struct th_no_dlg_param {
 	str routes;
 	str username;
+	uint16_t flags;
 };
 
 static char decoded_uri_str[MAX_ENCODED_URI_SIZE * 3];
@@ -74,46 +75,74 @@ extern int th_ct_enc_scheme_legacy;
 extern str topo_hiding_ct_encode_pw_legacy;
 extern str th_contact_encode_param_legacy;
 extern str th_internal_trusted_tag;
+extern str th_external_socket_tag;
 extern str th_is_self_socket_tag;
 extern int auto_route_on_trusted_socket;
 
 extern struct th_ct_params *th_param_list;
 extern struct th_ct_params *th_hdr_param_list;
 
-extern str decoded_route_set[12];
-extern int decoded_route_set_count;
+extern str decoded_uris[12];
+extern int decoded_uris_count;
 
 typedef int (*decode_info_fn)(str *, str[static 1], str[static 1], const struct socket_info **, uint16_t *);
 static int decode_info_buffer(str *, str [static 1], str [static 1], const struct socket_info **, uint16_t *);
 static int decode_info_buffer_legacy(str *, str [static 1], str [static 1], const struct socket_info **, uint16_t *);
 
-static int th_no_dlg_encode_contact(struct sip_msg *, uint16_t , str *, unsigned int);
+static int th_no_dlg_encode_contact(struct sip_msg *, uint16_t , str *, unsigned int, str *);
 
 static void th_no_dlg_onrequest(struct cell *, int, struct tmcb_params *);
-static inline int _th_no_dlg_onrequest(struct sip_msg *, uint16_t);
+static inline int _th_no_dlg_onrequest(struct sip_msg *, uint16_t, str *);
 static void th_no_dlg_onreply(struct cell *, int, struct tmcb_params *);
 static int th_no_dlg_seq_handling(struct sip_msg *, str *, decode_info_fn);
 static inline int th_no_dlg_one_way_hiding(const struct socket_info *);
-static int th_no_dlg_add_auto_record_route(struct sip_msg *, int, char []);
+static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg *, int thinfo_len, char [static thinfo_len], str additional_rrs);
 static int th_no_dlg_match_record_route_or_route_uris(struct sip_msg *, struct sip_msg *, hdr_types_t);
 
 static char* build_encoded_contact_suffix(struct sip_msg *, str *, unsigned int, int *, uint16_t, int);
 
-int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_flags) {
+int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_flags, struct th_params *params) {
+	struct th_no_dlg_param *p = NULL;
+	str *username = NULL;
+	size_t param_size = 0;
+
 	if (extra_flags & TOPOH_HIDE_CALLID)
 		LM_WARN("Cannot hide callid when dialog support is not engaged!\n");
 	if (extra_flags & TOPOH_DID_IN_USER)
 		LM_WARN("Cannot store DID in user when dialog support is not engaged!\n");
 
-	if (req->REQ_METHOD != METHOD_ACK) {
-		tm_api.set_tmcb_flags(extra_flags);
+	if (!(extra_flags & TOPOH_KEEP_USER) && params && params->ct_callee_user.len) {
+		param_size = sizeof *p + params->ct_callee_user.len + sizeof(uint16_t);
+	} else {
+		param_size = sizeof *p;
+	}
 
-		if (_th_no_dlg_onrequest(req, extra_flags) < 0) {
+	p = shm_malloc(param_size);
+	if (p == NULL) {
+		LM_ERR("Failed to allocate params\n");
+		return -1;
+	}
+
+	memset(p, 0, sizeof *p);
+	
+	if (!(extra_flags & TOPOH_KEEP_USER)) {
+		p->username.s = (char *)(p + 1);
+		p->username.len =  params->ct_callee_user.len;
+		memcpy(p->username.s,  params->ct_callee_user.s,
+				params->ct_callee_user.len);
+
+		username = &params->ct_caller_user;
+	}
+
+	p->flags = extra_flags;
+
+	if (req->REQ_METHOD != METHOD_ACK) {
+		if (_th_no_dlg_onrequest(req, extra_flags, username) < 0) {
 			LM_ERR("Failed to do topology_hiding on request\n");
 			return -1;
 		}
 
-		if (tm_api.register_tmcb(req, 0, TMCB_RESPONSE_FWDED, th_no_dlg_onreply, NULL, NULL) < 0) {
+		if (tm_api.register_tmcb(req, 0, TMCB_RESPONSE_FWDED, th_no_dlg_onreply, p, shm_free_wrap) < 0) {
 			LM_ERR("failed to register TMCB\n");
 			return -1;
 		}
@@ -126,9 +155,10 @@ int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_f
 }
 
 static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_route[static 1], str thinfo[static 1], int self_route) {
+	struct th_no_dlg_param *p = NULL;
 	rr_t *after_auto = NULL;
 	const struct socket_info *sock = NULL;
-	str ip = STR_NULL;
+	str host = STR_NULL;
 	int max_size = 0, dec_len = 0, proto = 0, i = 0;
 	uint16_t flags;
 	unsigned short port = 0;
@@ -166,18 +196,25 @@ static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_rout
 	decoded_uri_buf.len = dec_len;
 	decoded_uri_buf.pos = 0;
 
-	if (decode_socket(&decoded_uri_buf, &proto, &ip, &port) <= 0) {
+	if (decode_socket(&decoded_uri_buf, &proto, &host, &port) <= 0) {
 		LM_ERR("Failed to decode socket 0\n");
 		return -1;
 	}
 
-	LM_DBG("Decoded socket host [%.*s] - Port - %d - Proto %d\n", ip.len, ip.s, port, proto);
+	LM_DBG("Decoded socket host [%.*s] - Port - %d - Proto %d\n", host.len, host.s, port, proto);
 
-	sock = grep_sock_info(&ip, port, proto);
+	if (self_route) {
+		sock = grep_sock_info(&host, port, proto);
+	} else if (th_external_socket_tag.len > 0) {
+		sock = grep_internal_sock_info(&th_external_socket_tag, 0, proto);
+	} else {
+		LM_ERR("No external socket tag defined\n");
+		return TOPOH_MATCH_FAILURE;
+	}
 
-	if (self_route && sock != NULL) {
+	if (sock != NULL) {
 		msg->force_send_socket = sock;
-	} else if (!self_route && sock == NULL) {
+	} else if (sock == NULL) {
 		LM_ERR("No socket found encoded in the auto Route\n");
 		return TOPOH_MATCH_FAILURE;
 	}
@@ -192,7 +229,7 @@ static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_rout
 		return TOPOH_MATCH_FAILURE;
 	}
 
-	if (th_no_dlg_encode_contact(msg, flags, NULL, 0) < 0) {
+	if (th_no_dlg_encode_contact(msg, flags, NULL, 0, NULL) < 0) {
 		LM_ERR("Failed to encode contact header\n");
 		return TOPOH_MATCH_FAILURE;
 	}
@@ -209,13 +246,27 @@ static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_rout
 		return TOPOH_MATCH_FAILURE;
 	}
 
-	tm_api.set_tmcb_flags(flags);
-	if (tm_api.register_tmcb(msg, 0, TMCB_RESPONSE_FWDED, th_no_dlg_onreply, NULL, NULL) < 0) {
+	p = shm_malloc(sizeof *p);
+	if (p == NULL) {
+		LM_ERR("Failed to allocate params\n");
+		return -1;
+	}
+
+	memset(p, 0, sizeof *p);
+
+	p->flags = flags;
+
+	if (tm_api.register_tmcb(msg, 0, TMCB_RESPONSE_FWDED, th_no_dlg_onreply, p, shm_free_wrap) < 0) {
 		LM_ERR("failed to register TMCB\n");
 		return TOPOH_MATCH_FAILURE;
 	}
 
-	return self_route ? TOPOH_MATCH_SUCCESS : TOPOH_MATCH_TAG_MATCH;
+	p = NULL;
+
+	if (p)
+		shm_free(p);
+
+	return TOPOH_MATCH_SUCCESS;
 }
 
 int topo_hiding_match_no_dlg(struct sip_msg *msg) {
@@ -252,7 +303,7 @@ int topo_hiding_match_no_dlg(struct sip_msg *msg) {
 				return th_no_dlg_seq_handling(msg, &request_uri->u_val[i], decode_info_buffer_legacy);
 			}
 		}
-	} else if (msg->route != NULL) {
+	} else if (msg->route != NULL && auto_route_on_trusted_socket) {
 		LM_DBG("Route header found, checking params\n");
 
 		if (!msg->route->parsed && parse_rr(msg->route) != 0) {
@@ -272,7 +323,7 @@ int topo_hiding_match_no_dlg(struct sip_msg *msg) {
 		self_route = check_self(&route_uri.host, route_uri.port_no ? route_uri.port_no : SIP_PORT, 0);
 		tag_match = th_no_dlg_one_way_hiding(msg->rcv.bind_address);
 		
-		if (self_route || (tag_match && auto_route_on_trusted_socket)) {
+		if (self_route || tag_match) {
 			if (!tag_match) {
 				LM_ERR("Inbound socket is not a trusted internal socket or tag matching disable\n");
 				return TOPOH_MATCH_FAILURE;
@@ -304,11 +355,17 @@ int topo_hiding_match_no_dlg(struct sip_msg *msg) {
 
 // TODO log callId perhaps?
 static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *param) {
-	str *route_s = (str *)*param->param;
+	struct th_no_dlg_param *p = *(param->param);
+	str *route_s = &p->routes;
+	str *username = &p->username;
 	struct sip_msg *req = param->req;
 	struct sip_msg *rpl = param->rpl;
+	struct lump *lmp = NULL;
+	char *suffix = NULL;
+	int suffix_len = 0;
 	int rr_count_to_delete = 0, rr_count_to_skip_encode = 0;
-	unsigned int flags = param->flags;
+	unsigned int flags = p->flags;
+	str rr_set = STR_NULL;
 	int is_sequential = 0;
 	int one_way_hiding = th_no_dlg_one_way_hiding(t->uas.response.dst.send_sock);
 	int req_one_way_hiding = th_no_dlg_one_way_hiding(get_send_socket(req, &t->uac->request.dst.to, t->uac->request.dst.proto));
@@ -331,7 +388,7 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 
 	LM_DBG("Original request trusted send sock '%d' reply is trusted send sock '%d'\n", req_one_way_hiding, one_way_hiding);
 
-	if (one_way_hiding && restore_vias_from_req(req, rpl) != NULL) {
+	if (one_way_hiding && (lmp = restore_vias_from_req(req, rpl)) == NULL) {
 		LM_ERR("Failed to restore VIA headers from request \n");
 		return;
 	}
@@ -348,16 +405,37 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
         } else {
             LM_WARN("Record-Route in reply do not match with request, deleting all reply headers\n");
             rr_count_to_delete = 64;
+			rr_count_to_skip_encode = 64;
         }
+
+		if (topo_delete_record_route_uris(rpl, rr_count_to_delete) < 0) {
+			LM_ERR("Failed to remove '%d' Record-Route URIs\n", rr_count_to_delete);
+			return;
+		}
 	}
 
-	if (topo_delete_record_route_uris(rpl, rr_count_to_delete) < 0) {
-		LM_ERR("Failed to remove '%d' Record-Route URIs\n", rr_count_to_delete);
-		return;
+	if (one_way_hiding) {
+		if (!is_sequential && auto_route_on_trusted_socket) {
+			if (!(suffix = build_encoded_contact_suffix(rpl, NULL, 0, &suffix_len, flags, 1))) {
+				LM_ERR("Failed to add build Record-Route suffix\n");
+				return;
+			}
+
+			if (req->record_route != NULL && print_rr_body(req->record_route, &rr_set, 0, 1, NULL) != 0 ){
+				LM_ERR("failed to print route records \n");
+				return;
+			}
+
+			if ((lmp = th_no_dlg_add_auto_record_route(rpl, suffix_len, suffix, rr_set)) == NULL) {
+				LM_ERR("Failed to add Record-Route header\n");
+				pkg_free(suffix);
+				return;
+			}
+		}
 	}
 
-    if (!one_way_hiding && !(rpl->REPLY_STATUS >= 300 && rpl->REPLY_STATUS < 400)) {
-        if (th_no_dlg_encode_contact(rpl, flags, route_s, rr_count_to_skip_encode) < 0) {
+	if (!one_way_hiding && !(rpl->REPLY_STATUS >= 300 && rpl->REPLY_STATUS < 400)) {
+        if (th_no_dlg_encode_contact(rpl, flags, route_s, rr_count_to_skip_encode, username) < 0) {
             LM_ERR("Failed to encode contact header \n");
             return;
         }
@@ -366,14 +444,16 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 
 static void th_no_dlg_onrequest(struct cell *t, int type, struct tmcb_params *param) {
 	struct sip_msg *req = param->req;
-	unsigned int flags = param->flags;
+	struct th_no_dlg_param *p = *(param->param);
+	str *username = &p->username;
+	unsigned int flags = p->flags;
 
-	if (_th_no_dlg_onrequest(req, flags) < 0) {
+	if (_th_no_dlg_onrequest(req, flags, username) < 0) {
 		LM_ERR("Failed to do topology_hiding on request\n");
 	}
 }
 
-static inline int _th_no_dlg_onrequest(struct sip_msg *req, uint16_t flags) {
+static inline int _th_no_dlg_onrequest(struct sip_msg *req, uint16_t flags, str *username) {
 	char *suffix = NULL;
 	int suffix_len = 0;
     int one_way_hiding = 0;
@@ -396,7 +476,7 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, uint16_t flags) {
 				return -1;
             }
 
-            if (th_no_dlg_encode_contact(req, flags, NULL, 0) < 0) {
+            if (th_no_dlg_encode_contact(req, flags, NULL, 0, username) < 0) {
                 LM_ERR("Failed to encode contact header\n");
                 return -1;
             }
@@ -406,7 +486,7 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, uint16_t flags) {
                 return -1;
 			}
 
-            if (th_no_dlg_add_auto_record_route(req, suffix_len, suffix)) {
+            if (th_no_dlg_add_auto_record_route(req, suffix_len, suffix, STR_NULL) == NULL) {
                 LM_ERR("Failed to add Record-Route header\n");
 				pkg_free(suffix);
                 return -1;
@@ -842,7 +922,7 @@ error:
 	return NULL;
 }
 
-static int th_no_dlg_encode_contact(struct sip_msg *msg, uint16_t flags, str *routes, unsigned int rrs_to_ignore) {
+static int th_no_dlg_encode_contact(struct sip_msg *msg, uint16_t flags, str *routes, unsigned int rrs_to_ignore, str *ct_user) {
 	struct lump* lump;
 	char *prefix = NULL,*suffix = NULL,*ct_username = NULL;
 	int prefix_len, suffix_len = 0, ct_username_len = 0;
@@ -866,7 +946,12 @@ static int th_no_dlg_encode_contact(struct sip_msg *msg, uint16_t flags, str *ro
 	LM_DBG("Flags '%d' passed for encoding Contact\n", flags);
 
 	prefix_len = 5; /* <sip: */
-	if (flags & TOPOH_KEEP_USER) {
+
+	if (ct_user && ct_user->len) {
+		ct_username = ct_user->s;
+		ct_username_len = ct_user->len;
+		prefix_len += 1 + /* @ */ + ct_username_len;
+	} else if (flags & TOPOH_KEEP_USER) {
 		if (parse_contact(msg->contact) < 0 || HAS_NO_CONTACT_BODY(msg)) {
 			LM_ERR("bad Contact HDR\n");
 		} else {
@@ -1104,9 +1189,9 @@ static int decode_info_buffer(str *info, str rr_buf[static 1], str ct_buf[static
 	LM_DBG("Decoded URI count %u\n", uri_count);
 
     *flags = get_flags(&decoded_uri_buf);
-    decoded_len = decode_uris(&decoded_uri_buf, decoded_uri_str, uri_count, decoded_route_set);
+    decoded_len = decode_uris(&decoded_uri_buf, decoded_uri_str, uri_count, decoded_uris);
 
-	decoded_route_set_count = uri_count;
+	decoded_uris_count = uri_count;
 	ctx_decoded_routes_set_valid();
 
 	if (decoded_len < 0) {
@@ -1120,17 +1205,17 @@ static int decode_info_buffer(str *info, str rr_buf[static 1], str ct_buf[static
 	}
 
     if (host.len > 0 && host.s != NULL) {
-        *sock = grep_sock_info(&host, port, proto);
-        if (!*sock) {
-            LM_WARN("non-local socket <%.*s:%d>...ignoring\n", host.len, host.s, port);
+		*sock = grep_sock_info(&host, port, proto);
+        if (!*sock && th_internal_trusted_tag.len == 0) {
+			*sock = grep_internal_sock_info(&th_internal_trusted_tag, 0, proto);
         }
     }
 
-    ct_buf->s = decoded_route_set[0].s;
-    ct_buf->len = decoded_route_set[0].len;
+    ct_buf->s = decoded_uris[0].s;
+    ct_buf->len = decoded_uris[0].len;
     
     if (uri_count > 1) {
-        rr_buf->s = decoded_route_set[1].s;
+        rr_buf->s = decoded_uris[1].s;
         rr_buf->len = decoded_len - ct_buf->len - 1;
     }
 
@@ -1220,11 +1305,11 @@ error:
 
 
 static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info, decode_info_fn decode_fn) {
-	char *route = NULL, *msg_buf = NULL;
+	char *msg_buf = NULL;
+	struct th_no_dlg_param *param = NULL;
 	str rr_buf = STR_NULL, ct_buf = STR_NULL;
 	struct hdr_field *it;
 	const struct socket_info *sock = NULL;
-	str *route_s = NULL;
 	uint16_t flags;
 	int route_flags = ROUTE_SUCCESS;
     int one_way_hiding = 0;
@@ -1290,22 +1375,32 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info, decode_info_fn
 			}
 		}
 
-		route_s = shm_malloc(sizeof *route_s + rr_buf.len);
-		if (route_s) {
-			route_s->s = (char *)(route_s + 1);
-			memcpy(route_s->s, rr_buf.s, rr_buf.len);
-			route_s->len = rr_buf.len;
+		param = shm_malloc(sizeof *param + rr_buf.len);
+		if (param) {
+			memset(param, 0, sizeof *param);
+			param->routes.s = (char *)(param + 1);
+			param->routes.len = rr_buf.len;
+			memcpy(param->routes.s, rr_buf.s, rr_buf.len);
 		}
+	} else {
+		param = shm_malloc(sizeof *param);
+		if (param == NULL) {
+			LM_ERR("Failed to allocate params\n");
+			return -1;
+		}
+
+		memset(param, 0, sizeof *param);
 	}
 
-	tm_api.set_tmcb_flags(flags);
+	param->flags = flags;
+
 	/* register tm callback for response in  */
-	if (tm_api.register_tmcb(msg, 0, TMCB_RESPONSE_FWDED, th_no_dlg_onreply, route_s, topo_no_dlg_seq_free) < 0) {
+	if (tm_api.register_tmcb(msg, 0, TMCB_RESPONSE_FWDED, th_no_dlg_onreply, param, shm_free_wrap) < 0) {
 		LM_ERR("failed to register TMCB\n");
-		goto err_free_route;
+		goto err_free_params;
 	}
 
-	route_s = NULL;
+	param = NULL;
 
 	if (!sock) {
 		sock = msg->force_send_socket;
@@ -1319,7 +1414,7 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info, decode_info_fn
 			return TOPOH_MATCH_FAILURE;
 		}
 
-        if (th_no_dlg_encode_contact(msg, flags, NULL, 0) < 0) {
+        if (th_no_dlg_encode_contact(msg, flags, NULL, 0, NULL) < 0) {
             LM_ERR("Failed to encode contact header \n");
             return TOPOH_MATCH_FAILURE;
         }
@@ -1327,11 +1422,9 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info, decode_info_fn
 
 	return TOPOH_MATCH_SUCCESS;
 
-err_free_route:
-	if (route)
-		pkg_free(route);
-	if (route_s)
-		shm_free(route_s);
+err_free_params:
+	if (param)
+		shm_free(param);
 err_fail_early:
 	return TOPOH_MATCH_FAILURE;
 }
@@ -1368,18 +1461,23 @@ static inline int th_no_dlg_one_way_hiding(const struct socket_info *socket) {
 #define RR_R2 ";r2=on"
 #define RR_R2_LEN (sizeof(RR_R2)-1)
 
-#define RR_TERM ">"CRLF
+#define RR_TERM ">"
 #define RR_TERM_LEN (sizeof(RR_TERM)-1)
 
-static int th_no_dlg_add_auto_record_route(struct sip_msg* msg, int thinfo_len, char thinfo[static thinfo_len]) {
+#define RR_SEPARATOR ","
+#define RR_SEPARATOR_LEN (sizeof(RR_SEPARATOR)-1)
+
+static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg* msg, int thinfo_len, char thinfo[static thinfo_len], str additional_rrs) {
     struct lump *l;
     char *prefix, *suffix;
     int prefix_len, suffix_len;
+	int suffix_counter = 0;
     char *anchor_pos;
+	int has_additional_rrs = additional_rrs.s != NULL && additional_rrs.len > 0;
 
     if (parse_headers(msg, HDR_RECORDROUTE_F, 0) < 0) {
         LM_ERR("failed to parse headers\n");
-        return -1;
+        return NULL;
     }
 
     /* Get the anchor position relative to other Record-Routes if existing */
@@ -1388,51 +1486,63 @@ static int th_no_dlg_add_auto_record_route(struct sip_msg* msg, int thinfo_len, 
     l = anchor_lump(msg, anchor_pos - msg->buf, HDR_RECORDROUTE_T);
     if (!l) {
         LM_ERR("failed to create anchor\n");
-        return -1;
+        return NULL;
     }
 
     prefix_len = RR_PREFIX_LEN;
     prefix = pkg_malloc(prefix_len);
     if (!prefix) {
         LM_ERR("no pkg memory for prefix\n");
-        return -1;
+        return NULL;
     }
     memcpy(prefix, RR_PREFIX, RR_PREFIX_LEN);
 
     if (!(l = insert_new_lump_after(l, prefix, prefix_len, 0))) {
         LM_ERR("failed to insert prefix\n");
         pkg_free(prefix);
-        return -1;
+        return NULL;
     }
 
     l = insert_subst_lump_after(l, SUBST_SND_ALL, 0);
     if (!l) {
         LM_ERR("failed to insert subst lump\n");
-        return -1;
+        return NULL;
     }
 
     if (!(l = insert_new_lump_after(l, thinfo, thinfo_len, 0))) {
         LM_ERR("failed to insert thinfo param\n");
-        return -1;
+        return NULL;
     }
 
-    suffix_len = RR_LR_LEN + RR_TERM_LEN;
+    suffix_len = RR_LR_LEN + RR_TERM_LEN + (has_additional_rrs ? RR_SEPARATOR_LEN + additional_rrs.len + CRLF_LEN : CRLF_LEN);
+
     suffix = pkg_malloc(suffix_len);
     if (!suffix) {
         LM_ERR("no pkg memory for suffix\n");
-        return -1;
+        return NULL;
     }
     
     memcpy(suffix, RR_LR, RR_LR_LEN);
-    memcpy(suffix + RR_LR_LEN, RR_TERM, RR_TERM_LEN);
+	suffix_counter += RR_LR_LEN;
+    memcpy(suffix + suffix_counter, RR_TERM, RR_TERM_LEN);
+	suffix_counter += RR_TERM_LEN;
+
+	if (has_additional_rrs) {
+		memcpy(suffix + suffix_counter, RR_SEPARATOR, RR_SEPARATOR_LEN);
+		suffix_counter += RR_SEPARATOR_LEN;
+		memcpy(suffix + suffix_counter, additional_rrs.s, additional_rrs.len);
+		suffix_counter += additional_rrs.len;
+	}
+
+	memcpy(suffix + suffix_counter, CRLF, CRLF_LEN);
 
     if (!(l = insert_new_lump_after(l, suffix, suffix_len, 0))) {
         LM_ERR("failed to insert suffix\n");
         pkg_free(suffix);
-        return -1;
+        return NULL;
     }
     
-    return 0;
+    return l;
 }
 
 static int rr_equal(rr_t *p1, rr_t *p2) {

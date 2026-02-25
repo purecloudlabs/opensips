@@ -40,10 +40,7 @@
 #include "../rr/api.h"
 #include "../dialog/dlg_load.h"
 
-struct th_params {
-	str ct_caller_user;
-	str ct_callee_user;
-};
+#include "th_common_logic.h"
 
 extern str th_contact_caller_var;
 extern str th_contact_callee_var;
