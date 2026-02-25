@@ -88,7 +88,6 @@ static int decode_info_buffer(str *, str [static 1], str [static 1], const struc
 static int decode_info_buffer_legacy(str *, str [static 1], str [static 1], const struct socket_info **, uint16_t *);
 
 static int th_no_dlg_encode_contact(struct sip_msg *, uint16_t , str *, unsigned int);
-static int th_no_dlg_rebuild_record_routes(str *routes[static 1]); // TODO add back in
 
 static void th_no_dlg_onrequest(struct cell *, int, struct tmcb_params *);
 static inline int _th_no_dlg_onrequest(struct sip_msg *, uint16_t);
@@ -340,11 +339,16 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 	if (!is_sequential && req_one_way_hiding) {
 		rr_count_to_delete = th_no_dlg_match_record_route_or_route_uris(req, rpl, HDR_RECORDROUTE_T);
 
-		if (req->record_route == NULL) {
-			rr_count_to_skip_encode = auto_route_on_trusted_socket ? 1 : 0;
-		} else {
-			rr_count_to_skip_encode = rr_count_to_delete;
-		}
+        if (rr_count_to_delete != -1) {
+            if (req->record_route == NULL) {
+                rr_count_to_skip_encode = auto_route_on_trusted_socket ? 1 : 0;
+            } else {
+                rr_count_to_skip_encode = rr_count_to_delete;
+		    }
+        } else {
+            LM_WARN("Record-Route in reply do not match with request, deleting all reply headers\n");
+            rr_count_to_delete = 64;
+        }
 	}
 
 	if (topo_delete_record_route_uris(rpl, rr_count_to_delete) < 0) {
@@ -416,7 +420,6 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, uint16_t flags) {
 	return 1;
 }
 
-// TODO check star as well
 #define HAS_NO_CONTACT_BODY(_m) (((contact_body_t *) ((_m)->contact->parsed))->star == 1 || \
 							    ((contact_body_t *) ((_m)->contact->parsed))->contacts == NULL || \
                                 ((contact_body_t *) ((_m)->contact->parsed))->contacts->next != NULL)
@@ -773,7 +776,7 @@ static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsi
 
     LM_DBG("Encoding %u URIs\n", encoded_uris);
 
-socket_only: // TODO need to verify buffers potentially
+socket_only:
     if (encode_socket(&encoded_uri_buf, msg->rcv.bind_address) < 0) {
         LM_ERR("Error encoding socket\n");
         goto error;
@@ -839,7 +842,6 @@ error:
 	return NULL;
 }
 
-// TODO test when Record-Routes are in bad shape it kind of spins on the process, potential DDOS
 static int th_no_dlg_encode_contact(struct sip_msg *msg, uint16_t flags, str *routes, unsigned int rrs_to_ignore) {
 	struct lump* lump;
 	char *prefix = NULL,*suffix = NULL,*ct_username = NULL;
@@ -926,6 +928,11 @@ static int th_no_dlg_encode_contact(struct sip_msg *msg, uint16_t flags, str *ro
 
 	return 0;
 error:
+    // Need to add this lump in on error to stop the process from blocking
+    if (!(lump = insert_subst_lump_after(lump, SUBST_SND_ALL, 0))) {
+        LM_ERR("failed inserting SUBST_SND buf\n");
+        goto error;
+    }
 	if (prefix) pkg_free(prefix);
 	if (suffix) pkg_free(suffix);
 	return -1;
@@ -1501,6 +1508,11 @@ static int th_no_dlg_match_record_route_or_route_uris(struct sip_msg *req, struc
 		}
 		rpl_rr = (rr_t*) rpl_hf->parsed;
 
+        if (req_rr == NULL) {
+            LM_ERR("Reply headers left to check when all Request headers checked\n");
+            return -1;
+        }
+
 		while (rpl_rr) {
 			rpl_route_count++;
 			matched = rr_equal(req_rr, rpl_rr);
@@ -1519,6 +1531,7 @@ static int th_no_dlg_match_record_route_or_route_uris(struct sip_msg *req, struc
 					}
 				}
 			}
+
 			if (matched_count > 0 && !matched) {
 				return -1;
 			}
