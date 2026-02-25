@@ -204,7 +204,6 @@ struct tmcb_params {
 	struct sip_msg* req;
 	struct sip_msg* rpl;
 	int code;
-	unsigned int flags;
 	void **param;
 	void *extra1;
 	void *extra2;
@@ -225,7 +224,6 @@ struct tm_callback {
 	transaction_cb* callback;    /* callback function */
 	void *param;                 /* param to be passed to callback function */
 	release_tmcb_param *release; /* function to release the callback param when the callback is deleted */
-	unsigned int flags;          /* flags to be passed into the callback*/
 	struct tm_callback* next;
 };
 
@@ -265,9 +263,6 @@ int insert_tmcb(struct tmcb_head_list *cb_list, int types,
 
 /* set extra params for callbacks */
 void set_extra_tmcb_params(void *extra1, void *extra2);
-
-/* set extra params for callbacks */
-void set_tmcb_flags(unsigned int flags);
 
 /* run all transaction callbacks for an event type */
 void run_trans_callbacks( int type , struct cell *trans,

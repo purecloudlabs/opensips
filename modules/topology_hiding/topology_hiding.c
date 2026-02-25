@@ -568,4 +568,8 @@ static int pv_topo_decoded_contact(struct sip_msg *msg, pv_param_t *param, pv_va
 		return pv_get_null(msg, param, res);
 
 	return pv_topo_decoded_uri(msg, param, res, 0);
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 76e1a95621 (Ported user changes)

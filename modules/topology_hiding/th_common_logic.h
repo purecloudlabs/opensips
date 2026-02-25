@@ -23,7 +23,13 @@
 
 #include "../../str.h"
 #include "../../data_lump.h"
+#include "../../mem/shm_mem.h"
 #include "../../parser/contact/parse_contact.h"
+
+struct th_params {
+	str ct_caller_user;
+	str ct_callee_user;
+};
 
 #define RECORD_ROUTE "Record-Route: "
 #define RECORD_ROUTE_LEN (sizeof(RECORD_ROUTE)-1)
@@ -68,6 +74,11 @@ static inline char *topo_ct_param_copy(char *buf, str *name, str *val, int shoul
 			*buf++ = '"';
 	}
 	return buf;
+}
+
+static void shm_free_wrap(void *param) {
+	if (param)
+		shm_free(param);
 }
 
 #endif
