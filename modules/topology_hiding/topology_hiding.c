@@ -93,22 +93,22 @@ static const cmd_export_t cmds[]={
 
 /* Exported parameters */
 static const param_export_t params[] = {
-	{ "force_dialog",                INT_PARAM, &force_dialog                },
-	{ "th_passed_contact_uri_params",STR_PARAM, &topo_hiding_ct_params.s     },
-	{ "th_passed_contact_params",    STR_PARAM, &topo_hiding_ct_hdr_params.s },
-	{ "th_callid_passwd",            STR_PARAM, &topo_hiding_seed.s          },
-	{ "th_callid_prefix",            STR_PARAM, &topo_hiding_prefix.s        },
-	{ "th_contact_encode_passwd",    STR_PARAM, &topo_hiding_ct_encode_pw.s  },
-	{ "th_contact_encode_param",     STR_PARAM, &th_contact_encode_param.s   },
-	{ "th_contact_encode_scheme",    STR_PARAM, &th_contact_encode_scheme.s  },
-	{ "th_contact_caller_username_var", STR_PARAM, &th_contact_caller_var.s  },
-	{ "th_contact_callee_username_var", STR_PARAM, &th_contact_callee_var.s  },
-	{ "th_contact_encode_passwd_legacy",    STR_PARAM, &topo_hiding_ct_encode_pw_legacy.s  },
-	{ "th_contact_encode_param_legacy",     STR_PARAM, &th_contact_encode_param_legacy.s   },
-	{ "th_contact_encode_scheme_legacy",    STR_PARAM, &th_contact_encode_scheme_legacy.s  },
-	{ "th_internal_trusted_tag",     STR_PARAM, &th_internal_trusted_tag.s   },
-	{ "th_external_socket_tag",     STR_PARAM, &th_external_socket_tag.s   },
-	{ "th_auto_route_on_trusted_socket",                INT_PARAM, &auto_route_on_trusted_socket                },
+	{ "force_dialog",                    INT_PARAM, &force_dialog                      },
+	{ "th_passed_contact_uri_params",    STR_PARAM, &topo_hiding_ct_params.s           },
+	{ "th_passed_contact_params",        STR_PARAM, &topo_hiding_ct_hdr_params.s       },
+	{ "th_callid_passwd",                STR_PARAM, &topo_hiding_seed.s                },
+	{ "th_callid_prefix",                STR_PARAM, &topo_hiding_prefix.s              },
+	{ "th_contact_encode_passwd",        STR_PARAM, &topo_hiding_ct_encode_pw.s        },
+	{ "th_contact_encode_param",         STR_PARAM, &th_contact_encode_param.s         },
+	{ "th_contact_encode_scheme",        STR_PARAM, &th_contact_encode_scheme.s        },
+	{ "th_contact_caller_username_var",  STR_PARAM, &th_contact_caller_var.s           },
+	{ "th_contact_callee_username_var",  STR_PARAM, &th_contact_callee_var.s           },
+	{ "th_contact_encode_passwd_legacy", STR_PARAM, &topo_hiding_ct_encode_pw_legacy.s },
+	{ "th_contact_encode_param_legacy",  STR_PARAM, &th_contact_encode_param_legacy.s  },
+	{ "th_contact_encode_scheme_legacy", STR_PARAM, &th_contact_encode_scheme_legacy.s },
+	{ "th_internal_trusted_tag",         STR_PARAM, &th_internal_trusted_tag.s         },
+	{ "th_external_socket_tag",          STR_PARAM, &th_external_socket_tag.s          },
+	{ "th_auto_route_on_trusted_socket", INT_PARAM, &auto_route_on_trusted_socket      },
 	{0, 0, 0}
 };
 
@@ -136,12 +136,12 @@ static module_dependency_t *get_deps_dialog(const param_export_t *param)
 
 static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
-		{ MOD_TYPE_DEFAULT, "tm",          DEP_ABORT  },
-		{ MOD_TYPE_DEFAULT, "dialog",      DEP_SILENT },
+		{ MOD_TYPE_DEFAULT, "tm", DEP_ABORT  },
+		{ MOD_TYPE_DEFAULT, "dialog", DEP_SILENT },
 		{ MOD_TYPE_NULL, NULL, 0 },
 	},
 	{ /* modparam dependencies */
-		{ "force_dialog", get_deps_dialog },
+		{ "force_dialog",		get_deps_dialog },
 		{ NULL, NULL },
 	},
 };

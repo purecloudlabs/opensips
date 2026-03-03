@@ -216,7 +216,6 @@ typedef void (release_tmcb_param) (void *param);
 /* register callback function prototype */
 typedef int (*register_tmcb_f)(struct sip_msg* p_msg, struct cell *t,
 		int cb_types, transaction_cb f, void *param, release_tmcb_param func);
-typedef void (*set_tmcb_flags_f)(unsigned int flags);
 
 struct tm_callback {
 	int id;                      /* id of this callback - useless */

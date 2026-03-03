@@ -1,6 +1,6 @@
 #include <stdint.h>
 
-#include "th_binary_encoder.h"
+#include "thinfo_codec.h"
 
 #include "../../parser/msg_parser.h"
 #include "../../socket_info.h"
@@ -198,7 +198,7 @@ static uint8_t encode_params(unsigned char *p, uint16_t *uri_properties, str *pa
         } \
     } while(0)
 
-static int encode_uris(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct sip_uri *uri2, int param_count, str *params_to_skip) {
+static int encode_uris(thinfo_encoded_t *thinfo, struct sip_uri *uri1, struct sip_uri *uri2, int param_count, str *params_to_skip) {
     unsigned char *p, *props_ptr, *param_len_ptr, *uri2_props_ptr;
     uint16_t props = 0;
     uint8_t uri2_props;
@@ -208,19 +208,19 @@ static int encode_uris(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct
     str extra_params[param_count + 2];
     int extra_param_count = param_count;
     
-    if (encoding_uri->len + MAX_ENCODED_URI_SIZE * 2 > MAX_THINFO_BUFFER_SIZE) {
+    if (thinfo->len + MAX_ENCODED_URI_SIZE * 2 > MAX_THINFO_BUFFER_SIZE) {
         return -1;
     }
     
-    if (encoding_uri->len == 0) {
-        p = encoding_uri->buf + 3;
-        encoding_uri->len = 3;
-        encoding_uri->pos = 0;
+    if (thinfo->len == 0) {
+        p = thinfo->buf + 3;
+        thinfo->len = 3;
+        thinfo->pos = 0;
     } else {
-        p = encoding_uri->buf + encoding_uri->len;
+        p = thinfo->buf + thinfo->len;
     }
     
-    start_pos = p - encoding_uri->buf;
+    start_pos = p - thinfo->buf;
     
     if (uri2 != NULL) {
         props = IS_DUAL_URI;
@@ -313,19 +313,19 @@ static int encode_uris(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct
     props_ptr[0] = (props >> 8) & 0xFF;
     props_ptr[1] = props & 0xFF;
     
-    encoding_uri->len = p - encoding_uri->buf;
-    return p - (encoding_uri->buf + start_pos);
+    thinfo->len = p - thinfo->buf;
+    return p - (thinfo->buf + start_pos);
 }
 
-int encode_dual_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct sip_uri *uri2) {
-    return encode_uris(encoding_uri, uri1, uri2, dual_uri_skip_params_count, dual_uri_skip_params);
+int thinfo_encode_dual_uri(thinfo_encoded_t *thinfo, struct sip_uri *uri1, struct sip_uri *uri2) {
+    return encode_uris(thinfo, uri1, uri2, dual_uri_skip_params_count, dual_uri_skip_params);
 }
 
-int encode_uri(encoded_uri_t *encoding_uri, struct sip_uri *uri, int param_count, str *params_to_skip) {
-    return encode_uris(encoding_uri, uri, NULL, param_count, params_to_skip);
+int thinfo_encode_uri(thinfo_encoded_t *thinfo, struct sip_uri *uri, int param_count, str *params_to_skip) {
+    return encode_uris(thinfo, uri, NULL, param_count, params_to_skip);
 }
 
-int encode_socket(encoded_uri_t *encoding_uri, const struct socket_info *si) {
+int thinfo_encode_socket(thinfo_encoded_t *thinfo, const struct socket_info *si) {
     unsigned char *p;
     uint8_t flags = 0;
     int has_port = 0;
@@ -335,15 +335,15 @@ int encode_socket(encoded_uri_t *encoding_uri, const struct socket_info *si) {
         return -1;
     }
     
-    if (encoding_uri->len + MAX_ENCODED_URI_SIZE > MAX_THINFO_BUFFER_SIZE) {
+    if (thinfo->len + MAX_ENCODED_URI_SIZE > MAX_THINFO_BUFFER_SIZE) {
         return -1;
     }
 
-    if (encoding_uri->len == 0) {
-        encoding_uri->len = 3;
+    if (thinfo->len == 0) {
+        thinfo->len = 3;
     }
 
-    p = encoding_uri->buf + encoding_uri->len;
+    p = thinfo->buf + thinfo->len;
 
     if (si->proto >= PROTO_UDP && si->proto <= PROTO_WSS) {
         flags |= (TRANSPORTS[si->proto] >> 3) & SOCKET_PROTO_MASK;
@@ -379,26 +379,26 @@ int encode_socket(encoded_uri_t *encoding_uri, const struct socket_info *si) {
         *p++ = si->port_no & 0xFF;
     }
     
-    int bytes_written = p - (encoding_uri->buf + encoding_uri->len);
-    encoding_uri->len = p - encoding_uri->buf;
+    int bytes_written = p - (thinfo->buf + thinfo->len);
+    thinfo->len = p - thinfo->buf;
     
     return bytes_written;
 }
 
-int decode_socket(encoded_uri_t *encoded_uri, int *proto, str *ip, unsigned short *port) {
+int thinfo_decode_socket(thinfo_encoded_t *thinfo, int *proto, str *ip, unsigned short *port) {
     static char ip_str[INET6_ADDRSTRLEN];
     unsigned char *p;
     uint8_t flags, proto_bits, ip_type;
     int remaining, has_port;
     
-    if (!encoded_uri || encoded_uri->pos >= encoded_uri->len) return -1;
+    if (!thinfo || thinfo->pos >= thinfo->len) return -1;
 
-    if (encoded_uri->pos == 0) {
-        encoded_uri->pos = 3;
+    if (thinfo->pos == 0) {
+        thinfo->pos = 3;
     }
     
-    p = encoded_uri->buf + encoded_uri->pos;
-    remaining = encoded_uri->len - encoded_uri->pos;
+    p = thinfo->buf + thinfo->pos;
+    remaining = thinfo->len - thinfo->pos;
     
     if (remaining < 5) return -1;  // Minimum: 1 byte flags + 4 bytes IPv4
     
@@ -442,27 +442,9 @@ int decode_socket(encoded_uri_t *encoded_uri, int *proto, str *ip, unsigned shor
         *port = 0;
     }
     
-    encoded_uri->pos = p - encoded_uri->buf;
+    thinfo->pos = p - thinfo->buf;
     
     return 1;
-}
-
-void reset_encode_buffer(encoded_uri_t *encoded_uri) {
-    encoded_uri->len = 0;
-}
-
-void finalize_encode_buffer(encoded_uri_t *encoded_uri, uint16_t flags, uint8_t count) {
-    encoded_uri->buf[0] = (flags >> 8) & 0xFF;
-    encoded_uri->buf[1] = flags & 0xFF;
-    encoded_uri->buf[2] = count;
-}
-
-uint8_t get_uri_count(encoded_uri_t *encoded_uri) {
-    return encoded_uri->buf[2];
-}
-
-uint16_t get_flags(encoded_uri_t *encoded_uri) {
-    return (encoded_uri->buf[0] << 8) | encoded_uri->buf[1];
 }
 
 #define BUILD_URI_STRING(scheme_val, transport_val, port_val) \
@@ -537,7 +519,7 @@ uint16_t get_flags(encoded_uri_t *encoded_uri) {
 
 static char host_buf[UINT8_MAX], params_buf[UINT8_MAX], username_buf[UINT8_MAX], password_buf[UINT8_MAX], headers_buf[UINT8_MAX];
 
-int decode_uris(encoded_uri_t *encoded_uri, char decoded_uri_str[static MAX_ENCODED_URI_SIZE * 3], uint16_t uri_count, str uris[static uri_count]) {
+int thinfo_decode_uris(thinfo_encoded_t *thinfo, char decoded_uri_str[static MAX_ENCODED_URI_SIZE * 3], uint16_t uri_count, str uris[static uri_count]) {
     uint8_t domain_type, len, uri2_props = 0;
     uint8_t scheme1 = 0, scheme2 = 0, transport1 = 0, transport2 = 0;
     uint16_t port1 = 0, port2 = 0;
@@ -554,18 +536,18 @@ int decode_uris(encoded_uri_t *encoded_uri, char decoded_uri_str[static MAX_ENCO
     str params = {params_buf, 0};
     str headers = {headers_buf, 0};
 
-    if (!encoded_uri || encoded_uri->len < 3 || uri_count == 0) return -1;
+    if (!thinfo || thinfo->len < 3 || uri_count == 0) return -1;
     
-    if (encoded_uri->pos == 0) {
-        encoded_uri->pos = 3;
+    if (thinfo->pos == 0) {
+        thinfo->pos = 3;
     }
     
-    p = encoded_uri->buf + encoded_uri->pos;
+    p = thinfo->buf + thinfo->pos;
     s = decoded_uri_str;
     
     uri_idx = 0;
     while (uri_idx < uri_count) {
-        if ((p - encoded_uri->buf) >= encoded_uri->len) return -1;
+        if ((p - thinfo->buf) >= thinfo->len) return -1;
         
         props = (p[0] << 8) | p[1];
         p += 2;
@@ -644,7 +626,26 @@ int decode_uris(encoded_uri_t *encoded_uri, char decoded_uri_str[static MAX_ENCO
         }
     }
     
-    encoded_uri->pos = p - encoded_uri->buf;
+    thinfo->pos = p - thinfo->buf;
     
     return s - decoded_uri_str;
+}
+
+void thinfo_buffer_reset(thinfo_encoded_t *thinfo) {
+    thinfo->len = 0;
+    thinfo->pos = 0;
+}
+
+void thinfo_buffer_finalize(thinfo_encoded_t *thinfo, uint16_t flags, uint8_t count) {
+    thinfo->buf[0] = (flags >> 8) & 0xFF;
+    thinfo->buf[1] = flags & 0xFF;
+    thinfo->buf[2] = count;
+}
+
+uint8_t thinfo_get_uri_count(thinfo_encoded_t *thinfo) {
+    return thinfo->buf[2];
+}
+
+uint16_t thinfo_get_flags(thinfo_encoded_t *thinfo) {
+    return (thinfo->buf[0] << 8) | thinfo->buf[1];
 }

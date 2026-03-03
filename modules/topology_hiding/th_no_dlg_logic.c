@@ -27,7 +27,7 @@
 #include "../rr/loose.h"
 #include "../rr/api.h"
 #include "../compression/compression_api.h"
-#include "th_binary_encoder.h"
+#include "thinfo_codec.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -91,8 +91,8 @@
 
 extern struct tm_binds tm_api;
 
-static encoded_uri_t encoded_uri_buf = { 0 };
-static encoded_uri_t decoded_uri_buf = { 0 };
+static thinfo_encoded_t encoded_uri_buf = { 0 };
+static thinfo_encoded_t decoded_uri_buf = { 0 };
 
 struct th_no_dlg_param {
 	str routes;
@@ -221,17 +221,17 @@ static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_rout
 	for (i = 0; i < dec_len; i++)
 		decoded_uri_buf.buf[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
 
-	if (get_uri_count(&decoded_uri_buf) != 0) {
+	if (thinfo_get_uri_count(&decoded_uri_buf) != 0) {
 		LM_ERR("Encoded URI count is invalid, can only be 0 in auto Route\n");
 		return TOPOH_MATCH_FAILURE;
 	}
 
-	flags = get_flags(&decoded_uri_buf);
+	flags = thinfo_get_flags(&decoded_uri_buf);
 
 	decoded_uri_buf.len = dec_len;
 	decoded_uri_buf.pos = 0;
 
-	if (decode_socket(&decoded_uri_buf, &proto, &host, &port) <= 0) {
+	if (thinfo_decode_socket(&decoded_uri_buf, &proto, &host, &port) <= 0) {
 		LM_ERR("Failed to decode socket 0\n");
 		return -1;
 	}
@@ -556,9 +556,9 @@ static char* build_encoded_contact_suffix_legacy(struct sip_msg* msg, str *route
 	const struct socket_info *rr_sock = NULL;
 	int params_len = 0;
 	int local_len = sizeof(short) /* RR length */ +
-			sizeof(short) /* Contact length */ +
-			sizeof(short) /* RR length */ +
-			sizeof(short) /* bind addr */;
+					sizeof(short) /* Contact length */ +
+					sizeof(short) /* RR length */ +
+					sizeof(short) /* bind addr */;
 
 	/* parse all headers as we can have multiple
 	   RR headers in the same message */
@@ -567,10 +567,10 @@ static char* build_encoded_contact_suffix_legacy(struct sip_msg* msg, str *route
 		return NULL;
 	}
 
-	if (routes) {
+	if (routes && routes->len > 0) {
 		rr_set = *routes;
 		rr_len = (short)routes->len;
-		LM_INFO("XXX: adding [%.*s]\n", routes->len, routes->s);
+		LM_DBG("XXX: adding [%.*s]\n", routes->len, routes->s);
 	} else if(msg->record_route){
 		if (print_rr_body(msg->record_route, &rr_set, !is_req, 0, &rrs_to_ignore) != 0){
 			LM_ERR("failed to print route records \n");
@@ -740,7 +740,7 @@ error:
 	if (rr_set_free_str)
 		pkg_free(rr_set_free_str);
 	if (routes)
-		pkg_free(routes);
+		shm_free(routes);
 	return NULL;
 }
 
@@ -767,7 +767,7 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
 		return NULL;
 	}
 
-    reset_encode_buffer(&encoded_uri_buf);
+    thinfo_buffer_reset(&encoded_uri_buf);
 
     if (socket_only == 1) {
 		goto socket_only;
@@ -805,7 +805,7 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
 		}
 	}
 
-	if (encode_uri(&encoded_uri_buf, &ctu, param_count, ct_uri_params_skip) == -1) {
+	if (thinfo_encode_uri(&encoded_uri_buf, &ctu, param_count, ct_uri_params_skip) == -1) {
 		LM_ERR("Error encoding Contact URI\n");
 		goto error;
 	}
@@ -841,7 +841,7 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
 
         if (!th_no_dlg_one_way_hiding(rr_sock)) {
 			if (!is_2rr(&rr_uri.params)) {
-				if (encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL) == -1) {
+				if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL) == -1) {
 					LM_ERR("Error encoding Route URI\n");
 					goto error;
 				}
@@ -861,17 +861,17 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
 				}
 
 				if (is_2rr(&rr_uri_r2.params) && str_match(&rr_uri.host, &rr_uri_r2.host)) {
-					if (encode_dual_uri(&encoded_uri_buf, &rr_uri, &rr_uri_r2) == -1) {
+					if (thinfo_encode_dual_uri(&encoded_uri_buf, &rr_uri, &rr_uri_r2) == -1) {
 						LM_ERR("Error encoding Route URI\n");
 						goto error;
 					}
 				} else {
-					if (encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL) == -1) {
+					if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL) == -1) {
 						LM_ERR("Error encoding Route URI\n");
 						goto error;
 					}
 
-					if (encode_uri(&encoded_uri_buf, &rr_uri_r2, 0, NULL) == -1) {
+					if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri_r2, 0, NULL) == -1) {
 						LM_ERR("Error encoding Route URI\n");
 						goto error;
 					}
@@ -893,7 +893,7 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
     LM_DBG("Encoding %u URIs\n", encoded_uris);
 
 socket_only:
-    if (encode_socket(&encoded_uri_buf, msg->rcv.bind_address) < 0) {
+    if (thinfo_encode_socket(&encoded_uri_buf, msg->rcv.bind_address) < 0) {
         LM_ERR("Error encoding socket\n");
         goto error;
     }
@@ -901,7 +901,7 @@ socket_only:
     enc_len = th_ct_enc_scheme == ENC_BASE64 ?
 		calc_word64_encode_len(encoded_uri_buf.len) : calc_word32_encode_len(encoded_uri_buf.len);
     
-    finalize_encode_buffer(&encoded_uri_buf, flags, encoded_uris);
+    thinfo_buffer_finalize(&encoded_uri_buf, flags, encoded_uris);
 
 	for (i = 0; i < encoded_uri_buf.len; i++)
     	encoded_uri_buf.buf[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
@@ -1216,7 +1216,7 @@ static int decode_info_buffer(str *info, str rr_buf[static 1], str ct_buf[static
     decoded_uri_buf.len = dec_len;
     decoded_uri_buf.pos = 0;
 
-    uri_count = get_uri_count(&decoded_uri_buf);
+    uri_count = thinfo_get_uri_count(&decoded_uri_buf);
     if (uri_count == 0 || uri_count > MAX_ENCODED_SIP_URIS) {
         LM_ERR("Encoded URI count is invalid, count=%u\n", uri_count);
         return -1;
@@ -1224,8 +1224,8 @@ static int decode_info_buffer(str *info, str rr_buf[static 1], str ct_buf[static
 
 	LM_DBG("Decoded URI count %u\n", uri_count);
 
-    *flags = get_flags(&decoded_uri_buf);
-    decoded_len = decode_uris(&decoded_uri_buf, decoded_uri_str, uri_count, decoded_uris);
+    *flags = thinfo_get_flags(&decoded_uri_buf);
+    decoded_len = thinfo_decode_uris(&decoded_uri_buf, decoded_uri_str, uri_count, decoded_uris);
 
 	decoded_uris_count = uri_count;
 	ctx_decoded_routes_set_valid();
@@ -1235,7 +1235,7 @@ static int decode_info_buffer(str *info, str rr_buf[static 1], str ct_buf[static
         return -1;
     }
 
-    if (decode_socket(&decoded_uri_buf, &proto, &host, &port) <= 0) {
+    if (thinfo_decode_socket(&decoded_uri_buf, &proto, &host, &port) <= 0) {
 		LM_ERR("Failed to decode socket 0\n");
         return -1;
 	}
