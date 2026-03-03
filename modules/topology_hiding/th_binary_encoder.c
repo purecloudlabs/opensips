@@ -1,5 +1,7 @@
 #include <stdint.h>
 
+#include "th_binary_encoder.h"
+
 #include "../../parser/msg_parser.h"
 #include "../../socket_info.h"
 
@@ -52,29 +54,12 @@
 #define URI2_HAS_PORT       0x40    // Bit 6: URI2 has port
 #define URI2_HAS_R2         0x80    // Bit 7: r2 flag for both URIs in dual encoding
 
-static str r2_on = str_init("r2=on");
-static str lr = str_init("lr");
-static str lr_on = str_init("lr=on");
-
-#define MAX_ENCODED_URI_SIZE ( \
-    sizeof(uint16_t) +             /* uri properties */ \
-    sizeof(uint8_t)  + UINT8_MAX + /* username */ \
-    sizeof(uint8_t)  + UINT8_MAX + /* password */ \
-    sizeof(uint8_t)  + UINT8_MAX + /* domain */ \
-    sizeof(uint16_t) +             /* port */ \
-    sizeof(uint8_t)  + UINT8_MAX + /* params */ \
-    sizeof(uint8_t)  + UINT8_MAX + /* headers */ \
-    sizeof(uint8_t)  +             /* second associated uri flags */ \
-    sizeof(uint16_t)               /* second associated uri port */ \
-)
+static str r2_on_uri_param     = str_init("r2=on");
+static str lr_uri_param        = str_init("lr");
+static str lr_on_uri_param     = str_init("lr=on");
+static str transport_uri_param = str_init("transport");
 
 #define MAX_THINFO_BUFFER_SIZE 4096
-
-typedef struct {
-    uint16_t len;
-    unsigned char buf[MAX_THINFO_BUFFER_SIZE];
-    int pos;
-} encoded_uri_t;
 
 static const uint8_t SCHEMES[] = {
     [ERROR_URI_T]            = 0,
@@ -170,9 +155,8 @@ static uint8_t encode_params(unsigned char *p, uint16_t *uri_properties, str *pa
         for (int i = 0; i < param_count; i++) {
             LM_DBG("Checking param [%.*s]\n", params_to_skip[i].len, params_to_skip[i].s);
             if (param_len_current >= params_to_skip[i].len && strncmp(src, params_to_skip[i].s, params_to_skip[i].len) == 0) {
-                /* Setting some flags in case of lr or r2 params which will be encoded into the uri properties */
-                if ((param_len_current == lr.len && memcmp(src, lr.s, lr.len) == 0) ||
-                         (param_len_current == lr_on.len && memcmp(src, lr_on.s, lr_on.len) == 0)) {
+                if ((param_len_current == lr_uri_param.len && memcmp(src, lr_uri_param.s, lr_uri_param.len) == 0) ||
+                         (param_len_current == lr_on_uri_param.len && memcmp(src, lr_on_uri_param.s, lr_on_uri_param.len) == 0)) {
                     *uri_properties |= HAS_LR;
                 }
                 
@@ -309,8 +293,8 @@ static int encode_uris(encoded_uri_t *encoding_uri, struct sip_uri *uri1, struct
             extra_param_count = 0;
         }
 
-        extra_params[extra_param_count++] = str_init("transport");
-        extra_params[extra_param_count++] = str_init("lr");
+        extra_params[extra_param_count++] = transport_uri_param;
+        extra_params[extra_param_count++] = lr_uri_param;
 
         param_len_ptr = p++;
         param_len = encode_params(p, &props, &uri1->params, extra_param_count, extra_params);
