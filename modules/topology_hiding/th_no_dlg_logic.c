@@ -54,6 +54,41 @@
 #define ROUTE_STRICT    (1<<4)
 #define ROUTE_FAILURE   (1<<5)
 
+#define RR_PREFIX "Record-Route: "
+#define RR_PREFIX_LEN (sizeof(RR_PREFIX)-1)
+
+#define RR_URI_PREFIX "<sip:"
+#define RR_URI_PREFIX_LEN (sizeof(RR_URI_PREFIX)-1)
+
+#define RR_LR ";lr"
+#define RR_LR_LEN (sizeof(RR_LR)-1)
+
+#define RR_LR_FULL ";lr=on"
+#define RR_LR_FULL_LEN (sizeof(RR_LR_FULL)-1)
+
+#define RR_FROMTAG ";ftag="
+#define RR_FROMTAG_LEN (sizeof(RR_FROMTAG)-1)
+
+#define RR_R2 ";r2=on"
+#define RR_R2_LEN (sizeof(RR_R2)-1)
+
+#define RR_TERM ">"
+#define RR_TERM_LEN (sizeof(RR_TERM)-1)
+
+#define RR_SEPARATOR ","
+#define RR_SEPARATOR_LEN (sizeof(RR_SEPARATOR)-1)
+
+#define BUILD_RR_HEADER_BUFFER(hdr_buf, hdr_len, uri_str) \
+    do { \
+        hdr_len = RR_PREFIX_LEN + (uri_str).len + CRLF_LEN; \
+        hdr_buf = pkg_malloc(hdr_len); \
+        if (hdr_buf) { \
+            memcpy(hdr_buf, RR_PREFIX, RR_PREFIX_LEN); \
+            memcpy(hdr_buf + RR_PREFIX_LEN, (uri_str).s, (uri_str).len); \
+            memcpy(hdr_buf + RR_PREFIX_LEN + (uri_str).len, CRLF, CRLF_LEN); \
+        } \
+    } while(0)
+
 extern struct tm_binds tm_api;
 
 static encoded_uri_t encoded_uri_buf = { 0 };
@@ -96,10 +131,10 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *, uint16_t, str *);
 static void th_no_dlg_onreply(struct cell *, int, struct tmcb_params *);
 static int th_no_dlg_seq_handling(struct sip_msg *, str *, decode_info_fn);
 static inline int th_no_dlg_one_way_hiding(const struct socket_info *);
-static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg *, int thinfo_len, char [static thinfo_len], str additional_rrs);
+static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg *, uint16_t);
 static int th_no_dlg_match_record_route_or_route_uris(struct sip_msg *, struct sip_msg *, hdr_types_t);
 
-static char* build_encoded_contact_suffix(struct sip_msg *, str *, unsigned int, int *, uint16_t, int);
+static char* build_encoded_thinfo_suffix(struct sip_msg *, str *, unsigned int, int *, uint16_t, int);
 
 int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_flags, struct th_params *params) {
 	struct th_no_dlg_param *p = NULL;
@@ -358,17 +393,16 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 	struct th_no_dlg_param *p = *(param->param);
 	str *route_s = &p->routes;
 	str *username = &p->username;
+    str *additional_rrs = NULL;
 	struct sip_msg *req = param->req;
 	struct sip_msg *rpl = param->rpl;
 	struct lump *lmp = NULL;
-	char *suffix = NULL;
-	int suffix_len = 0;
-	int rr_count_to_delete = 0, rr_count_to_skip_encode = 0;
+	char *suffix = NULL, *req_rr_buf = NULL;
+	int rr_count_to_delete = 0, rr_count_to_skip_encode = 0, req_rr_count = 0, req_rr_buf_len = 0;
 	unsigned int flags = p->flags;
-	str rr_set = STR_NULL;
 	int is_sequential = 0;
 	int one_way_hiding = th_no_dlg_one_way_hiding(t->uas.response.dst.send_sock);
-	int req_one_way_hiding = th_no_dlg_one_way_hiding(get_send_socket(req, &t->uac->request.dst.to, t->uac->request.dst.proto));
+	int req_one_way_hiding = th_no_dlg_one_way_hiding(t->uac->request.dst.send_sock);
 
 	LM_DBG("Response callback with flags %u \n", flags);
 
@@ -416,21 +450,31 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 
 	if (one_way_hiding) {
 		if (!is_sequential && auto_route_on_trusted_socket) {
-			if (!(suffix = build_encoded_contact_suffix(rpl, NULL, 0, &suffix_len, flags, 1))) {
-				LM_ERR("Failed to add build Record-Route suffix\n");
-				return;
-			}
-
-			if (req->record_route != NULL && print_rr_body(req->record_route, &rr_set, 0, 1, NULL) != 0 ){
-				LM_ERR("failed to print route records \n");
-				return;
-			}
-
-			if ((lmp = th_no_dlg_add_auto_record_route(rpl, suffix_len, suffix, rr_set)) == NULL) {
+			if ((lmp = th_no_dlg_add_auto_record_route(rpl, flags)) == NULL) {
 				LM_ERR("Failed to add Record-Route header\n");
 				pkg_free(suffix);
 				return;
 			}
+
+            if ((req_rr_count = list_rr_body(req->record_route, &additional_rrs)) < 0 ){
+				LM_ERR("failed to print route records \n");
+				return;
+			}
+
+            for (int i = 0; i < req_rr_count; i++) {
+                BUILD_RR_HEADER_BUFFER(req_rr_buf, req_rr_buf_len, additional_rrs[i]);
+
+                if (!req_rr_buf) {
+                    LM_ERR("no more pkg memory\n");
+                    return;
+                }
+
+                if (!(lmp = insert_new_lump_after(lmp, req_rr_buf, req_rr_buf_len, 0))) {
+                    LM_ERR("failed to insert prefix\n");
+                    pkg_free(req_rr_buf);
+                    return;
+                }
+            }
 		}
 	}
 
@@ -454,9 +498,7 @@ static void th_no_dlg_onrequest(struct cell *t, int type, struct tmcb_params *pa
 }
 
 static inline int _th_no_dlg_onrequest(struct sip_msg *req, uint16_t flags, str *username) {
-	char *suffix = NULL;
-	int suffix_len = 0;
-    int one_way_hiding = 0;
+	int one_way_hiding = 0;
     int do_rr = 0;
 
 	LM_DBG("Request callback with flags %u\n", flags);
@@ -481,14 +523,8 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, uint16_t flags, str 
                 return -1;
             }
 		} else if (do_rr && auto_route_on_trusted_socket) {
-			if (!(suffix = build_encoded_contact_suffix(req, NULL, 0, &suffix_len, flags, 1))) {
-				LM_ERR("Failed to add build Record-Route suffix\n");
-                return -1;
-			}
-
-            if (th_no_dlg_add_auto_record_route(req, suffix_len, suffix, STR_NULL) == NULL) {
+			if (th_no_dlg_add_auto_record_route(req, flags) == NULL) {
                 LM_ERR("Failed to add Record-Route header\n");
-				pkg_free(suffix);
                 return -1;
             }
         }
@@ -708,7 +744,7 @@ error:
 	return NULL;
 }
 
-static char* build_encoded_contact_suffix(struct sip_msg* msg, str *routes, unsigned int rrs_to_ignore, int *suffix_len, uint16_t flags, int socket_only) {
+static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsigned int rrs_to_ignore, int *suffix_len, uint16_t flags, int socket_only) {
 	uint16_t enc_len = 0;
 	char *suffix_enc, *s;
     rr_t *next = NULL, *head = NULL;
@@ -975,7 +1011,7 @@ static int th_no_dlg_encode_contact(struct sip_msg *msg, uint16_t flags, str *ro
 		goto error;
 	}
 
-	memcpy(prefix,"<sip:",5);
+	memcpy(prefix, "<sip:", 5);
 	if (flags & TOPOH_KEEP_USER && ct_username_len > 0) {
 		memcpy(prefix + 5, ct_username, ct_username_len);
 		prefix[prefix_len - 1] = '@';
@@ -990,7 +1026,7 @@ static int th_no_dlg_encode_contact(struct sip_msg *msg, uint16_t flags, str *ro
 	prefix = NULL;
 
 	if (flags & TOPOH_USE_BINARY_ENCODING) {
-		if (!(suffix = build_encoded_contact_suffix(msg, routes, rrs_to_ignore, &suffix_len, flags, 0))) {
+		if (!(suffix = build_encoded_thinfo_suffix(msg, routes, rrs_to_ignore, &suffix_len, flags, 0))) {
 			LM_ERR("Failed to build suffix \n");
 			goto error;
 		}
@@ -1446,56 +1482,49 @@ static inline int th_no_dlg_one_way_hiding(const struct socket_info *socket) {
 	return th_no_dlg_match_socket_tag(socket, &th_internal_trusted_tag);
 }
 
-#define RR_PREFIX "Record-Route: <sip:"
-#define RR_PREFIX_LEN (sizeof(RR_PREFIX)-1)
+static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg* msg, uint16_t flags) {
+    struct lump *l, *existing_routes;
+    char *prefix, *suffix, *rpl_route_hdr, *thinfo = NULL;
+    int prefix_len, suffix_len, rpl_route_hdr_len, thinfo_len;
+	int prefix_counter = 0, suffix_counter = 0;
+    str *rpl_rrs = NULL;
+    unsigned int rpl_rr_count = 0;
+    int is_reply = msg->first_line.type == SIP_REPLY;
 
-#define RR_LR ";lr"
-#define RR_LR_LEN (sizeof(RR_LR)-1)
+    if (parse_headers(msg, HDR_EOH_F, 0)< 0) {
+		LM_ERR("Failed to parse reply\n");
+		return NULL;
+	}
 
-#define RR_LR_FULL ";lr=on"
-#define RR_LR_FULL_LEN (sizeof(RR_LR_FULL)-1)
+	if ((rpl_rr_count = list_rr_body(msg->record_route, &rpl_rrs)) < 0){
+		LM_ERR("failed to print Record-Route header body\n");
+		return NULL;
+	}
 
-#define RR_FROMTAG ";ftag="
-#define RR_FROMTAG_LEN (sizeof(RR_FROMTAG)-1)
+	if (rpl_rr_count > 0 && topo_delete_record_route_uris(msg, rpl_rr_count) < 0) {
+		LM_ERR("Failed to remove '%d' Record-Route URIs\n", rpl_rr_count);
+		return NULL;
+	}
 
-#define RR_R2 ";r2=on"
-#define RR_R2_LEN (sizeof(RR_R2)-1)
-
-#define RR_TERM ">"
-#define RR_TERM_LEN (sizeof(RR_TERM)-1)
-
-#define RR_SEPARATOR ","
-#define RR_SEPARATOR_LEN (sizeof(RR_SEPARATOR)-1)
-
-static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg* msg, int thinfo_len, char thinfo[static thinfo_len], str additional_rrs) {
-    struct lump *l;
-    char *prefix, *suffix;
-    int prefix_len, suffix_len;
-	int suffix_counter = 0;
-    char *anchor_pos;
-	int has_additional_rrs = additional_rrs.s != NULL && additional_rrs.len > 0;
-
-    if (parse_headers(msg, HDR_RECORDROUTE_F, 0) < 0) {
-        LM_ERR("failed to parse headers\n");
-        return NULL;
-    }
-
-    /* Get the anchor position relative to other Record-Routes if existing */
-    anchor_pos = msg->record_route != NULL ? msg->record_route->name.s : msg->headers->name.s;
-
-    l = anchor_lump(msg, anchor_pos - msg->buf, HDR_RECORDROUTE_T);
+    l = anchor_lump(msg, msg->headers->name.s - msg->buf, HDR_RECORDROUTE_T);
+    existing_routes = l;
     if (!l) {
         LM_ERR("failed to create anchor\n");
         return NULL;
     }
 
-    prefix_len = RR_PREFIX_LEN;
+    prefix_len = RR_PREFIX_LEN + RR_URI_PREFIX_LEN;
     prefix = pkg_malloc(prefix_len);
     if (!prefix) {
         LM_ERR("no pkg memory for prefix\n");
         return NULL;
     }
-    memcpy(prefix, RR_PREFIX, RR_PREFIX_LEN);
+
+	memcpy(prefix, RR_PREFIX, RR_PREFIX_LEN);
+	prefix_counter += RR_PREFIX_LEN;
+
+    memcpy(prefix + prefix_counter, RR_URI_PREFIX, RR_URI_PREFIX_LEN);
+	prefix_counter += RR_URI_PREFIX_LEN;
 
     if (!(l = insert_new_lump_after(l, prefix, prefix_len, 0))) {
         LM_ERR("failed to insert prefix\n");
@@ -1509,12 +1538,18 @@ static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg* msg, int thi
         return NULL;
     }
 
-    if (!(l = insert_new_lump_after(l, thinfo, thinfo_len, 0))) {
-        LM_ERR("failed to insert thinfo param\n");
+    if (!(thinfo = build_encoded_thinfo_suffix(msg, NULL, 0, &thinfo_len, flags, 1))) {
+        LM_ERR("Failed to add build Record-Route suffix\n");
         return NULL;
     }
 
-    suffix_len = RR_LR_LEN + RR_TERM_LEN + (has_additional_rrs ? RR_SEPARATOR_LEN + additional_rrs.len + CRLF_LEN : CRLF_LEN);
+    if (!(l = insert_new_lump_after(l, thinfo, thinfo_len, 0))) {
+        LM_ERR("failed to insert thinfo param\n");
+        pkg_free(thinfo);
+        return NULL;
+    }
+
+    suffix_len = RR_LR_LEN + RR_TERM_LEN + CRLF_LEN;
 
     suffix = pkg_malloc(suffix_len);
     if (!suffix) {
@@ -1523,23 +1558,50 @@ static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg* msg, int thi
     }
     
     memcpy(suffix, RR_LR, RR_LR_LEN);
-	suffix_counter += RR_LR_LEN;
+    suffix_counter += RR_LR_LEN;
     memcpy(suffix + suffix_counter, RR_TERM, RR_TERM_LEN);
-	suffix_counter += RR_TERM_LEN;
+    suffix_counter += RR_TERM_LEN;
 
-	if (has_additional_rrs) {
-		memcpy(suffix + suffix_counter, RR_SEPARATOR, RR_SEPARATOR_LEN);
-		suffix_counter += RR_SEPARATOR_LEN;
-		memcpy(suffix + suffix_counter, additional_rrs.s, additional_rrs.len);
-		suffix_counter += additional_rrs.len;
-	}
-
-	memcpy(suffix + suffix_counter, CRLF, CRLF_LEN);
+    memcpy(suffix + suffix_counter, CRLF, CRLF_LEN);
 
     if (!(l = insert_new_lump_after(l, suffix, suffix_len, 0))) {
         LM_ERR("failed to insert suffix\n");
         pkg_free(suffix);
         return NULL;
+    }
+
+    if (rpl_rr_count > 0) {
+        if (is_reply) {
+            for (int i = rpl_rr_count - 1; i >= 0; i--) {
+                BUILD_RR_HEADER_BUFFER(rpl_route_hdr, rpl_route_hdr_len, rpl_rrs[i]);
+
+                if (!rpl_route_hdr) {
+                    LM_ERR("no more pkg memory\n");
+                    return NULL;
+                }
+
+                if (!(insert_new_lump_before(existing_routes, rpl_route_hdr, rpl_route_hdr_len, 0))) {
+                    LM_ERR("failed to insert route before\n");
+                    pkg_free(rpl_route_hdr);
+                    return NULL;
+                }
+            }
+        } else {
+            for (int i = 0; i < rpl_rr_count; i++) {
+                BUILD_RR_HEADER_BUFFER(rpl_route_hdr, rpl_route_hdr_len, rpl_rrs[i]);
+
+                if (!rpl_route_hdr) {
+                    LM_ERR("no more pkg memory\n");
+                    return NULL;
+                }
+                
+                if (!(l = insert_new_lump_after(l, rpl_route_hdr, rpl_route_hdr_len, 0))) {
+                    LM_ERR("failed to insert route after\n");
+                    pkg_free(rpl_route_hdr);
+                    return NULL;
+                }
+            }
+        }
     }
     
     return l;
