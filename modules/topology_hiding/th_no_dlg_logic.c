@@ -1438,8 +1438,10 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info, decode_info_fn
 
 	param = NULL;
 
-	if (!sock) {
-		sock = msg->force_send_socket;
+	if (sock != NULL) {
+		msg->force_send_socket = sock;
+	} else {
+		LM_WARN("Socket is NULL, using default ingress socket\n");
 	}
 
     one_way_hiding = th_no_dlg_one_way_hiding(sock);
