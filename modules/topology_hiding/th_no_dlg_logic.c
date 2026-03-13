@@ -171,22 +171,17 @@ int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_f
 
 	p->flags = extra_flags;
 
-	if (req->REQ_METHOD != METHOD_ACK) {
-		if (_th_no_dlg_onrequest(req, extra_flags, username) < 0) {
-			LM_ERR("Failed to do topology_hiding on request\n");
-			return -1;
-		}
+    if (_th_no_dlg_onrequest(req, extra_flags, username) < 0) {
+        LM_ERR("Failed to do topology_hiding on request\n");
+        return -1;
+    }
 
-		if (tm_api.register_tmcb(req, 0, TMCB_RESPONSE_FWDED, th_no_dlg_onreply, p, shm_free_wrap) < 0) {
-			LM_ERR("failed to register TMCB\n");
-			return -1;
-		}
+    if (tm_api.register_tmcb(req, 0, TMCB_RESPONSE_FWDED, th_no_dlg_onreply, p, shm_free_wrap) < 0) {
+        LM_ERR("failed to register TMCB\n");
+        return -1;
+    }
 
-		return 1;
-	} else {
-		LM_ERR("Failed to topology hide e2e ACK not supported\n");
-		return TOPOH_MATCH_UNSUPPORTED_METHOD;
-	}
+    return 1;
 }
 
 static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_route[static 1], str thinfo[static 1], int self_route) {
@@ -448,42 +443,40 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 		}
 	}
 
-	if (one_way_hiding) {
-		if (!is_sequential) {
-			if (auto_route_on_trusted_socket) {
-				rr_lmp = th_no_dlg_add_auto_record_route(rpl, flags);
-				if (rr_lmp == NULL) {
-					LM_ERR("Failed to add Record-Route header\n");
-					pkg_free(suffix);
-					return;
-				}
-			}
-
-			if (rr_lmp == NULL) {
-				rr_lmp = anchor_lump(rpl, rpl->headers->name.s - rpl->buf, HDR_RECORDROUTE_T);
-			}
-
-            if ((req_rr_count = list_rr_body(req->record_route, &additional_rrs)) < 0 ){
-				LM_ERR("failed to print route records \n");
-				return;
-			}
-
-            for (int i = 0; i < req_rr_count; i++) {
-                BUILD_RR_HEADER_BUFFER(req_rr_buf, req_rr_buf_len, additional_rrs[i]);
-
-                if (!req_rr_buf) {
-                    LM_ERR("no more pkg memory\n");
-                    return;
-                }
-
-                if (!(rr_lmp = insert_new_lump_after(rr_lmp, req_rr_buf, req_rr_buf_len, 0))) {
-                    LM_ERR("failed to insert prefix\n");
-                    pkg_free(req_rr_buf);
-                    return;
-                }
+	if (one_way_hiding && !is_sequential) {
+        if (auto_route_on_trusted_socket) {
+            rr_lmp = th_no_dlg_add_auto_record_route(rpl, flags);
+            if (rr_lmp == NULL) {
+                LM_ERR("Failed to add Record-Route header\n");
+                pkg_free(suffix);
+                return;
             }
-		}
-	}
+        }
+
+        if (rr_lmp == NULL) {
+            rr_lmp = anchor_lump(rpl, rpl->headers->name.s - rpl->buf, HDR_RECORDROUTE_T);
+        }
+
+        if ((req_rr_count = list_rr_body(req->record_route, &additional_rrs)) < 0 ){
+            LM_ERR("failed to print route records \n");
+            return;
+        }
+
+        for (int i = 0; i < req_rr_count; i++) {
+            BUILD_RR_HEADER_BUFFER(req_rr_buf, req_rr_buf_len, additional_rrs[i]);
+
+            if (!req_rr_buf) {
+                LM_ERR("no more pkg memory\n");
+                return;
+            }
+
+            if (!(rr_lmp = insert_new_lump_after(rr_lmp, req_rr_buf, req_rr_buf_len, 0))) {
+                LM_ERR("failed to insert prefix\n");
+                pkg_free(req_rr_buf);
+                return;
+            }
+        }
+    }
 
 	if (!one_way_hiding && !(rpl->REPLY_STATUS >= 300 && rpl->REPLY_STATUS < 400)) {
         if (th_no_dlg_encode_contact(rpl, flags, route_s, rr_count_to_skip_encode, username) < 0) {
@@ -1044,7 +1037,7 @@ static int th_no_dlg_encode_contact(struct sip_msg *msg, uint16_t flags, str *ro
 		}
 	}
 
-    if (!(lump = insert_subst_lump_after(lump, SUBST_SND_ALL, 0))) {
+    if (!(lump = insert_subst_lump_after(lump, SUBST_SND_ALL_CONTACT, 0))) {
         LM_ERR("failed inserting SUBST_SND buf\n");
         goto error;
     }
@@ -1057,7 +1050,7 @@ static int th_no_dlg_encode_contact(struct sip_msg *msg, uint16_t flags, str *ro
 	return 0;
 error:
     // Need to add this lump in on error to stop the process from blocking
-    if (!(lump = insert_subst_lump_after(lump, SUBST_SND_ALL, 0))) {
+    if (!(lump = insert_subst_lump_after(lump, SUBST_SND_ALL_CONTACT, 0))) {
         LM_ERR("failed inserting SUBST_SND buf\n");
         goto error;
     }
