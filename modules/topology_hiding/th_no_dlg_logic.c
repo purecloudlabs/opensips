@@ -396,7 +396,7 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
     str *additional_rrs = NULL;
 	struct sip_msg *req = param->req;
 	struct sip_msg *rpl = param->rpl;
-	struct lump *lmp = NULL;
+	struct lump *lmp = NULL, *rr_lmp = NULL;
 	char *suffix = NULL, *req_rr_buf = NULL;
 	int rr_count_to_delete = 0, rr_count_to_skip_encode = 0, req_rr_count = 0, req_rr_buf_len = 0;
 	unsigned int flags = p->flags;
@@ -449,11 +449,18 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 	}
 
 	if (one_way_hiding) {
-		if (!is_sequential && auto_route_on_trusted_socket) {
-			if ((lmp = th_no_dlg_add_auto_record_route(rpl, flags)) == NULL) {
-				LM_ERR("Failed to add Record-Route header\n");
-				pkg_free(suffix);
-				return;
+		if (!is_sequential) {
+			if (auto_route_on_trusted_socket) {
+				rr_lmp = th_no_dlg_add_auto_record_route(rpl, flags);
+				if (rr_lmp == NULL) {
+					LM_ERR("Failed to add Record-Route header\n");
+					pkg_free(suffix);
+					return;
+				}
+			}
+
+			if (rr_lmp == NULL) {
+				rr_lmp = anchor_lump(rpl, rpl->headers->name.s - rpl->buf, HDR_RECORDROUTE_T);
 			}
 
             if ((req_rr_count = list_rr_body(req->record_route, &additional_rrs)) < 0 ){
@@ -469,7 +476,7 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
                     return;
                 }
 
-                if (!(lmp = insert_new_lump_after(lmp, req_rr_buf, req_rr_buf_len, 0))) {
+                if (!(rr_lmp = insert_new_lump_after(rr_lmp, req_rr_buf, req_rr_buf_len, 0))) {
                     LM_ERR("failed to insert prefix\n");
                     pkg_free(req_rr_buf);
                     return;
