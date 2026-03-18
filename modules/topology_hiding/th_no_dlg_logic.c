@@ -120,6 +120,11 @@ extern struct th_ct_params *th_hdr_param_list;
 extern str decoded_uris[12];
 extern int decoded_uris_count;
 
+typedef struct {
+	unsigned int delete_count;
+	unsigned int skip_encode_count;
+} route_count_t; 
+
 typedef int (*decode_info_fn)(str *, str[static 1], str[static 1], const struct socket_info **, uint16_t *);
 static int decode_info_buffer(str *, str [static 1], str [static 1], const struct socket_info **, uint16_t *);
 static int decode_info_buffer_legacy(str *, str [static 1], str [static 1], const struct socket_info **, uint16_t *);
@@ -132,7 +137,7 @@ static void th_no_dlg_onreply(struct cell *, int, struct tmcb_params *);
 static int th_no_dlg_seq_handling(struct sip_msg *, str *, decode_info_fn);
 static inline int th_no_dlg_one_way_hiding(const struct socket_info *);
 static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg *, uint16_t);
-static int th_no_dlg_match_record_route_or_route_uris(struct sip_msg *, struct sip_msg *, hdr_types_t);
+static route_count_t th_no_dlg_match_record_route_or_route_uris(struct sip_msg *, struct sip_msg *, hdr_types_t);
 
 static char* build_encoded_thinfo_suffix(struct sip_msg *, str *, unsigned int, int *, uint16_t, int);
 
@@ -393,11 +398,12 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 	struct sip_msg *rpl = param->rpl;
 	struct lump *lmp = NULL, *rr_lmp = NULL;
 	char *suffix = NULL, *req_rr_buf = NULL;
-	int rr_count_to_delete = 0, rr_count_to_skip_encode = 0, req_rr_count = 0, req_rr_buf_len = 0;
+	int req_rr_count = 0, req_rr_buf_len = 0;
 	unsigned int flags = p->flags;
 	int is_sequential = 0;
 	int one_way_hiding = th_no_dlg_one_way_hiding(t->uas.response.dst.send_sock);
 	int req_one_way_hiding = th_no_dlg_one_way_hiding(t->uac->request.dst.send_sock);
+	route_count_t route_count;
 
 	LM_DBG("Response callback with flags %u \n", flags);
 
@@ -423,22 +429,10 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 	}
 
 	if (!is_sequential && req_one_way_hiding) {
-		rr_count_to_delete = th_no_dlg_match_record_route_or_route_uris(req, rpl, HDR_RECORDROUTE_T);
+		route_count = th_no_dlg_match_record_route_or_route_uris(req, rpl, HDR_RECORDROUTE_T);
 
-        if (rr_count_to_delete != -1) {
-            if (req->record_route == NULL) {
-                rr_count_to_skip_encode = auto_route_on_trusted_socket ? 1 : 0;
-            } else {
-                rr_count_to_skip_encode = rr_count_to_delete;
-		    }
-        } else {
-            LM_WARN("Record-Route in reply do not match with request, deleting all reply headers\n");
-            rr_count_to_delete = 64;
-			rr_count_to_skip_encode = 64;
-        }
-
-		if (topo_delete_record_route_uris(rpl, rr_count_to_delete) < 0) {
-			LM_ERR("Failed to remove '%d' Record-Route URIs\n", rr_count_to_delete);
+		if (topo_delete_record_route_uris(rpl, route_count.delete_count) < 0) {
+			LM_ERR("Failed to remove '%d' Record-Route URIs\n", route_count.delete_count);
 			return;
 		}
 	}
@@ -479,7 +473,7 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
     }
 
 	if (!one_way_hiding && !(rpl->REPLY_STATUS >= 300 && rpl->REPLY_STATUS < 400)) {
-        if (th_no_dlg_encode_contact(rpl, flags, route_s, rr_count_to_skip_encode, username) < 0) {
+        if (th_no_dlg_encode_contact(rpl, flags, route_s, route_count.skip_encode_count, username) < 0) {
             LM_ERR("Failed to encode contact header \n");
             return;
         }
@@ -855,8 +849,16 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
 						goto error;
 					}
 				} else {
-					LM_WARN("Previous Route has r2=on but no next Route\n");
+					if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL) == -1) {
+						LM_ERR("Error encoding Route URI\n");
+						goto error;
+					}
+					if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL) == -1) {
+						LM_ERR("Error encoding Route URI\n");
+						goto error;
+					}
 					encoded_uris++;
+					LM_WARN("Previous Route has r2=on but no next Route\n");
 					continue;
 				}
 
@@ -1621,26 +1623,37 @@ static int rr_equal(rr_t *p1, rr_t *p2) {
 	return compare_uris(&p1->nameaddr.uri, NULL, &p2->nameaddr.uri, NULL) == 0;
 }
 
-static int th_no_dlg_match_record_route_or_route_uris(struct sip_msg *req, struct sip_msg *rpl, hdr_types_t hdr_type) {
+static route_count_t th_no_dlg_match_record_route_or_route_uris(struct sip_msg *req, struct sip_msg *rpl, hdr_types_t hdr_type) {
 	struct hdr_field *req_hf = NULL, *rpl_hf = NULL;
 	rr_t *req_rr = NULL, *rpl_rr = NULL;
 	int rpl_route_count = 0;
 	int matched_count = 0;
+	unsigned int delete_count = 0;
+	unsigned int skip_encode_count = 0;
 	int matched = 0;
 
 	if (hdr_type != HDR_RECORDROUTE_T && hdr_type != HDR_ROUTE_T) {
 		LM_ERR("Header type has to be one of Record-Route or Route\n");
-		return -1;
+		return (route_count_t) {
+			.delete_count = 64,
+			.skip_encode_count = 64
+		};
 	}
 
 	if (parse_headers(req, HDR_EOH_F, 0) == -1) {
 		LM_ERR("Failed to parse req headers\n");
-		return -1;
+		return (route_count_t) {
+			.delete_count = 64,
+			.skip_encode_count = 64
+		};
 	}
 
 	if (parse_headers(rpl, HDR_EOH_F, 0) == -1) {
 		LM_ERR("Failed to parse rpl headers\n");
-		return -1;
+		return (route_count_t) {
+			.delete_count = 64,
+			.skip_encode_count = 64
+		};
 	}
 
 	LM_DBG("Matching '%s' headers\n", hdr_type == HDR_RECORDROUTE_T ? "Record-Route" : "Route");
@@ -1652,7 +1665,10 @@ static int th_no_dlg_match_record_route_or_route_uris(struct sip_msg *req, struc
 		while (rpl_hf != NULL) {
 			if (parse_rr(rpl_hf) < 0) {
 				LM_ERR("Failed to '%.*s' headers in reply\n", rpl_hf->name.len, rpl_hf->name.s);
-				return -1;
+				return (route_count_t) {
+					.delete_count = 64,
+					.skip_encode_count = 64
+				};
 			}
 
 			rpl_rr = (rr_t*)rpl_hf->parsed;
@@ -1665,12 +1681,18 @@ static int th_no_dlg_match_record_route_or_route_uris(struct sip_msg *req, struc
 			rpl_hf = rpl_hf->sibling;
 		}
 
-		return rpl_route_count;
+		return (route_count_t) {
+			.delete_count = rpl_route_count,
+			.skip_encode_count = 0
+		};
 	}
 	
 	if (parse_rr(req_hf) < 0) {
 		LM_ERR("Failed to '%.*s' headers in request\n", req_hf->name.len, req_hf->name.s);
-		return -1;
+		return (route_count_t) {
+			.delete_count = 64,
+			.skip_encode_count = 64
+		};
 	}
 	req_rr = (rr_t*)req_hf->parsed;
 
@@ -1678,13 +1700,19 @@ static int th_no_dlg_match_record_route_or_route_uris(struct sip_msg *req, struc
 	while (rpl_hf != NULL) {
 		if (parse_rr(rpl_hf) < 0) {
 			LM_ERR("Failed to '%.*s' headers in reply\n", rpl_hf->name.len, rpl_hf->name.s);
-			return -1;
+			return (route_count_t) {
+				.delete_count = 64,
+				.skip_encode_count = 64
+			};
 		}
 		rpl_rr = (rr_t*) rpl_hf->parsed;
 
         if (req_rr == NULL) {
             LM_ERR("Reply headers left to check when all Request headers checked\n");
-            return -1;
+            return (route_count_t) {
+				.delete_count = 64,
+				.skip_encode_count = 64
+			};
         }
 
 		while (rpl_rr) {
@@ -1699,7 +1727,10 @@ static int th_no_dlg_match_record_route_or_route_uris(struct sip_msg *req, struc
 					if (req_hf != NULL) {
 						if (parse_rr(req_hf) < 0) {
 							LM_ERR("Failed to '%.*s' headers in request\n", req_hf->name.len, req_hf->name.s);
-							return -1;
+							return (route_count_t) {
+								.delete_count = 64,
+								.skip_encode_count = 64
+							};
 						}
 						req_rr = (rr_t*)req_hf->parsed;
 					}
@@ -1707,7 +1738,10 @@ static int th_no_dlg_match_record_route_or_route_uris(struct sip_msg *req, struc
 			}
 
 			if (matched_count > 0 && !matched) {
-				return -1;
+				return (route_count_t) {
+					.delete_count = 64,
+					.skip_encode_count = 64
+				};
 			}
 
 			rpl_rr = rpl_rr->next;
@@ -1718,10 +1752,23 @@ static int th_no_dlg_match_record_route_or_route_uris(struct sip_msg *req, struc
 
 	if (req_rr != NULL) {
 		LM_ERR("Not all request headers were matched in reply (matched count %d)\n", matched_count);
-		return -1;
+		return (route_count_t) {
+			.delete_count = 64,
+			.skip_encode_count = 64
+		};
 	}
 
-	LM_DBG("Reply header count minus matched count different '%d'\n", rpl_route_count - matched_count);
+	delete_count = rpl_route_count - matched_count;
+	skip_encode_count = rpl_route_count - delete_count;
 
-	return rpl_route_count - matched_count;
+	if (auto_route_on_trusted_socket) {
+		skip_encode_count++;
+	}
+
+	LM_DBG("Delete header count '%d', skip encode count '%d'\n", delete_count, skip_encode_count);
+
+	return (route_count_t) {
+		.delete_count = delete_count,
+		.skip_encode_count = skip_encode_count
+	};
 }
