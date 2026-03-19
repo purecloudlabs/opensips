@@ -507,6 +507,7 @@ int list_rr_body(struct hdr_field *iroute, str **oroute)
 			}
 			p = p->next;
 		}
+
 		iroute = iroute->sibling;
 	}
 

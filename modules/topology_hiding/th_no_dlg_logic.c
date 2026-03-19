@@ -388,6 +388,20 @@ int topo_hiding_match_no_dlg(struct sip_msg *msg) {
 	return TOPOH_MATCH_FAILURE;
 }
 
+static int free_msg_rrs(struct sip_msg *msg) {
+	struct hdr_field *hdr;
+
+	for (hdr = msg->record_route; hdr; hdr = hdr->sibling) {
+		if (hdr->parsed) {
+			free_rr((rr_t **)&hdr->parsed);
+			hdr->parsed = NULL;
+		}
+	}
+
+	return 0;
+}
+
+
 // TODO log callId perhaps?
 static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *param) {
 	struct th_no_dlg_param *p = *(param->param);
@@ -433,7 +447,7 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 
 		if (topo_delete_record_route_uris(rpl, route_count.delete_count) < 0) {
 			LM_ERR("Failed to remove '%d' Record-Route URIs\n", route_count.delete_count);
-			return;
+			goto cleanup_parsed_rr;
 		}
 	}
 
@@ -443,7 +457,7 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
             if (rr_lmp == NULL) {
                 LM_ERR("Failed to add Record-Route header\n");
                 pkg_free(suffix);
-                return;
+                goto cleanup_parsed_rr;
             }
         }
 
@@ -453,7 +467,7 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 
         if ((req_rr_count = list_rr_body(req->record_route, &additional_rrs)) < 0 ){
             LM_ERR("failed to print route records \n");
-            return;
+            goto cleanup_parsed_rr;
         }
 
         for (int i = 0; i < req_rr_count; i++) {
@@ -461,13 +475,13 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 
             if (!req_rr_buf) {
                 LM_ERR("no more pkg memory\n");
-                return;
+                goto cleanup_parsed_rr;
             }
 
             if (!(rr_lmp = insert_new_lump_after(rr_lmp, req_rr_buf, req_rr_buf_len, 0))) {
                 LM_ERR("failed to insert prefix\n");
                 pkg_free(req_rr_buf);
-                return;
+                goto cleanup_parsed_rr;
             }
         }
     }
@@ -475,9 +489,15 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 	if (!one_way_hiding && !(rpl->REPLY_STATUS >= 300 && rpl->REPLY_STATUS < 400)) {
         if (th_no_dlg_encode_contact(rpl, flags, route_s, route_count.skip_encode_count, username) < 0) {
             LM_ERR("Failed to encode contact header \n");
-            return;
         }
     }
+cleanup_parsed_rr:
+	/* We parse the record-routes in the request from the transaction 
+	 * they need to be cleaned up as it's in pkg memory
+	 * this request can used from a transaction timeout to generate a response
+	 * if they're parsed and not nulled it will crash
+	 */
+	free_msg_rrs(req);
 }
 
 static void th_no_dlg_onrequest(struct cell *t, int type, struct tmcb_params *param) {
@@ -502,11 +522,6 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, uint16_t flags, str 
 		one_way_hiding = th_no_dlg_one_way_hiding(req->force_send_socket != NULL ? req->force_send_socket : req->rcv.bind_address);
         do_rr = get_to(req)->tag_value.len == 0 || get_to(req)->tag_value.s == NULL;
 		if (!one_way_hiding) {
-			if (topo_delete_record_routes(req) < 0) {
-				LM_ERR("Failed to remove Record Route header \n");
-				return -1;
-			}
-
 			if (topo_delete_vias(req) < 0) {
 				LM_ERR("Failed to remove via headers\n");
 				return -1;
@@ -516,6 +531,11 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, uint16_t flags, str 
                 LM_ERR("Failed to encode contact header\n");
                 return -1;
             }
+
+			if (topo_delete_record_route_uris(req, 0) < 0) {
+				LM_ERR("Failed to remove Record Route header \n");
+				return -1;
+			}
 		} else if (do_rr && auto_route_on_trusted_socket) {
 			if (th_no_dlg_add_auto_record_route(req, flags) == NULL) {
                 LM_ERR("Failed to add Record-Route header\n");
