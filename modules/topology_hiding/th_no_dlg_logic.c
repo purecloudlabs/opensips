@@ -1264,9 +1264,11 @@ static int decode_info_buffer(str *info, str rr_buf[static 1], str ct_buf[static
 
     if (host.len > 0 && host.s != NULL) {
 		*sock = grep_sock_info(&host, port, proto);
-        if (!*sock && th_internal_trusted_tag.len == 0) {
+        if (!*sock && th_internal_trusted_tag.len > 0) {
 			*sock = grep_internal_sock_info(&th_internal_trusted_tag, 0, proto);
-        }
+		} else {
+			LM_WARN("non-local socket <%.*s:%d>...ignoring\n", host.len, host.s, port);
+		}
     }
 
     ct_buf->s = decoded_uris[0].s;
@@ -1350,9 +1352,11 @@ static int decode_info_buffer_legacy(str *info, str rr_buf[static 1], str ct_buf
             LM_ERR("bad socket <%.*s>\n", bind_buf.len, bind_buf.s);
         } else {
             *sock = grep_sock_info(&host, (unsigned short) port, proto);
-            if (!*sock) {
-                LM_WARN("non-local socket <%.*s>...ignoring\n", bind_buf.len, bind_buf.s);
-            }
+            if (!*sock && th_internal_trusted_tag.len > 0) {
+				*sock = grep_internal_sock_info(&th_internal_trusted_tag, 0, proto);
+            } else {
+				LM_WARN("non-local socket <%.*s>...ignoring\n", bind_buf.len, bind_buf.s);
+			}
         }
     }
 
