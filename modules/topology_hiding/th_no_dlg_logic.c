@@ -137,7 +137,7 @@ static void th_no_dlg_onreply(struct cell *, int, struct tmcb_params *);
 static int th_no_dlg_seq_handling(struct sip_msg *, str *, decode_info_fn);
 static inline int th_no_dlg_one_way_hiding(const struct socket_info *);
 static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg *, uint16_t);
-static route_count_t th_no_dlg_match_record_route_or_route_uris(struct sip_msg *, struct sip_msg *, hdr_types_t);
+static route_count_t th_no_dlg_match_record_route_or_route_uris(struct sip_msg *, struct sip_msg *, hdr_types_t, int);
 
 static char* build_encoded_thinfo_suffix(struct sip_msg *, str *, unsigned int, int *, uint16_t, int);
 
@@ -443,7 +443,7 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 	}
 
 	if (!is_sequential && req_one_way_hiding) {
-		route_count = th_no_dlg_match_record_route_or_route_uris(req, rpl, HDR_RECORDROUTE_T);
+		route_count = th_no_dlg_match_record_route_or_route_uris(req, rpl, HDR_RECORDROUTE_T, auto_route_on_trusted_socket && req_one_way_hiding);
 
 		if (topo_delete_record_route_uris(rpl, route_count.delete_count) < 0) {
 			LM_ERR("Failed to remove '%d' Record-Route URIs\n", route_count.delete_count);
@@ -1647,7 +1647,7 @@ static int rr_equal(rr_t *p1, rr_t *p2) {
 	return compare_uris(&p1->nameaddr.uri, NULL, &p2->nameaddr.uri, NULL) == 0;
 }
 
-static route_count_t th_no_dlg_match_record_route_or_route_uris(struct sip_msg *req, struct sip_msg *rpl, hdr_types_t hdr_type) {
+static route_count_t th_no_dlg_match_record_route_or_route_uris(struct sip_msg *req, struct sip_msg *rpl, hdr_types_t hdr_type, int req_auto_routed) {
 	struct hdr_field *req_hf = NULL, *rpl_hf = NULL;
 	rr_t *req_rr = NULL, *rpl_rr = NULL;
 	int rpl_route_count = 0;
@@ -1707,7 +1707,7 @@ static route_count_t th_no_dlg_match_record_route_or_route_uris(struct sip_msg *
 
 		return (route_count_t) {
 			.delete_count = rpl_route_count,
-			.skip_encode_count = 0
+			.skip_encode_count = req_auto_routed ? 1 : 0
 		};
 	}
 	
@@ -1785,14 +1785,10 @@ static route_count_t th_no_dlg_match_record_route_or_route_uris(struct sip_msg *
 	delete_count = rpl_route_count - matched_count;
 	skip_encode_count = rpl_route_count - delete_count;
 
-	if (auto_route_on_trusted_socket) {
-		skip_encode_count++;
-	}
-
 	LM_DBG("Delete header count '%d', skip encode count '%d'\n", delete_count, skip_encode_count);
 
 	return (route_count_t) {
 		.delete_count = delete_count,
-		.skip_encode_count = skip_encode_count
+		.skip_encode_count = req_auto_routed ? skip_encode_count + 1 : skip_encode_count
 	};
 }
