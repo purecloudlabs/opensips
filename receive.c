@@ -287,8 +287,29 @@ int receive_msg(char* buf, unsigned int len, struct receive_info* rcv_info,
 end:
 	reset_global_context();
 
-	__stop_expire_timer( start, execmsgthreshold, "msg processing",
-		msg->buf, msg->len, 0, slow_msgs);
+	if (msg) {
+		const char *fmt = "(extra debug info: Call-Id: %.*s, User-Agent: %.*s)";
+
+		int callid_len = (msg->callid ? msg->callid->body.len : 3);
+		const char *callid_str = (msg->callid ? msg->callid->body.s : "N/A");
+
+		int ua_len = (msg->user_agent ? msg->user_agent->body.len : 3);
+		const char *ua_str = (msg->user_agent ? msg->user_agent->body.s : "N/A");
+
+		int size = strlen(fmt) - 8 + callid_len + ua_len + 1;
+
+		char *buf = pkg_malloc(size);
+		if (buf) {
+			snprintf(buf, size, fmt, callid_len, callid_str, ua_len, ua_str);
+			__stop_expire_timer(start, execmsgthreshold, "msg processing",
+				buf, size, 0, slow_msgs);
+			pkg_free(buf);
+		} else {
+			__stop_expire_timer(start, execmsgthreshold, "msg processing",
+				NULL, 0, 0, slow_msgs);
+		}
+	}
+
 	reset_longest_action_list(execmsgthreshold);
 
 	/* free possible loaded avps -bogdan */

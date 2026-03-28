@@ -320,7 +320,10 @@ int t_handle_async(struct sip_msg *msg, struct action* a,
 	}
 
 	if (route_type!=REQUEST_ROUTE) {
-		LM_WARN("async detected in non-request route, switching to sync\n");
+		LM_WARN("async detected in non-request route, switching to sync (extra debug info: Call-Id: %.*s, User-Agent: %.*s)\n",
+				(msg->callid ? msg->callid->body.len : 3), (msg->callid ? msg->callid->body.s : "N/A"),
+				(msg->user_agent ? msg->user_agent->body.len : 3), (msg->user_agent ? msg->user_agent->body.s : "N/A")
+		);
 		goto sync;
 	}
 
