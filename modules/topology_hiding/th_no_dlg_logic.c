@@ -136,7 +136,7 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *, uint16_t, str *);
 static void th_no_dlg_onreply(struct cell *, int, struct tmcb_params *);
 static int th_no_dlg_seq_handling(struct sip_msg *, str *, decode_info_fn);
 static inline int th_no_dlg_one_way_hiding(const struct socket_info *);
-static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg *, uint16_t);
+static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg *, uint16_t, struct lump *);
 static route_count_t th_no_dlg_match_record_route_or_route_uris(struct sip_msg *, struct sip_msg *, hdr_types_t, int);
 
 static char* build_encoded_thinfo_suffix(struct sip_msg *, str *, unsigned int, int *, uint16_t, int);
@@ -401,18 +401,33 @@ static int free_msg_rrs(struct sip_msg *msg) {
 	return 0;
 }
 
+static struct lump *anchor_after_last_record_route(struct sip_msg *msg) {
+    struct hdr_field *last_rr = msg->record_route;
+    unsigned int offset;
+
+    if (last_rr) {
+        while (last_rr->sibling)
+            last_rr = last_rr->sibling;
+        offset = last_rr->name.s + last_rr->len - msg->buf;
+    } else {
+        offset = msg->headers->name.s - msg->buf;
+    }
+
+    return anchor_lump(msg, offset, HDR_RECORDROUTE_T);
+}
 
 // TODO log callId perhaps?
 static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *param) {
 	struct th_no_dlg_param *p = *(param->param);
 	str *route_s = &p->routes;
 	str *username = &p->username;
+	str *rpl_original_rrs = NULL;
     str *additional_rrs = NULL;
 	struct sip_msg *req = param->req;
 	struct sip_msg *rpl = param->rpl;
 	struct lump *lmp = NULL, *rr_lmp = NULL;
-	char *suffix = NULL, *req_rr_buf = NULL;
-	int req_rr_count = 0, req_rr_buf_len = 0;
+	char *suffix = NULL, *req_rr_buf = NULL, *rpl_rr_buf = NULL;
+	int req_rr_count = 0, rpl_rr_count = 0, req_rr_buf_len = 0, rpl_rr_buf_len = 0;
 	unsigned int flags = p->flags;
 	int is_sequential = 0;
 	int one_way_hiding = th_no_dlg_one_way_hiding(t->uas.response.dst.send_sock);
@@ -449,20 +464,50 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 			LM_ERR("Failed to remove '%d' Record-Route URIs\n", route_count.delete_count);
 			goto cleanup_parsed_rr;
 		}
-	}
-
-	if (one_way_hiding && !is_sequential) {
+	} else if (!is_sequential && one_way_hiding) {
         if (auto_route_on_trusted_socket) {
-            rr_lmp = th_no_dlg_add_auto_record_route(rpl, flags);
+            rr_lmp = th_no_dlg_add_auto_record_route(rpl, flags, rr_lmp);
             if (rr_lmp == NULL) {
                 LM_ERR("Failed to add Record-Route header\n");
                 pkg_free(suffix);
                 goto cleanup_parsed_rr;
             }
-        }
+        } else {
+			// Rebuild the Record-Routes for consistency into single uri single header
+			if ((rpl_rr_count = list_rr_body(rpl->record_route, &rpl_original_rrs)) < 0 ){
+				LM_ERR("failed to print route records \n");
+				goto cleanup_parsed_rr;
+			}
+
+			if (rpl_rr_count > 0) {
+				if (topo_delete_record_route_uris(rpl, 0) < 0) {
+					LM_ERR("Failed to remove all Record-Route URIs\n");
+					goto cleanup_parsed_rr;
+				}
+
+				if (rr_lmp == NULL) {
+					rr_lmp = anchor_lump(rpl, rpl->headers->name.s - rpl->buf, HDR_RECORDROUTE_T);
+				}
+
+				for (int i = 0; i < rpl_rr_count; i++) {
+					BUILD_RR_HEADER_BUFFER(rpl_rr_buf, rpl_rr_buf_len, rpl_original_rrs[i]);
+
+					if (!rpl_rr_buf) {
+						LM_ERR("no more pkg memory\n");
+						goto cleanup_parsed_rr;
+					}
+
+					if (!(rr_lmp = insert_new_lump_after(rr_lmp, rpl_rr_buf, rpl_rr_buf_len, 0))) {
+						LM_ERR("failed to insert prefix\n");
+						pkg_free(rpl_rr_buf);
+						goto cleanup_parsed_rr;
+					}
+				}
+			}
+		}
 
         if (rr_lmp == NULL) {
-            rr_lmp = anchor_lump(rpl, rpl->headers->name.s - rpl->buf, HDR_RECORDROUTE_T);
+            rr_lmp = anchor_after_last_record_route(rpl);
         }
 
         if ((req_rr_count = list_rr_body(req->record_route, &additional_rrs)) < 0 ){
@@ -537,7 +582,7 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, uint16_t flags, str 
 				return -1;
 			}
 		} else if (do_rr && auto_route_on_trusted_socket) {
-			if (th_no_dlg_add_auto_record_route(req, flags) == NULL) {
+			if (th_no_dlg_add_auto_record_route(req, flags, NULL) == NULL) {
                 LM_ERR("Failed to add Record-Route header\n");
                 return -1;
             }
@@ -1510,7 +1555,7 @@ static inline int th_no_dlg_one_way_hiding(const struct socket_info *socket) {
 	return th_no_dlg_match_socket_tag(socket, &th_internal_trusted_tag);
 }
 
-static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg* msg, uint16_t flags) {
+static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg* msg, uint16_t flags, struct lump *anchor) {
     struct lump *l, *existing_routes;
     char *prefix, *suffix, *rpl_route_hdr, *thinfo = NULL;
     int prefix_len, suffix_len, rpl_route_hdr_len, thinfo_len;
@@ -1534,7 +1579,11 @@ static struct lump* th_no_dlg_add_auto_record_route(struct sip_msg* msg, uint16_
 		return NULL;
 	}
 
-    l = anchor_lump(msg, msg->headers->name.s - msg->buf, HDR_RECORDROUTE_T);
+	if (anchor == NULL) {
+		l = anchor_after_last_record_route(msg);
+	} else {
+		l = anchor;
+	}
     existing_routes = l;
     if (!l) {
         LM_ERR("failed to create anchor\n");
