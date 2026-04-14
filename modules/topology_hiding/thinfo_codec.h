@@ -156,10 +156,11 @@ typedef struct {
  * @param uri Pointer to the parsed SIP URI to encode
  * @param param_count Number of parameters to skip during encoding
  * @param params_to_skip Array of parameter names to exclude from encoding
+ * @param encode_user boolean to toggle whether to encode the username/password
  * 
  * @return 0 on success, -1 on error
  */
-int thinfo_encode_uri(thinfo_encoded_t *thinfo, struct sip_uri *uri, int param_count, str *params_to_skip);
+int thinfo_encode_uri(thinfo_encoded_t *thinfo, struct sip_uri *uri, int param_count, str *params_to_skip, int encode_user);
 
 /**
  * @brief Encode two related SIP URIs (dual URI encoding for r2 scenarios)

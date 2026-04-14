@@ -178,15 +178,18 @@ int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_f
 
     if (_th_no_dlg_onrequest(req, extra_flags, username) < 0) {
         LM_ERR("Failed to do topology_hiding on request\n");
-        return -1;
+        goto error;
     }
 
     if (tm_api.register_tmcb(req, 0, TMCB_RESPONSE_FWDED, th_no_dlg_onreply, p, shm_free_wrap) < 0) {
         LM_ERR("failed to register TMCB\n");
-        return -1;
+        goto error;
     }
 
     return 1;
+error:
+	shm_free_wrap(p);
+	return -1;
 }
 
 static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_route[static 1], str thinfo[static 1], int self_route) {
@@ -293,13 +296,11 @@ static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_rout
 
 	if (tm_api.register_tmcb(msg, 0, TMCB_RESPONSE_FWDED, th_no_dlg_onreply, p, shm_free_wrap) < 0) {
 		LM_ERR("failed to register TMCB\n");
+		shm_free(p);
 		return TOPOH_MATCH_FAILURE;
 	}
 
 	p = NULL;
-
-	if (p)
-		shm_free(p);
 
 	return TOPOH_MATCH_SUCCESS;
 }
@@ -432,7 +433,7 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
 	int is_sequential = 0;
 	int one_way_hiding = th_no_dlg_one_way_hiding(t->uas.response.dst.send_sock);
 	int req_one_way_hiding = th_no_dlg_one_way_hiding(t->uac->request.dst.send_sock);
-	route_count_t route_count;
+	route_count_t route_count = { 0 };
 
 	LM_DBG("Response callback with flags %u \n", flags);
 
@@ -469,7 +470,8 @@ static void th_no_dlg_onreply(struct cell *t, int type, struct tmcb_params *para
             rr_lmp = th_no_dlg_add_auto_record_route(rpl, flags, rr_lmp);
             if (rr_lmp == NULL) {
                 LM_ERR("Failed to add Record-Route header\n");
-                pkg_free(suffix);
+				if (suffix)
+                	pkg_free(suffix);
                 goto cleanup_parsed_rr;
             }
         } else {
@@ -601,7 +603,7 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, uint16_t flags, str 
 
 static char* build_encoded_contact_suffix_legacy(struct sip_msg* msg, str *routes, unsigned int rrs_to_ignore, int *suffix_len, int flags) {
 	short rr_len,ct_len,addr_len,flags_len,enc_len;
-	char *suffix_plain,*suffix_enc,*p,*s;
+	char *suffix_plain = NULL,*suffix_enc = NULL,*p = NULL,*s = NULL;
 	str rr_set = {NULL, 0};
 	char *rr_set_free_str = NULL;
 	str contact;
@@ -796,6 +798,10 @@ static char* build_encoded_contact_suffix_legacy(struct sip_msg* msg, str *route
 	*suffix_len = total_len;
 	return suffix_enc;
 error:
+	if (suffix_enc)
+		pkg_free(suffix_enc);
+	if (suffix_plain)
+		pkg_free(suffix_plain);
 	if (rr_set_free_str)
 		pkg_free(rr_set_free_str);
 	if (routes)
@@ -814,6 +820,7 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
     uint16_t encoded_uris = 0;
 	str contact = STR_NULL;
     str rr_set = STR_NULL;
+	char *rr_set_free_str = NULL;
 	const struct socket_info *rr_sock = NULL;
 	int is_req = (msg->first_line.type == SIP_REQUEST) ? 1 : 0;
 	str ct_uri_params_skip[URI_MAX_U_PARAMS];
@@ -864,7 +871,7 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
 		}
 	}
 
-	if (thinfo_encode_uri(&encoded_uri_buf, &ctu, param_count, ct_uri_params_skip) == -1) {
+	if (thinfo_encode_uri(&encoded_uri_buf, &ctu, param_count, ct_uri_params_skip, !(flags & TOPOH_KEEP_USER)) == -1) {
 		LM_ERR("Error encoding Contact URI\n");
 		goto error;
 	}
@@ -879,6 +886,7 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
 			LM_ERR("failed to print route records \n");
             goto error;
 		}
+		rr_set_free_str = rr_set.s;
 	}
 
     if (rr_set.len > 0) {
@@ -900,7 +908,7 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
 
         if (!th_no_dlg_one_way_hiding(rr_sock)) {
 			if (!is_2rr(&rr_uri.params)) {
-				if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL) == -1) {
+				if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL, 1) == -1) {
 					LM_ERR("Error encoding Route URI\n");
 					goto error;
 				}
@@ -914,11 +922,11 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
 						goto error;
 					}
 				} else {
-					if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL) == -1) {
+					if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL, 1) == -1) {
 						LM_ERR("Error encoding Route URI\n");
 						goto error;
 					}
-					if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL) == -1) {
+					if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL, 1) == -1) {
 						LM_ERR("Error encoding Route URI\n");
 						goto error;
 					}
@@ -933,12 +941,12 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
 						goto error;
 					}
 				} else {
-					if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL) == -1) {
+					if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri, 0, NULL, 1) == -1) {
 						LM_ERR("Error encoding Route URI\n");
 						goto error;
 					}
 
-					if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri_r2, 0, NULL) == -1) {
+					if (thinfo_encode_uri(&encoded_uri_buf, &rr_uri_r2, 0, NULL, 1) == -1) {
 						LM_ERR("Error encoding Route URI\n");
 						goto error;
 					}
@@ -954,8 +962,10 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
         next = next->next;
     }
 
-	if (head != NULL)
-        pkg_free(head);
+	if (head != NULL) {
+		pkg_free(head);
+		head = NULL;
+	}
 
     LM_DBG("Encoding %u URIs\n", encoded_uris);
 
@@ -1014,10 +1024,15 @@ socket_only:
 		}
 	}
 
+	if (rr_set_free_str)
+    	pkg_free(rr_set_free_str);
+
 	*suffix_len = s - suffix_enc;
 
 	return suffix_enc;
 error:
+	if (rr_set_free_str)
+    	pkg_free(rr_set_free_str);
     if (head != NULL)
         pkg_free(head);
 	if (suffix_enc)
@@ -1117,10 +1132,11 @@ static int th_no_dlg_encode_contact(struct sip_msg *msg, uint16_t flags, str *ro
 	return 0;
 error:
     // Need to add this lump in on error to stop the process from blocking
-    if (!(lump = insert_subst_lump_after(lump, SUBST_SND_ALL_CONTACT, 0))) {
-        LM_ERR("failed inserting SUBST_SND buf\n");
-        goto error;
-    }
+	if (lump != NULL) {
+		if (!(lump = insert_subst_lump_after(lump, SUBST_SND_ALL_CONTACT, 0))) {
+			LM_ERR("failed inserting SUBST_SND buf\n");
+		}
+	}
 	if (prefix) pkg_free(prefix);
 	if (suffix) pkg_free(suffix);
 	return -1;
@@ -1142,14 +1158,15 @@ static inline int topo_no_dlg_route(struct sip_msg *msg, str rr_buf[static 1]) {
 	if (parse_rr_body(rr_buf->s, rr_buf->len, &head) != 0) {
 		LM_ERR("failed parsing route set\n");
 		route_flags = ROUTE_FAILURE;
-		return -1;
+		goto cleanup;
 	}
 
 	rrp = head;
 
 	if (parse_uri(head->nameaddr.uri.s, head->nameaddr.uri.len, &rr_uri) < 0) {
 		LM_ERR("Failed to parse SIP uri\n");
-		return -1;
+		route_flags = ROUTE_FAILURE;
+		goto cleanup;
 	}
 
 	if (!is_strict(&rr_uri.params)) {
@@ -1183,6 +1200,7 @@ static inline int topo_no_dlg_route(struct sip_msg *msg, str rr_buf[static 1]) {
 		if (route == 0) {
 			LM_ERR("no more pkg memory\n");
 			route_flags = ROUTE_FAILURE;
+			goto cleanup;
 		}
 
 		memcpy(route, ROUTE_STR, ROUTE_LEN);
@@ -1410,6 +1428,8 @@ error:
 	return -1;
 }
 
+static char user_buf[UINT16_MAX];
+static str ct_user_buf = { .s = user_buf, .len = 0 };
 
 static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info, decode_info_fn decode_fn) {
 	char *msg_buf = NULL;
@@ -1417,9 +1437,12 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info, decode_info_fn
 	str rr_buf = STR_NULL, ct_buf = STR_NULL;
 	struct hdr_field *it;
 	const struct socket_info *sock = NULL;
+	struct sip_uri contact_uri = { 0 };
 	uint16_t flags;
 	int route_flags = ROUTE_SUCCESS;
     int one_way_hiding = 0;
+
+	ct_user_buf.len = 0;
 
 	/* parse all headers to be sure that all RR and Contact hdrs are found */
 	if (parse_headers(msg, HDR_EOH_F, 0) < 0) {
@@ -1461,25 +1484,36 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info, decode_info_fn
 		return -1;
 	}
 
+	if (flags & TOPOH_KEEP_USER) {
+		if (parse_sip_msg_uri(msg) < 0) {
+			LM_ERR("Failed to parse request URI\n");
+			return -1;
+		}
+
+		if (msg->parsed_uri.user.len > 0 && msg->parsed_uri.user.len < UINT16_MAX) {
+			memcpy(ct_user_buf.s, msg->parsed_uri.user.s, msg->parsed_uri.user.len);
+			ct_user_buf.len += msg->parsed_uri.user.len;
+		} else if (msg->parsed_uri.user.len >= UINT16_MAX) {
+			LM_ERR("User larger than %d\n", UINT16_MAX);
+			return -1;
+		}
+
+		if (msg->parsed_uri.passwd.len > 0 && msg->parsed_uri.passwd.len + ct_user_buf.len + 1 < UINT16_MAX) {
+			memcpy(ct_user_buf.s + ct_user_buf.len, ":", 1);
+			ct_user_buf.len++;
+			memcpy(ct_user_buf.s + ct_user_buf.len, msg->parsed_uri.passwd.s, msg->parsed_uri.passwd.len);
+			ct_user_buf.len += msg->parsed_uri.passwd.len;
+		}  else if (msg->parsed_uri.passwd.len + ct_user_buf.len + 1 >= UINT16_MAX) {
+			LM_ERR("Password larger than %d\n", UINT16_MAX);
+			return -1;
+		}
+	}
+
 	if (rr_buf.s && rr_buf.len) {
 		route_flags = topo_no_dlg_route(msg, &rr_buf);
 		if (route_flags & ROUTE_FAILURE) {
 			LM_ERR("Failure to Route\n");
 			goto err_fail_early;
-		}
-
-		if (!(route_flags & ROUTE_FAILURE) && !(route_flags & ROUTE_STRICT)) {
-			LM_DBG("Setting new URI to  <%.*s> \n", ct_buf.len, ct_buf.s);
-
-			if (set_ruri(msg, &ct_buf) != 0) {
-				LM_ERR("failed setting ruri\n");
-				goto err_fail_early;
-			}
-		} else if (!(route_flags & ROUTE_FAILURE) && (route_flags & ROUTE_STRICT)) {
-			if (topo_no_dlg_rewrite_contact_as_next_route(msg, &ct_buf) != 1) {
-				LM_ERR("Failure to rewrite Contact header as next Route\n");
-				goto err_fail_early;
-			}
 		}
 
 		param = shm_malloc(sizeof *param + rr_buf.len);
@@ -1488,6 +1522,9 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info, decode_info_fn
 			param->routes.s = (char *)(param + 1);
 			param->routes.len = rr_buf.len;
 			memcpy(param->routes.s, rr_buf.s, rr_buf.len);
+		} else {
+			LM_ERR("Failed to allocate params\n");
+			return -1;
 		}
 	} else {
 		param = shm_malloc(sizeof *param);
@@ -1497,6 +1534,32 @@ static int th_no_dlg_seq_handling(struct sip_msg *msg, str *info, decode_info_fn
 		}
 
 		memset(param, 0, sizeof *param);
+	}
+
+	if (!(route_flags & ROUTE_FAILURE) && !(route_flags & ROUTE_STRICT)) {
+		LM_DBG("Setting new URI to  <%.*s> \n", ct_buf.len, ct_buf.s);
+
+		if (parse_uri(ct_buf.s, ct_buf.len, &contact_uri) < 0) {
+			LM_ERR("Bad Route URI\n");
+			goto err_free_params;
+		}
+
+		if (set_ruri(msg, &ct_buf) != 0) {
+			LM_ERR("failed setting ruri\n");
+			goto err_free_params;
+		}
+
+		if (contact_uri.user.len == 0 && ct_user_buf.len > 0) {
+			if (rewrite_ruri(msg, &ct_user_buf, 0, RW_RURI_USERPASS) < 0) {
+				LM_ERR("Failed to set R-URI user\n");
+				goto err_free_params;
+			}
+		}
+	} else if (!(route_flags & ROUTE_FAILURE) && (route_flags & ROUTE_STRICT)) {
+		if (topo_no_dlg_rewrite_contact_as_next_route(msg, &ct_buf) != 1) {
+			LM_ERR("Failure to rewrite Contact header as next Route\n");
+			goto err_free_params;
+		}
 	}
 
 	param->flags = flags;
