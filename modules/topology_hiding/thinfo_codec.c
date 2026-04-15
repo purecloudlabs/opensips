@@ -198,7 +198,7 @@ static uint8_t encode_params(unsigned char *p, uint16_t *uri_properties, str *pa
         } \
     } while(0)
 
-static int encode_uris(thinfo_encoded_t *thinfo, struct sip_uri *uri1, struct sip_uri *uri2, int param_count, str *params_to_skip) {
+static int encode_uris(thinfo_encoded_t *thinfo, struct sip_uri *uri1, struct sip_uri *uri2, int param_count, str *params_to_skip, int encode_user) {
     unsigned char *p, *props_ptr, *param_len_ptr, *uri2_props_ptr;
     uint16_t props = 0;
     uint8_t uri2_props;
@@ -235,9 +235,10 @@ static int encode_uris(thinfo_encoded_t *thinfo, struct sip_uri *uri1, struct si
         props = (props & ~TRANSPORT_MASK) | TRANSPORTS[PROTO_UDP];
     }
 
-    ENCODE_URI_FIELD(uri1, user, props | HAS_USERNAME, props, p);
-    
-    ENCODE_URI_FIELD(uri1, passwd, props | HAS_PASSWORD, props, p);
+    if (encode_user) {
+        ENCODE_URI_FIELD(uri1, user, props | HAS_USERNAME, props, p);
+        ENCODE_URI_FIELD(uri1, passwd, props | HAS_PASSWORD, props, p);
+    }
 
     if (uri1->host.len > 0 && uri1->host.len < sizeof(tmp)) {
         memcpy(tmp, uri1->host.s, uri1->host.len);
@@ -318,11 +319,11 @@ static int encode_uris(thinfo_encoded_t *thinfo, struct sip_uri *uri1, struct si
 }
 
 int thinfo_encode_dual_uri(thinfo_encoded_t *thinfo, struct sip_uri *uri1, struct sip_uri *uri2) {
-    return encode_uris(thinfo, uri1, uri2, dual_uri_skip_params_count, dual_uri_skip_params);
+    return encode_uris(thinfo, uri1, uri2, dual_uri_skip_params_count, dual_uri_skip_params, 1);
 }
 
-int thinfo_encode_uri(thinfo_encoded_t *thinfo, struct sip_uri *uri, int param_count, str *params_to_skip) {
-    return encode_uris(thinfo, uri, NULL, param_count, params_to_skip);
+int thinfo_encode_uri(thinfo_encoded_t *thinfo, struct sip_uri *uri, int param_count, str *params_to_skip, int encode_user) {
+    return encode_uris(thinfo, uri, NULL, param_count, params_to_skip, encode_user);
 }
 
 int thinfo_encode_socket(thinfo_encoded_t *thinfo, const struct socket_info *si) {
