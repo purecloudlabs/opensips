@@ -549,7 +549,12 @@ int thinfo_decode_uris(thinfo_encoded_t *thinfo, char decoded_uri_str[static MAX
     uri_idx = 0;
     while (uri_idx < uri_count) {
         if ((p - thinfo->buf) >= thinfo->len) return -1;
-        
+
+        has_r2 = 0;
+        port1 = 0;
+        port2 = 0;
+        is_dual = 0;
+
         props = (p[0] << 8) | p[1];
         p += 2;
 
