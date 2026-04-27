@@ -28,8 +28,17 @@
 
 enum encode_scheme {ENC_BASE64, ENC_BASE32};
 
+extern str decoded_uris[12];
+extern int decoded_uris_count;
+extern int ctx_decoded_routes_valid_idx;
 
-int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, int extra_flags, struct th_params *params);
+#define ctx_decoded_routes_set_valid() \
+	context_put_int(CONTEXT_GLOBAL, current_processing_ctx, ctx_decoded_routes_valid_idx, 1)
+
+#define ctx_decoded_routes_is_valid() \
+	context_get_int(CONTEXT_GLOBAL, current_processing_ctx, ctx_decoded_routes_valid_idx)
+
+int topo_hiding_no_dlg(struct sip_msg *req, struct cell* t, unsigned int extra_flags, struct th_params *params);
 int topo_hiding_match_no_dlg(struct sip_msg *msg);
 
 #endif

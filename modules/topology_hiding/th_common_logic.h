@@ -26,19 +26,21 @@
 #include "../../mem/shm_mem.h"
 #include "../../parser/contact/parse_contact.h"
 
-#define RECORD_ROUTE "Record-Route: "
-#define RECORD_ROUTE_LEN (sizeof(RECORD_ROUTE)-1)
-
 struct th_params {
 	str ct_caller_user;
 	str ct_callee_user;
 };
+
+#define RECORD_ROUTE "Record-Route: "
+#define RECORD_ROUTE_LEN (sizeof(RECORD_ROUTE)-1)
 
 struct th_ct_params {
     str param_name;
     struct th_ct_params *next;
 };
 
+int topo_delete_route_uris(struct sip_msg *msg, int delete_count);
+int topo_delete_record_route_uris(struct sip_msg *msg, int delete_count);
 int topo_delete_record_routes(struct sip_msg *req);
 int topo_delete_vias(struct sip_msg *req);
 struct lump* delete_existing_contact(struct sip_msg *msg, int del_hdr);

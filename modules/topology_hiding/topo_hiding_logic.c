@@ -26,6 +26,7 @@
 
 #include "../../ut.h"
 #include "topo_hiding_logic.h"
+#include "th_no_dlg_logic.h"
 
 extern int force_dialog;
 extern struct rr_binds rr_api;
