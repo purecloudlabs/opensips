@@ -30,6 +30,9 @@
 #include "topo_hiding_logic.h"
 #include "th_no_dlg_logic.h"
 
+#include "../../trim.h"
+#include "../../ut.h"
+
 struct tm_binds tm_api;
 struct dlg_binds dlg_api;
 
@@ -50,9 +53,28 @@ str th_internal_trusted_tag = STR_EMPTY;
 str th_external_socket_tag = STR_EMPTY;
 int auto_route_on_trusted_socket = 1;
 int th_compact_encoding = 0;
+thinfo_options_t password_rotation[TH_INFO_PASSWORD_ROTATION_SIZE];
+thinfo_options_t *thinfo_options;
+int th_topology_param_password_count;
 
 int th_ct_enc_scheme;
 int th_ct_enc_scheme_legacy;
+
+typedef struct {
+	str name;
+	str password;
+} param_password_t;
+
+/* Up to two modparam lines: name matches th_contact_encode_param; password is XOR key for thinfo. */
+static param_password_t param_passwords[2];
+static int param_password_count;
+static param_password_t *compact_encoding_password;
+
+/*
+ * Pointer to the str used for XOR on primary (non-legacy) thinfo encode/decode.
+ * Defaults to topo_hiding_ct_encode_pw; after optional modparams, may point into param_passwords[].
+ */
+str *th_topoh_encode_xor_pw = &topo_hiding_ct_encode_pw;
 
 /* Global buffer for decoded routes */
 str decoded_uris[12];
@@ -80,6 +102,9 @@ static int pv_topo_decoded_routes_count(struct sip_msg *msg, pv_param_t *param, 
 static int pv_topo_decoded_contact(struct sip_msg *msg, pv_param_t *param, pv_value_t *res);
 static int pv_parse_nameaddr_part(pv_spec_p sp, const str *in);
 static int pv_parse_idx_th_route(pv_spec_p sp, const str *in);
+static int add_param_password(modparam_t type, void *val);
+static void th_free_param_passwords(void);
+static void sync_th_compact_encode_xor_pw(void);
 
 static const cmd_export_t cmds[]={
 	{"topology_hiding",(cmd_function)w_topology_hiding, {
@@ -111,6 +136,7 @@ static const param_export_t params[] = {
 	{ "th_external_socket_tag",          STR_PARAM, &th_external_socket_tag.s          },
 	{ "th_auto_route_on_trusted_socket", INT_PARAM, &auto_route_on_trusted_socket      },
 	{ "th_compact_encoding",             INT_PARAM, &th_compact_encoding               },
+	{ "th_contact_encode_param_password", STR_PARAM|USE_FUNC_PARAM, (void *)&add_param_password },
 	{0, 0, 0}
 };
 
@@ -171,6 +197,117 @@ struct module_exports exports= {
 	0                 /* reload confirm function */
 };
 
+static void th_free_param_passwords(void)
+{
+	int i;
+
+	for (i = 0; i < param_password_count; i++) {
+		if (param_passwords[i].name.s)
+			pkg_free(param_passwords[i].name.s);
+		if (param_passwords[i].password.s)
+			pkg_free(param_passwords[i].password.s);
+		memset(&param_passwords[i], 0, sizeof param_passwords[i]);
+	}
+	param_password_count = 0;
+	compact_encoding_password = NULL;
+	th_topoh_encode_xor_pw = &topo_hiding_ct_encode_pw;
+}
+
+static int add_param_password(modparam_t type, void *val)
+{
+	char *colon;
+	str name, pwd;
+	param_password_t *slot;
+
+	if ((PARAM_TYPE_MASK(type) & STR_PARAM) == 0) {
+		LM_ERR("th_contact_encode_param_password: string value required\n");
+		return -1;
+	}
+
+	if (!val || !*(char *)val) {
+		LM_ERR("th_contact_encode_param_password: empty value\n");
+		return -1;
+	}
+
+	if (param_password_count >= 2) {
+		LM_ERR("th_contact_encode_param_password: at most 2 entries allowed\n");
+		return -1;
+	}
+
+	colon = strchr((char *)val, ':');
+	if (!colon || colon == (char *)val) {
+		LM_ERR("th_contact_encode_param_password: expected name:password (missing name)\n");
+		return -1;
+	}
+	if (*(colon + 1) == '\0') {
+		LM_ERR("th_contact_encode_param_password: expected name:password (empty password)\n");
+		return -1;
+	}
+
+	name.s = (char *)val;
+	name.len = colon - (char *)val;
+	pwd.s = colon + 1;
+	pwd.len = strlen(pwd.s);
+	trim(&name);
+	trim(&pwd);
+	if (name.len == 0 || pwd.len == 0) {
+		LM_ERR("th_contact_encode_param_password: empty name or password\n");
+		return -1;
+	}
+
+	slot = &param_passwords[param_password_count];
+	if (pkg_str_dup(&slot->name, &name) != 0)
+		return -1;
+	if (pkg_str_dup(&slot->password, &pwd) != 0) {
+		pkg_free(slot->name.s);
+		slot->name.s = NULL;
+		slot->name.len = 0;
+		return -1;
+	}
+
+	param_password_count++;
+	LM_DBG("th_contact_encode_param_password: registered name <%.*s>\n",
+		slot->name.len, slot->name.s);
+	return 0;
+}
+
+static void sync_th_compact_encode_xor_pw(void)
+{
+	int i;
+
+	memset(password_rotation, 0, sizeof(password_rotation));
+	th_topology_param_password_count = 0;
+	thinfo_options = NULL;
+
+	if (param_password_count == 0) {
+		compact_encoding_password = NULL;
+		th_topoh_encode_xor_pw = &topo_hiding_ct_encode_pw;
+		return;
+	}
+
+	for (i = 0; i < param_password_count; i++) {
+		password_rotation[i].param_name = param_passwords[i].name;
+		password_rotation[i].param_password = param_passwords[i].password;
+		password_rotation[i].compact_encoding = th_compact_encoding;
+	}
+	th_topology_param_password_count = param_password_count;
+
+	compact_encoding_password = &param_passwords[0];
+	for (i = 0; i < param_password_count; i++) {
+		if (str_strcmp(&th_contact_encode_param, &param_passwords[i].name) == 0) {
+			compact_encoding_password = &param_passwords[i];
+			break;
+		}
+	}
+
+	th_topoh_encode_xor_pw = &compact_encoding_password->password;
+	thinfo_options = &password_rotation[compact_encoding_password - param_passwords];
+
+	LM_INFO("topology_hiding: using th_contact_encode_param_password entry <%.*s> "
+		"for primary thinfo XOR (th_contact_encode_param)\n",
+		compact_encoding_password->name.len, compact_encoding_password->name.s);
+}
+
 static int mod_init(void)
 {
 	LM_INFO("initializing...\n");
@@ -182,6 +319,7 @@ static int mod_init(void)
 	topo_hiding_prefix.len = strlen(topo_hiding_prefix.s);
 	topo_hiding_seed.len = strlen(topo_hiding_seed.s);
 	th_contact_encode_param.len = strlen(th_contact_encode_param.s);
+	sync_th_compact_encode_xor_pw();
 	topo_hiding_ct_encode_pw.len = strlen(topo_hiding_ct_encode_pw.s);
 	th_contact_encode_param_legacy.len = strlen(th_contact_encode_param_legacy.s);
 	topo_hiding_ct_encode_pw_legacy.len = strlen(topo_hiding_ct_encode_pw_legacy.s);
@@ -264,7 +402,7 @@ error:
 
 static void mod_destroy(void)
 {
-	return;
+	th_free_param_passwords();
 }
 
 static int fixup_mmode(void **param)

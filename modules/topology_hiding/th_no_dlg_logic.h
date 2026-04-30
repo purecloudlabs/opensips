@@ -28,6 +28,18 @@
 
 enum encode_scheme {ENC_BASE64, ENC_BASE32};
 
+#define TH_INFO_PASSWORD_ROTATION_SIZE 2
+
+typedef struct {
+	str param_name;
+	str param_password;
+	int compact_encoding;
+} thinfo_options_t;
+
+extern thinfo_options_t password_rotation[TH_INFO_PASSWORD_ROTATION_SIZE];
+extern thinfo_options_t *thinfo_options;
+extern int th_topology_param_password_count;
+
 extern str decoded_uris[12];
 extern int decoded_uris_count;
 extern int ctx_decoded_routes_valid_idx;

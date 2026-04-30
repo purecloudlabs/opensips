@@ -104,7 +104,7 @@ static char decoded_uri_str[MAX_ENCODED_URI_SIZE * 3];
 static char dec_buf_legacy[4096];
 
 extern int th_ct_enc_scheme;
-extern str topo_hiding_ct_encode_pw;
+extern str *th_topoh_encode_xor_pw;
 extern str th_contact_encode_param;
 extern int th_ct_enc_scheme_legacy;
 extern str topo_hiding_ct_encode_pw_legacy;
@@ -223,7 +223,7 @@ static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_rout
 	LM_DBG("Size of base64 decoded length %d and size of param len %d\n", dec_len, thinfo->len);
 
 	for (i = 0; i < dec_len; i++)
-		decoded_uri_buf.buf[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
+		decoded_uri_buf.buf[i] ^= th_topoh_encode_xor_pw->s[i % th_topoh_encode_xor_pw->len];
 
 	if (thinfo_get_uri_count(&decoded_uri_buf) != 0) {
 		LM_ERR("Encoded URI count is invalid, can only be 0 in auto Route\n");
@@ -306,12 +306,45 @@ static int th_no_dlg_auto_route_seq_handling(struct sip_msg *msg, rr_t auto_rout
 	return TOPOH_MATCH_SUCCESS;
 }
 
+/* Match a URI parameter name to registered thinfo options or default primary/legacy names. */
+static thinfo_options_t *th_get_options(const str *pn)
+{
+	int i;
+	static thinfo_options_t fallback_pri;
+	static thinfo_options_t fallback_leg;
+
+	if (!pn || !pn->s)
+		return NULL;
+
+	for (i = 0; i < th_topology_param_password_count; i++) {
+		if (pn->len == password_rotation[i].param_name.len &&
+				memcmp(pn->s, password_rotation[i].param_name.s, pn->len) == 0)
+			return &password_rotation[i];
+	}
+	if (pn->len == th_contact_encode_param.len &&
+			memcmp(th_contact_encode_param.s, pn->s, th_contact_encode_param.len) == 0) {
+		fallback_pri.param_name = th_contact_encode_param;
+		fallback_pri.param_password = *th_topoh_encode_xor_pw;
+		fallback_pri.compact_encoding = th_compact_encoding;
+		return &fallback_pri;
+	}
+	if (pn->len == th_contact_encode_param_legacy.len &&
+			memcmp(th_contact_encode_param_legacy.s, pn->s, th_contact_encode_param_legacy.len) == 0) {
+		fallback_leg.param_name = th_contact_encode_param_legacy;
+		fallback_leg.param_password = topo_hiding_ct_encode_pw_legacy;
+		fallback_leg.compact_encoding = 0;
+		return &fallback_leg;
+	}
+	return NULL;
+}
+
 int topo_hiding_match_no_dlg(struct sip_msg *msg) {
 	struct sip_uri *request_uri;
 	struct sip_uri route_uri = { 0 };
 	str *thinfo = NULL;
 	rr_t *auto_route = NULL;
 	int i, self_route, tag_match;
+	thinfo_options_t *thinfo_decode = NULL;
 
 	if (parse_sip_msg_uri(msg) < 0) {
 		LM_ERR("Failed to parse request URI\n");
@@ -328,16 +361,17 @@ int topo_hiding_match_no_dlg(struct sip_msg *msg) {
 		/* topology_hiding_match with thinfo and request domain is us
 		 * needs to have a thinfo to continue otherwise we cannot match */
 		for (i = 0; i < request_uri->u_params_no; i++) {
-			if (request_uri->u_name[i].len == th_contact_encode_param.len &&
-				memcmp(th_contact_encode_param.s, request_uri->u_name[i].s, th_contact_encode_param.len) == 0) {
-				LM_DBG("We found param in R-URI with value of %.*s\n",
-					request_uri->u_val[i].len, request_uri->u_val[i].s);
-				return th_no_dlg_seq_handling(msg, &request_uri->u_val[i], decode_info_buffer);
-			} else if (request_uri->u_name[i].len == th_contact_encode_param_legacy.len &&
-				memcmp(th_contact_encode_param_legacy.s, request_uri->u_name[i].s, th_contact_encode_param_legacy.len) == 0) {
-				LM_DBG("We found legacy param in R-URI with value of %.*s\n",
-					request_uri->u_val[i].len, request_uri->u_val[i].s);
-				return th_no_dlg_seq_handling(msg, &request_uri->u_val[i], decode_info_buffer_legacy);
+			thinfo_decode = th_get_options(&request_uri->u_name[i]);
+			if (thinfo_decode != NULL) {
+				if (thinfo_decode->compact_encoding) {
+					LM_DBG("We found param in R-URI with value of %.*s\n",
+						request_uri->u_val[i].len, request_uri->u_val[i].s);
+					return th_no_dlg_seq_handling(msg, &request_uri->u_val[i], decode_info_buffer);
+				} else {
+					LM_DBG("We found legacy param in R-URI with value of %.*s\n",
+						request_uri->u_val[i].len, request_uri->u_val[i].s);
+					return th_no_dlg_seq_handling(msg, &request_uri->u_val[i], decode_info_buffer_legacy);
+				}
 			}
 		}
 	} else if (msg->route != NULL && auto_route_on_trusted_socket) {
@@ -367,11 +401,10 @@ int topo_hiding_match_no_dlg(struct sip_msg *msg) {
 			}
 
 			for (i = 0; i < route_uri.u_params_no; i++) {
-				if (route_uri.u_name[i].len == th_contact_encode_param.len &&
-					memcmp(th_contact_encode_param.s, route_uri.u_name[i].s, th_contact_encode_param.len) == 0) {
+				thinfo_decode = th_get_options(&route_uri.u_name[i]);
+				if (thinfo_decode != NULL) {
 					LM_DBG("We found param in Route header with value of %.*s\n",
 						route_uri.u_val[i].len, route_uri.u_val[i].s);
-
 					thinfo = &route_uri.u_val[i];
 					break;
 				}
@@ -982,7 +1015,7 @@ socket_only:
     thinfo_buffer_finalize(&encoded_uri_buf, flags, encoded_uris);
 
 	for (i = 0; i < encoded_uri_buf.len; i++)
-    	encoded_uri_buf.buf[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
+    	encoded_uri_buf.buf[i] ^= th_topoh_encode_xor_pw->s[i % th_topoh_encode_xor_pw->len];
 
     suffix_enc = pkg_malloc(1 + th_contact_encode_param.len + 1 + enc_len + params_len + 1);
     if (!suffix_enc) {
@@ -1108,15 +1141,20 @@ static int th_no_dlg_encode_contact(struct sip_msg *msg, uint16_t flags, str *ro
 	/* make sure we do not free this string in case of a further error */
 	prefix = NULL;
 
-	if (th_compact_encoding) {
-		if (!(suffix = build_encoded_thinfo_suffix(msg, routes, rrs_to_ignore, &suffix_len, flags, 0))) {
-			LM_ERR("Failed to build suffix \n");
-			goto error;
-		}
-	} else {
-		if (!(suffix = build_encoded_contact_suffix_legacy(msg, routes, rrs_to_ignore, &suffix_len, flags))) {
-			LM_ERR("Failed to build suffix \n");
-			goto error;
+	{
+		int use_compact_enc = (thinfo_options != NULL) ?
+			thinfo_options->compact_encoding : th_compact_encoding;
+
+		if (use_compact_enc) {
+			if (!(suffix = build_encoded_thinfo_suffix(msg, routes, rrs_to_ignore, &suffix_len, flags, 0))) {
+				LM_ERR("Failed to build suffix \n");
+				goto error;
+			}
+		} else {
+			if (!(suffix = build_encoded_contact_suffix_legacy(msg, routes, rrs_to_ignore, &suffix_len, flags))) {
+				LM_ERR("Failed to build suffix \n");
+				goto error;
+			}
 		}
 	}
 
@@ -1297,7 +1335,7 @@ static int decode_info_buffer(str *info, str rr_buf[static 1], str ct_buf[static
 	}
 
 	for (i = 0; i < dec_len; i++)
-        decoded_uri_buf.buf[i] ^= topo_hiding_ct_encode_pw.s[i % topo_hiding_ct_encode_pw.len];
+        decoded_uri_buf.buf[i] ^= th_topoh_encode_xor_pw->s[i % th_topoh_encode_xor_pw->len];
 
     decoded_uri_buf.len = dec_len;
     decoded_uri_buf.pos = 0;
