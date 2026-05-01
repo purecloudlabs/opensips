@@ -65,7 +65,7 @@ typedef struct {
 	str password;
 } param_password_t;
 
-/* Up to two modparam lines: name matches th_contact_encode_param; password is XOR key for thinfo. */
+/* Up to two th_contact_encode_param_passwd modparam lines: name matches th_contact_encode_param; passwd is XOR key for thinfo. */
 static param_password_t param_passwords[2];
 static int param_password_count;
 static param_password_t *compact_encoding_password;
@@ -136,7 +136,7 @@ static const param_export_t params[] = {
 	{ "th_external_socket_tag",          STR_PARAM, &th_external_socket_tag.s          },
 	{ "th_auto_route_on_trusted_socket", INT_PARAM, &auto_route_on_trusted_socket      },
 	{ "th_compact_encoding",             INT_PARAM, &th_compact_encoding               },
-	{ "th_contact_encode_param_password", STR_PARAM|USE_FUNC_PARAM, (void *)&add_param_password },
+	{ "th_contact_encode_param_passwd", STR_PARAM|USE_FUNC_PARAM, (void *)&add_param_password },
 	{0, 0, 0}
 };
 
@@ -220,27 +220,27 @@ static int add_param_password(modparam_t type, void *val)
 	param_password_t *slot;
 
 	if ((PARAM_TYPE_MASK(type) & STR_PARAM) == 0) {
-		LM_ERR("th_contact_encode_param_password: string value required\n");
+		LM_ERR("th_contact_encode_param_passwd: string value required\n");
 		return -1;
 	}
 
 	if (!val || !*(char *)val) {
-		LM_ERR("th_contact_encode_param_password: empty value\n");
+		LM_ERR("th_contact_encode_param_passwd: empty value\n");
 		return -1;
 	}
 
 	if (param_password_count >= 2) {
-		LM_ERR("th_contact_encode_param_password: at most 2 entries allowed\n");
+		LM_ERR("th_contact_encode_param_passwd: at most 2 entries allowed\n");
 		return -1;
 	}
 
 	colon = strchr((char *)val, ':');
 	if (!colon || colon == (char *)val) {
-		LM_ERR("th_contact_encode_param_password: expected name:password (missing name)\n");
+		LM_ERR("th_contact_encode_param_passwd: expected name:password (missing name)\n");
 		return -1;
 	}
 	if (*(colon + 1) == '\0') {
-		LM_ERR("th_contact_encode_param_password: expected name:password (empty password)\n");
+		LM_ERR("th_contact_encode_param_passwd: expected name:password (empty password)\n");
 		return -1;
 	}
 
@@ -251,7 +251,7 @@ static int add_param_password(modparam_t type, void *val)
 	trim(&name);
 	trim(&pwd);
 	if (name.len == 0 || pwd.len == 0) {
-		LM_ERR("th_contact_encode_param_password: empty name or password\n");
+		LM_ERR("th_contact_encode_param_passwd: empty name or password\n");
 		return -1;
 	}
 
@@ -266,7 +266,7 @@ static int add_param_password(modparam_t type, void *val)
 	}
 
 	param_password_count++;
-	LM_DBG("th_contact_encode_param_password: registered name <%.*s>\n",
+	LM_DBG("th_contact_encode_param_passwd: registered name <%.*s>\n",
 		slot->name.len, slot->name.s);
 	return 0;
 }
@@ -303,7 +303,7 @@ static void sync_th_compact_encode_xor_pw(void)
 	th_topoh_encode_xor_pw = &compact_encoding_password->password;
 	thinfo_options = &password_rotation[compact_encoding_password - param_passwords];
 
-	LM_INFO("topology_hiding: using th_contact_encode_param_password entry <%.*s> "
+	LM_INFO("topology_hiding: using th_contact_encode_param_passwd entry <%.*s> "
 		"for primary thinfo XOR (th_contact_encode_param)\n",
 		compact_encoding_password->name.len, compact_encoding_password->name.s);
 }
