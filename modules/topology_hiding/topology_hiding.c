@@ -482,11 +482,13 @@ static int pv_topo_decoded_uri(struct sip_msg *msg, pv_param_t *param, pv_value_
 		field_id = param->pvn.u.isname.name.n;
 	}
 
+	LM_DBG("Decoded uri %.*s\n", decoded_uris[index].len - 2, decoded_uris[index].s + 1);
+
 	if (field_id == TH_ROUTE_FULL) {
 		return pv_get_strval(msg, param, res, &decoded_uris[index]);
 	}
 
-	if (parse_uri(decoded_uris[index].s + 1, decoded_uris[index].len - 1, &uri) < 0) {
+	if (parse_uri(decoded_uris[index].s + 1, decoded_uris[index].len - 2, &uri) < 0) {
 		LM_ERR("Bad Contact URI\n");
 		return -1;
 	}

@@ -296,7 +296,7 @@ struct lump* delete_existing_contact(struct sip_msg *msg, int del_hdr) {
 	return lump;
 }
 
-struct lump* restore_vias_from_req(struct sip_msg *req,struct sip_msg *rpl)
+struct lump* restore_vias_from_req(struct sip_msg *req, struct sip_msg *rpl)
 {
 	struct lump* lmp;
 	struct hdr_field *it;

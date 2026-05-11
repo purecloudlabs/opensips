@@ -46,6 +46,10 @@ int topo_delete_vias(struct sip_msg *req);
 struct lump* delete_existing_contact(struct sip_msg *msg, int del_hdr);
 struct lump* restore_vias_from_req(struct sip_msg *req,struct sip_msg *rpl);
 
+int topo_parse_passed_ct_params(str *params);
+
+int topo_parse_passed_hdr_ct_params(str *params);
+
 static inline int topo_ct_param_len(str *name, str *val, int should_quote)
 {
 	int len = 1 /* ; */ + name->len;

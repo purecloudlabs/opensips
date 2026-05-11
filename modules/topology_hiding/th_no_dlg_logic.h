@@ -21,9 +21,10 @@
 #ifndef _TH_NO_DLG_LOGIC_H
 #define _TH_NO_DLG_LOGIC_H
 
+#include "th_common_logic.h"
+
 #include "../../str.h"
 #include "../tm/t_hooks.h"
-#include "th_common_logic.h"
 #include "../../context.h"
 
 enum encode_scheme {ENC_BASE64, ENC_BASE32};
