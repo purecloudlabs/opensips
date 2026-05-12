@@ -33,7 +33,7 @@ enum encode_scheme {ENC_BASE64, ENC_BASE32};
 typedef struct {
 	str param_name;
 	str param_password;
-	int compact_encoding;
+	int compact_encoding; // 1 would be compact encoding and 0 would be the legecy encoding
 } thinfo_options_t;
 
 extern thinfo_options_t password_rotation[TH_INFO_PASSWORD_ROTATION_SIZE];

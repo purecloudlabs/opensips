@@ -41,40 +41,34 @@ str topo_hiding_ct_params = {0,0};
 str topo_hiding_ct_hdr_params = {0,0};
 str topo_hiding_prefix = str_init("DLGCH_");
 str topo_hiding_seed = str_init("OpenSIPS");
-str topo_hiding_ct_encode_pw = str_init("ToPoCtPaSS");
-str th_contact_encode_param = str_init("thinfo");
+
 str th_contact_encode_scheme = str_init("base64");
 str th_contact_caller_var = str_init("_th_contact_caller_username_var_");
 str th_contact_callee_var = str_init("_th_contact_callee_username_var_");
-str topo_hiding_ct_encode_pw_legacy = str_init("ToPoCtPaSS");
-str th_contact_encode_param_legacy = str_init("thinfol");
-str th_contact_encode_scheme_legacy = str_init("base64");
+
 str th_internal_trusted_tag = STR_EMPTY;
 str th_external_socket_tag = STR_EMPTY;
+str th_use_param = STR_EMPTY;
 int auto_route_on_trusted_socket = 1;
-int th_compact_encoding = 0;
+
 thinfo_options_t password_rotation[TH_INFO_PASSWORD_ROTATION_SIZE];
 thinfo_options_t *thinfo_options;
 int th_topology_param_password_count;
 
 int th_ct_enc_scheme;
-int th_ct_enc_scheme_legacy;
+
+static str default_th_param_name = str_init("thinfo");
+static str default_th_param_pw = str_init("ToPoCtPaSS");
 
 typedef struct {
 	str name;
 	str password;
+	int compact_encoding;
 } param_password_t;
 
-/* Up to two th_contact_encode_param_passwd modparam lines: name matches th_contact_encode_param; passwd is XOR key for thinfo. */
+/* Up to two th_contact_encode_param_password lines: name[:password[:C|L]] */
 static param_password_t param_passwords[2];
 static int param_password_count;
-static param_password_t *compact_encoding_password;
-
-/*
- * Pointer to the str used for XOR on primary (non-legacy) thinfo encode/decode.
- * Defaults to topo_hiding_ct_encode_pw; after optional modparams, may point into param_passwords[].
- */
-str *th_topoh_encode_xor_pw = &topo_hiding_ct_encode_pw;
 
 /* Global buffer for decoded routes */
 str decoded_uris[12];
@@ -102,9 +96,9 @@ static int pv_topo_decoded_routes_count(struct sip_msg *msg, pv_param_t *param, 
 static int pv_topo_decoded_contact(struct sip_msg *msg, pv_param_t *param, pv_value_t *res);
 static int pv_parse_nameaddr_part(pv_spec_p sp, const str *in);
 static int pv_parse_idx_th_route(pv_spec_p sp, const str *in);
-static int add_param_password(modparam_t type, void *val);
+static int add_encode_param_password(modparam_t type, void *val);
 static void th_free_param_passwords(void);
-static void sync_th_compact_encode_xor_pw(void);
+static int sync_th_encode_options(void);
 
 static const cmd_export_t cmds[]={
 	{"topology_hiding",(cmd_function)w_topology_hiding, {
@@ -124,19 +118,14 @@ static const param_export_t params[] = {
 	{ "th_passed_contact_params",        STR_PARAM, &topo_hiding_ct_hdr_params.s       },
 	{ "th_callid_passwd",                STR_PARAM, &topo_hiding_seed.s                },
 	{ "th_callid_prefix",                STR_PARAM, &topo_hiding_prefix.s              },
-	{ "th_contact_encode_passwd",        STR_PARAM, &topo_hiding_ct_encode_pw.s        },
-	{ "th_contact_encode_param",         STR_PARAM, &th_contact_encode_param.s         },
 	{ "th_contact_encode_scheme",        STR_PARAM, &th_contact_encode_scheme.s        },
 	{ "th_contact_caller_username_var",  STR_PARAM, &th_contact_caller_var.s           },
 	{ "th_contact_callee_username_var",  STR_PARAM, &th_contact_callee_var.s           },
-	{ "th_contact_encode_passwd_legacy", STR_PARAM, &topo_hiding_ct_encode_pw_legacy.s },
-	{ "th_contact_encode_param_legacy",  STR_PARAM, &th_contact_encode_param_legacy.s  },
-	{ "th_contact_encode_scheme_legacy", STR_PARAM, &th_contact_encode_scheme_legacy.s },
 	{ "th_internal_trusted_tag",         STR_PARAM, &th_internal_trusted_tag.s         },
 	{ "th_external_socket_tag",          STR_PARAM, &th_external_socket_tag.s          },
 	{ "th_auto_route_on_trusted_socket", INT_PARAM, &auto_route_on_trusted_socket      },
-	{ "th_compact_encoding",             INT_PARAM, &th_compact_encoding               },
-	{ "th_contact_encode_param_passwd", STR_PARAM|USE_FUNC_PARAM, (void *)&add_param_password },
+	{ "th_use_param",                    STR_PARAM, &th_use_param.s                    },
+	{ "th_contact_encode_param_password", STR_PARAM|USE_FUNC_PARAM, (void *)&add_encode_param_password },
 	{0, 0, 0}
 };
 
@@ -209,51 +198,91 @@ static void th_free_param_passwords(void)
 		memset(&param_passwords[i], 0, sizeof param_passwords[i]);
 	}
 	param_password_count = 0;
-	compact_encoding_password = NULL;
-	th_topoh_encode_xor_pw = &topo_hiding_ct_encode_pw;
 }
 
-static int add_param_password(modparam_t type, void *val)
+
+static int parse_th_line(const char *value, str *name, str *pwd, int *compact){
+	const char *c1, *c2;
+	str enc = STR_NULL;
+
+	static str default_pw = str_init("ToPoCtPaSS");
+
+	c1 = strchr(value, ':');
+	
+	if (!c1) {
+		name->s = (char *)value;
+		name->len = strlen(name->s);
+		trim(name);
+		if (name->len == 0)
+			return -1;
+		*pwd = default_pw;
+		*compact = 1;
+		return 0;
+	}
+
+	name->s = (char *)value;
+	name->len = c1 - value;
+	trim(name);
+
+	if (name->len == 0)
+		return -1;
+
+	c2 = strchr(c1 + 1, ':');
+
+	if (!c2) {
+		pwd->s = (char *)c1 + 1;
+		pwd->len = strlen(pwd->s);
+		trim(pwd);
+		if (pwd->len == 0)
+			*pwd = default_pw;
+		*compact = 1;
+		return 0;
+	}
+
+	pwd->s = (char *)c1 + 1;
+	pwd->len = c2 - (c1 + 1);
+	trim(pwd);
+	if (pwd->len == 0)
+		*pwd = default_pw;
+
+	enc.s = (char *)c2 + 1;
+	enc.len = strlen(enc.s);
+	trim(&enc);
+
+	if (enc.len == 0) {
+		*compact = 1;
+		return 0;
+	}
+
+	if (enc.len != 1)
+		return -1;
+
+	if (enc.s[0] == 'L' || enc.s[0] == 'l')
+		*compact = 0;
+	else if (enc.s[0] == 'C' || enc.s[0] == 'c')
+		*compact = 1;
+	else
+		return -1;
+
+	return 0;
+}
+
+static int add_encode_param_password(modparam_t type, void *val)
 {
-	char *colon;
 	str name, pwd;
+	int compact;
 	param_password_t *slot;
 
-	if ((PARAM_TYPE_MASK(type) & STR_PARAM) == 0) {
-		LM_ERR("th_contact_encode_param_passwd: string value required\n");
+	if ((PARAM_TYPE_MASK(type) & STR_PARAM) == 0 || !val || !*(char *)val)
 		return -1;
-	}
-
-	if (!val || !*(char *)val) {
-		LM_ERR("th_contact_encode_param_passwd: empty value\n");
-		return -1;
-	}
 
 	if (param_password_count >= 2) {
-		LM_ERR("th_contact_encode_param_passwd: at most 2 entries allowed\n");
+		LM_ERR("th_contact_encode_param_password: at most 2 entries\n");
 		return -1;
 	}
 
-	colon = strchr((char *)val, ':');
-	if (!colon || colon == (char *)val) {
-		LM_ERR("th_contact_encode_param_passwd: expected name:password (missing name)\n");
+	if (parse_th_line((char *)val, &name, &pwd, &compact) != 0)
 		return -1;
-	}
-	if (*(colon + 1) == '\0') {
-		LM_ERR("th_contact_encode_param_passwd: expected name:password (empty password)\n");
-		return -1;
-	}
-
-	name.s = (char *)val;
-	name.len = colon - (char *)val;
-	pwd.s = colon + 1;
-	pwd.len = strlen(pwd.s);
-	trim(&name);
-	trim(&pwd);
-	if (name.len == 0 || pwd.len == 0) {
-		LM_ERR("th_contact_encode_param_passwd: empty name or password\n");
-		return -1;
-	}
 
 	slot = &param_passwords[param_password_count];
 	if (pkg_str_dup(&slot->name, &name) != 0)
@@ -264,48 +293,64 @@ static int add_param_password(modparam_t type, void *val)
 		slot->name.len = 0;
 		return -1;
 	}
-
+	slot->compact_encoding = compact;
 	param_password_count++;
-	LM_DBG("th_contact_encode_param_passwd: registered name <%.*s>\n",
-		slot->name.len, slot->name.s);
 	return 0;
 }
 
-static void sync_th_compact_encode_xor_pw(void)
-{
-	int i;
+static int sync_th_encode_options(void){
+	int i, sel = 0;
 
-	memset(password_rotation, 0, sizeof(password_rotation));
-	th_topology_param_password_count = 0;
-	thinfo_options = NULL;
+	memset(password_rotation, 0, sizeof(password_rotation));  //set the password rotation to 0
+	th_topology_param_password_count = 0; //set the password count to 0
+	thinfo_options = NULL; //set the thinfo options to NULL
+
+	if (th_use_param.s) { //if the th_use_param is not NULL
+		th_use_param.len = strlen(th_use_param.s); //assign the length of the string value to the len pointer
+	}
+	else {
+		th_use_param.len = 0; //assign 0 to the len pointer
+	}
+	trim(&th_use_param);
 
 	if (param_password_count == 0) {
-		compact_encoding_password = NULL;
-		th_topoh_encode_xor_pw = &topo_hiding_ct_encode_pw;
-		return;
-	}
+		password_rotation[0].param_name = default_th_param_name;
+		password_rotation[0].param_password = default_th_param_pw;
+		password_rotation[0].compact_encoding = 1;
+		th_topology_param_password_count = 1;
 
-	for (i = 0; i < param_password_count; i++) {
-		password_rotation[i].param_name = param_passwords[i].name;
-		password_rotation[i].param_password = param_passwords[i].password;
-		password_rotation[i].compact_encoding = th_compact_encoding;
+		if (th_use_param.len && str_strcmp(&th_use_param, &default_th_param_name) != 0) {
+			LM_ERR("th_use_param does not match built-in thinfo\n");
+			return -1;
+		}
+		sel = 0;
 	}
-	th_topology_param_password_count = param_password_count;
+	else { 
+		for (i = 0; i < param_password_count; i++) { //loop through the param_password_count
+			password_rotation[i].param_name = param_passwords[i].name; //assign the name to the param_name pointer
+			password_rotation[i].param_password = param_passwords[i].password; //assign the password to the param_password pointer
+			password_rotation[i].compact_encoding = param_passwords[i].compact_encoding; //assign the compact encoding to the compact_encoding pointer
+		}
+		th_topology_param_password_count = param_password_count; //assign the password count to the th_topology_param_password_count pointer
 
-	compact_encoding_password = &param_passwords[0];
-	for (i = 0; i < param_password_count; i++) {
-		if (str_strcmp(&th_contact_encode_param, &param_passwords[i].name) == 0) {
-			compact_encoding_password = &param_passwords[i];
-			break;
+		if (th_use_param.len) { //if the th_use_param is not NULL
+			for (i = 0; i < param_password_count; i++) { //loop through the param_password_count
+				if (str_strcmp(&th_use_param, &param_passwords[i].name) == 0) {  //if the th_use_param matches the name
+					sel = i; //assign the index to the sel pointer
+					break;
+				}
+			}
+			if (i == param_password_count) { //if the th_use_param is not found in the list
+				LM_ERR("th_use_param not found in list\n"); 
+				return -1;
+			}
+		}
+		else {
+			sel = 0; //assign 0 to the sel pointer
 		}
 	}
-
-	th_topoh_encode_xor_pw = &compact_encoding_password->password;
-	thinfo_options = &password_rotation[compact_encoding_password - param_passwords];
-
-	LM_INFO("topology_hiding: using th_contact_encode_param_passwd entry <%.*s> "
-		"for primary thinfo XOR (th_contact_encode_param)\n",
-		compact_encoding_password->name.len, compact_encoding_password->name.s);
+	thinfo_options = &password_rotation[sel];
+	return 0;
 }
 
 static int mod_init(void)
@@ -318,11 +363,8 @@ static int mod_init(void)
 	/* param handling */
 	topo_hiding_prefix.len = strlen(topo_hiding_prefix.s);
 	topo_hiding_seed.len = strlen(topo_hiding_seed.s);
-	th_contact_encode_param.len = strlen(th_contact_encode_param.s);
-	sync_th_compact_encode_xor_pw();
-	topo_hiding_ct_encode_pw.len = strlen(topo_hiding_ct_encode_pw.s);
-	th_contact_encode_param_legacy.len = strlen(th_contact_encode_param_legacy.s);
-	topo_hiding_ct_encode_pw_legacy.len = strlen(topo_hiding_ct_encode_pw_legacy.s);
+	if (sync_th_encode_options() != 0)
+		goto error;
 	if (topo_hiding_ct_params.s) {
 		topo_hiding_ct_params.len = strlen(topo_hiding_ct_params.s);
 		topo_parse_passed_ct_params(&topo_hiding_ct_params);
@@ -340,17 +382,6 @@ static int mod_init(void)
 		th_ct_enc_scheme = ENC_BASE32;
 	else {
 		LM_ERR("Unsupported value for 'th_contact_encode_scheme' modparam!"
-			"Use 'base64' or 'base32'\n");
-		goto error;
-	}
-	
-	th_contact_encode_scheme_legacy.len = strlen(th_contact_encode_scheme_legacy.s);
-	if (!str_strcmp(&th_contact_encode_scheme_legacy, const_str("base64")))
-		th_ct_enc_scheme_legacy = ENC_BASE64;
-	else if (!str_strcmp(&th_contact_encode_scheme_legacy, const_str("base32")))
-		th_ct_enc_scheme_legacy = ENC_BASE32;
-	else {
-		LM_ERR("Unsupported value for 'th_contact_encode_scheme_legacy' modparam!"
 			"Use 'base64' or 'base32'\n");
 		goto error;
 	}
