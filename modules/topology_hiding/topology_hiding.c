@@ -301,15 +301,15 @@ static int add_encode_param_password(modparam_t type, void *val)
 static int sync_th_encode_options(void){
 	int i, sel = 0;
 
-	memset(password_rotation, 0, sizeof(password_rotation));  //set the password rotation to 0
-	th_topology_param_password_count = 0; //set the password count to 0
-	thinfo_options = NULL; //set the thinfo options to NULL
+	memset(password_rotation, 0, sizeof(password_rotation));
+	th_topology_param_password_count = 0;
+	thinfo_options = NULL;
 
-	if (th_use_param.s) { //if the th_use_param is not NULL
-		th_use_param.len = strlen(th_use_param.s); //assign the length of the string value to the len pointer
+	if (th_use_param.s) {
+		th_use_param.len = strlen(th_use_param.s);
 	}
 	else {
-		th_use_param.len = 0; //assign 0 to the len pointer
+		th_use_param.len = 0;
 	}
 	trim(&th_use_param);
 
@@ -326,27 +326,27 @@ static int sync_th_encode_options(void){
 		sel = 0;
 	}
 	else { 
-		for (i = 0; i < param_password_count; i++) { //loop through the param_password_count
-			password_rotation[i].param_name = param_passwords[i].name; //assign the name to the param_name pointer
-			password_rotation[i].param_password = param_passwords[i].password; //assign the password to the param_password pointer
-			password_rotation[i].compact_encoding = param_passwords[i].compact_encoding; //assign the compact encoding to the compact_encoding pointer
+		for (i = 0; i < param_password_count; i++) {
+			password_rotation[i].param_name = param_passwords[i].name;
+			password_rotation[i].param_password = param_passwords[i].password;
+			password_rotation[i].compact_encoding = param_passwords[i].compact_encoding;
 		}
-		th_topology_param_password_count = param_password_count; //assign the password count to the th_topology_param_password_count pointer
+		th_topology_param_password_count = param_password_count;
 
-		if (th_use_param.len) { //if the th_use_param is not NULL
-			for (i = 0; i < param_password_count; i++) { //loop through the param_password_count
-				if (str_strcmp(&th_use_param, &param_passwords[i].name) == 0) {  //if the th_use_param matches the name
-					sel = i; //assign the index to the sel pointer
+		if (th_use_param.len) {
+			for (i = 0; i < param_password_count; i++) {
+				if (str_strcmp(&th_use_param, &param_passwords[i].name) == 0) {
+					sel = i;
 					break;
 				}
 			}
-			if (i == param_password_count) { //if the th_use_param is not found in the list
+			if (i == param_password_count) {
 				LM_ERR("th_use_param not found in list\n"); 
 				return -1;
 			}
 		}
 		else {
-			sel = 0; //assign 0 to the sel pointer
+			sel = 0;
 		}
 	}
 	thinfo_options = &password_rotation[sel];
