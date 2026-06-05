@@ -717,8 +717,10 @@ static char* build_encoded_contact_suffix_legacy(struct sip_msg* msg, str *route
         }
     }
 
-	if (head != NULL)
-        pkg_free(head);
+	if (head != NULL) {
+		free_rr(&head);
+		head = NULL;
+	}
 
 	total_len += params_len;
 
@@ -799,14 +801,14 @@ static char* build_encoded_contact_suffix_legacy(struct sip_msg* msg, str *route
 	*suffix_len = total_len;
 	return suffix_enc;
 error:
+	if (head != NULL)
+		free_rr(&head);
 	if (suffix_enc)
 		pkg_free(suffix_enc);
 	if (suffix_plain)
 		pkg_free(suffix_plain);
 	if (rr_set_free_str)
 		pkg_free(rr_set_free_str);
-	if (routes)
-		shm_free(routes);
 	return NULL;
 }
 
@@ -964,7 +966,7 @@ static char* build_encoded_thinfo_suffix(struct sip_msg* msg, str *routes, unsig
     }
 
 	if (head != NULL) {
-		pkg_free(head);
+		free_rr(&head);
 		head = NULL;
 	}
 
@@ -1035,7 +1037,7 @@ error:
 	if (rr_set_free_str)
     	pkg_free(rr_set_free_str);
     if (head != NULL)
-        pkg_free(head);
+        free_rr(&head);
 	if (suffix_enc)
 		pkg_free(suffix_enc);
 	return NULL;
