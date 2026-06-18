@@ -38,6 +38,9 @@
 #define RR_FLOW_DOWNSTREAM  (1<<0)
 #define RR_FLOW_UPSTREAM    (1<<1)
 
+#define LR_NO_FLAGS 0
+#define LR_ON_SELF  1	
+
 extern int ctx_rrparam_idx;
 extern int ctx_routing_idx;
 
@@ -45,7 +48,7 @@ extern int ctx_routing_idx;
 /*! \brief
  * Do loose routing as per RFC3261
  */
-int loose_route(struct sip_msg* _m);
+int loose_route(struct sip_msg* _m, void* func_flags);
 
 
 /*! \brief
@@ -157,6 +160,110 @@ static inline int is_strict(str* _params)
 
 	if ((state == 2) || (state == 3)) return 0;
 	else return 1;
+}
+
+/*
+ * Find out if a URI contains r2 parameter which indicates
+ * that we put 2 record routes
+ */
+static inline int is_2rr(str* _params)
+{
+	str s;
+	int i, state = 0;
+
+	if (_params->len == 0) return 0;
+	s = *_params;
+
+	for(i = 0; i < s.len; i++) {
+		switch(state) {
+		case 0:
+			switch(s.s[i]) {
+			case ' ':
+			case '\r':
+			case '\n':
+			case '\t':           break;
+			case 'r':
+			case 'R': state = 1; break;
+			default:  state = 4; break;
+			}
+			break;
+
+		case 1:
+			switch(s.s[i]) {
+			case '2': state = 2; break;
+			default:  state = 4; break;
+			}
+			break;
+
+		case 2:
+			switch(s.s[i]) {
+			case ';':  return 1;
+			case '=':  return 1;
+			case ' ':
+			case '\r':
+			case '\n':
+			case '\t': state = 3; break;
+			default:   state = 4; break;
+			}
+			break;
+
+		case 3:
+			switch(s.s[i]) {
+			case ';':  return 1;
+			case '=':  return 1;
+			case ' ':
+			case '\r':
+			case '\n':
+			case '\t': break;
+			default:   state = 4; break;
+			}
+			break;
+
+		case 4:
+			switch(s.s[i]) {
+			case '\"': state = 5; break;
+			case ';':  state = 0; break;
+			default:              break;
+			}
+			break;
+
+		case 5:
+			switch(s.s[i]) {
+			case '\\': state = 6; break;
+			case '\"': state = 4; break;
+			default:              break;
+			}
+			break;
+
+		case 6: state = 5; break;
+		}
+	}
+
+	if ((state == 2) || (state == 3)) return 1;
+	else return 0;
+}
+
+static inline int fixup_lr_flags(void** param)
+{
+	int index, ret = LR_NO_FLAGS;
+	str *flags = (str *)*param;
+
+	for (index=0; index < flags->len; index++) {
+		switch (flags->s[index]) {
+			case ' ':
+				break;
+			case 'l':
+			case 'L':
+				ret |= LR_ON_SELF;
+				break;
+			default:
+				LM_ERR("Invalid flag\n");
+				return -1;
+		}
+	}
+
+	*param = (void *)(long)ret;
+	return 0;
 }
 
 

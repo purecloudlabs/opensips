@@ -194,6 +194,8 @@ struct tcp_connection{
 	struct tcp_async_data *async;
 	/* protocol specific data attached to this connection, in TCP-main-private memory */
 	void *proto_data;
+	time_t first_seen;
+	int do_not_reuse;
 };
 
 
