@@ -55,6 +55,7 @@
 #include "../ipc.h"
 #include "../receive.h"
 #include "../lib/cond.h"
+#include "../cfg_reload.h"
 
 #include "tcp_passfd.h"
 #include "net_tcp_proc.h"
@@ -931,18 +932,43 @@ error_sec:
 }
 
 
+static void tcpconn_put_rpc(int pid, void *param)
+{
+	tcpconn_put(param);
+}
+
+
 void tcpconn_put(struct tcp_connection* c)
 {
 	int destroy = 0;
+	int release_in_main = 0;
+	int tcp_main_proc;
 
 	TCPCONN_LOCK(c->id);
-	c->refcnt--;
-	if (c->refcnt == 0 && (c->flags & F_CONN_HASHED) == 0)
-		destroy = 1;
+	if ((c->flags & F_CONN_HASHED) == 0) {
+		if (!is_tcp_main && c->refcnt == 1) {
+			/* Keep the last reference until TCP main accepts ownership. */
+			release_in_main = 1;
+		} else {
+			c->refcnt--;
+			if (c->refcnt == 0)
+				destroy = 1;
+		}
+	} else {
+		/* Hashed connections are destroyed by TCP main lifetime handling. */
+		c->refcnt--;
+	}
 	TCPCONN_UNLOCK(c->id);
 
-	if (destroy)
+	if (release_in_main) {
+		tcp_main_proc = tcp_get_main_proc_no();
+		if (tcp_main_proc < 0 ||
+				ipc_send_rpc(tcp_main_proc, tcpconn_put_rpc, c) < 0)
+			LM_ERR("failed to release connection %p (%u) in TCP main; "
+				"leaving its final reference intact\n", c, c->id);
+	} else if (destroy) {
 		_tcpconn_rm(c, 1);
+	}
 }
 
 
@@ -1126,13 +1152,30 @@ static inline void tcpconn_destroy(struct tcp_connection* tcpconn)
 	TCPCONN_UNLOCK(id);
 }
 
+static void tcpconn_destroy_rpc(int _, void *param)
+{
+	tcpconn_destroy(param);
+}
+
 /* wrapper to the internally used function */
 void tcp_conn_destroy(struct tcp_connection* tcpconn)
 {
+	int tcp_main_proc;
+
 	tcp_trigger_report(tcpconn, TCP_REPORT_CLOSE,
 				"Closed by Proto layer");
 	sh_log(tcpconn->hist, TCP_UNREF, "tcp_conn_destroy, (%d)", tcpconn->refcnt);
-	return tcpconn_destroy(tcpconn);
+
+	if (!is_tcp_main) {
+		tcp_main_proc = tcp_get_main_proc_no();
+		if (tcp_main_proc < 0 ||
+				ipc_send_rpc(tcp_main_proc, tcpconn_destroy_rpc, tcpconn) < 0)
+			LM_ERR("failed to destroy connection %p (%u) in TCP main; "
+				"leaving its reference intact\n", tcpconn, tcpconn->id);
+		return;
+	}
+
+	tcpconn_destroy(tcpconn);
 }
 
 static inline int tcp_set_nonblock(int fd)
@@ -2061,8 +2104,7 @@ int tcp_init(void)
 			LM_WARN("TCP scaling profile <%s> not defined "
 				"-> ignoring it...\n", tcp_auto_scaling_profile);
 		} else {
-			LM_WARN("ignoring TCP auto-scaling profile in single IO mode\n");
-			s_profile = NULL;
+			auto_scaling_enabled = 1;
 		}
 	}
 
@@ -2254,6 +2296,86 @@ void tcp_reset_worker_slot(void)
 }
 
 
+static int fork_dynamic_tcp_process(void *foo)
+{
+	int p_id;
+	int r;
+	const struct internal_fork_params ifp_sr_tcp = {
+		.proc_desc = "SIP receiver TCP",
+		.flags = OSS_PROC_DYNAMIC|OSS_PROC_NEEDS_SCRIPT,
+		.type = TYPE_TCP,
+	};
+
+	/* search for a free slot in the TCP workers table */
+	for (r = 0; r < tcp_workers_max_no; r++)
+		if (tcp_workers[r].state == STATE_INACTIVE)
+			break;
+
+	if (r == tcp_workers_max_no) {
+		LM_BUG("trying to fork one more TCP worker but no free slot in "
+			"the TCP table (size=%d)\n", tcp_workers_max_no);
+		return -1;
+	}
+
+	if ((p_id = internal_fork(&ifp_sr_tcp)) < 0) {
+		LM_ERR("cannot fork dynamic TCP worker process\n");
+		return -1;
+	} else if (p_id == 0) {
+		/* new TCP worker process */
+		if (tcp_dispatch_sock[1] >= 0)
+			close(tcp_dispatch_sock[1]);
+		tcp_dispatch_sock[1] = -1;
+
+		set_proc_attrs("TCP receiver");
+		tcp_workers[r].pid = getpid();
+
+		if (tcp_worker_proc_reactor_init(tcp_dispatch_sock[0]) < 0 ||
+		init_child(20000) ||
+		self_update_routing_script() < 0)
+			goto error;
+
+		report_conditional_status(1, 0);
+		clean_read_pipeend();
+
+		tcp_worker_proc_loop();
+		destroy_worker_reactor();
+
+error:
+		report_failure_status();
+		LM_ERR("initializing new TCP worker failed, exiting with error\n");
+		pt[process_no].flags |= OSS_PROC_SELFEXIT;
+		exit(-1);
+	} else {
+		/* parent/attendant */
+		tcp_workers[r].state = STATE_ACTIVE;
+		tcp_workers[r].pt_idx = p_id;
+		return p_id;
+	}
+
+	return 0;
+}
+
+
+static void tcp_process_graceful_terminate(int sender, void *param)
+{
+	int i;
+
+	/* accept this only from the attendant process */
+	if (sender != 0) {
+		LM_BUG("graceful terminate received from a non-main process\n");
+		return;
+	}
+	LM_NOTICE("process %d received RPC to terminate from Main\n", process_no);
+
+	/* reserve this slot until tcp_terminate_worker() detaches the process
+	 * from the shared dispatch queue and completes its pending async work */
+	if ((i = _get_own_tcp_worker_id()) >= 0)
+		tcp_workers[i].state = STATE_DRAINING;
+
+	tcp_terminate_worker();
+}
+
+
 /* counts the number of TCP processes to start with; this number may
  * change during runtime due auto-scaling */
 int tcp_count_processes(unsigned int *extra)
@@ -2262,6 +2384,9 @@ int tcp_count_processes(unsigned int *extra)
 
 	if (tcp_disabled)
 		return 0;
+
+	if (s_profile && extra && s_profile->max_procs > tcp_workers_no)
+		*extra = s_profile->max_procs - tcp_workers_no;
 
 	return 1 /* tcp main / IO process */ + tcp_workers_no /* dispatch workers */;
 }
@@ -2307,6 +2432,12 @@ int tcp_start_processes(int *chd_rank, int *startup_done)
 			strerror(errno));
 		goto error;
 	}
+
+	if (auto_scaling_enabled && s_profile &&
+	create_process_group(TYPE_TCP, NULL, s_profile,
+		fork_dynamic_tcp_process, tcp_process_graceful_terminate) != 0)
+		LM_ERR("failed to create TCP auto-scaling process group; "
+			"automatic scaling will not be possible\n");
 
 	for (r = 0; r < tcp_workers_no; r++) {
 		(*chd_rank)++;
@@ -2354,7 +2485,9 @@ int tcp_start_processes(int *chd_rank, int *startup_done)
 		tcp_worker_proc_loop();
 	}
 
-	if (tcp_dispatch_sock[0] >= 0) {
+	/* Keep the worker endpoint in the attendant when auto-scaling is enabled,
+	 * so dynamically forked TCP workers can inherit the shared queue. */
+	if (!s_profile && tcp_dispatch_sock[0] >= 0) {
 		close(tcp_dispatch_sock[0]);
 		tcp_dispatch_sock[0] = -1;
 	}
@@ -2491,7 +2624,7 @@ static int tcp_close_conn_run(void *data)
 	return 0;
 }
 
-static void tcp_close_conn_rpc(int _, void *param)
+static void tcp_close_conn_rpc(int pid, void *param)
 {
 	tcp_close_conn_run(param);
 }
