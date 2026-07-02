@@ -20,6 +20,17 @@
 #ifndef redact_pii_h
 #define redact_pii_h
 
+enum {
+    REDACT_REPLACE = 0,
+    REDACT_APPEND,
+    REDACT_PREPEND,
+    REDACT_FORMAT
+};
+
+extern int redact_pii_;
+extern char *redact_template;
+extern int redact_mode;
 
 const char* redact_pii(const char* input);
+
 #endif
