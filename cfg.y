@@ -1598,6 +1598,20 @@ assign_stm: LOGLEVEL EQUAL snumber { IFOR();
 		| REDACT_PII_ error { yyerror("boolean value expected"); }
 		| REDACT_TEMPLATE EQUAL STRING { IFOR();
 										redact_template=$3;
+										if (redact_mode == REDACT_FORMAT) {
+											char *pct = strstr(redact_template, "%s");
+											if (pct) {
+												redact_fmt.left.s = redact_template;
+												redact_fmt.left.len = pct - redact_template;
+												redact_fmt.right.s = pct + 2;
+												redact_fmt.right.len = strlen(pct + 2);
+											} else {
+												redact_fmt.left.s = redact_template;
+												redact_fmt.left.len = strlen(redact_template);
+												redact_fmt.right.s = "";
+												redact_fmt.right.len = 0;
+											}
+										}
 									}
 		| REDACT_TEMPLATE error { yyerror("string value expected"); }
 		| REDACT_MODE EQUAL STRING { IFOR();
@@ -1607,8 +1621,23 @@ assign_stm: LOGLEVEL EQUAL snumber { IFOR();
 											redact_mode=REDACT_APPEND;
 										else if (strcasecmp($3, "prepend")==0)
 											redact_mode=REDACT_PREPEND;
-										else if (strcasecmp($3, "format")==0)
+										else if (strcasecmp($3, "format")==0) {
 											redact_mode=REDACT_FORMAT;
+											if (redact_template) {
+												char *pct = strstr(redact_template, "%s");
+												if (pct) {
+													redact_fmt.left.s = redact_template;
+													redact_fmt.left.len = pct - redact_template;
+													redact_fmt.right.s = pct + 2;
+													redact_fmt.right.len = strlen(pct + 2);
+												} else {
+													redact_fmt.left.s = redact_template;
+													redact_fmt.left.len = strlen(redact_template);
+													redact_fmt.right.s = "";
+													redact_fmt.right.len = 0;
+												}
+											}
+										}
 										else
 											yyerror("redact_mode must be: replace|append|prepend|format");
 									}

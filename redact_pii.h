@@ -20,6 +20,8 @@
 #ifndef redact_pii_h
 #define redact_pii_h
 
+#include "str.h"
+
 enum {
     REDACT_REPLACE = 0,
     REDACT_APPEND,
@@ -27,9 +29,15 @@ enum {
     REDACT_FORMAT
 };
 
+typedef struct {
+    str left;
+    str right;
+} redact_log_format_t;
+
 extern int redact_pii_;
 extern char *redact_template;
 extern int redact_mode;
+extern redact_log_format_t redact_fmt;
 
 const char* redact_pii(const char* input);
 
