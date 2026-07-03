@@ -57,3 +57,25 @@ inline const char* redact_pii(const char* input) {
 		return redact_template;
 	}
 }
+
+inline int redact_pii_len(const char* input, int orig_len) {
+	size_t tpl_len, input_len;
+
+	if (!redact_pii_)
+		return orig_len;
+
+	switch (redact_mode) {
+	case REDACT_REPLACE:
+		return (int)strlen(redact_template);
+	case REDACT_APPEND:
+		return orig_len + (int)strlen(redact_template);
+	case REDACT_PREPEND:
+		return (int)strlen(redact_template) + orig_len;
+	case REDACT_FORMAT:
+		input_len = input ? strlen(input) : 0;
+		tpl_len = redact_fmt.left.len + input_len + redact_fmt.right.len;
+		return (int)tpl_len;
+	default:
+		return (int)strlen(redact_template);
+	}
+}

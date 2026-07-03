@@ -40,5 +40,7 @@ extern int redact_mode;
 extern redact_log_format_t redact_fmt;
 
 const char* redact_pii(const char* input);
+int redact_pii_len(const char* input, int orig_len);
+#define REDACT_PII(len, s) redact_pii_len((s), (len)), redact_pii((s))
 
 #endif
