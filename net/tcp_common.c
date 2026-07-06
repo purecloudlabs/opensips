@@ -175,7 +175,7 @@ int tcp_connect_blocking(int fd, const struct sockaddr *servaddr,
 }
 
 int tcp_sync_connect_fd(const union sockaddr_union* src, const union sockaddr_union* dst,
-                 enum sip_protos proto, const struct tcp_conn_profile *prof, enum si_flags flags, int sock_tos)
+                 enum sip_protos proto, const struct tcp_conn_profile *prof, enum si_flags flags, int sock_tos, int mark)
 {
 	int s;
 	union sockaddr_union my_name;
@@ -190,6 +190,17 @@ int tcp_sync_connect_fd(const union sockaddr_union* src, const union sockaddr_un
 	if (tcp_init_sock_opt(s, prof, flags, sock_tos)<0){
 		LM_ERR("tcp_init_sock_opt failed\n");
 		goto error;
+	}
+
+	if (mark > 0) {
+#ifdef SO_MARK
+		if (setsockopt(s, SOL_SOCKET, SO_MARK, &mark, sizeof(mark)) < 0) {
+			LM_ERR("SO_MARK setsockopt failed (%d) %s\n", errno, strerror(errno));
+			goto error;
+		}
+#else
+		LM_WARN("SO_MARK not available on this platform\n");
+#endif
 	}
 
 	if (src) {
