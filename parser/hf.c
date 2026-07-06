@@ -53,6 +53,7 @@
 #include "parse_fcaps.h"
 #include "parse_security.h"
 
+#include "../redact_pii.h"
 
 /*
  * Frees a hdr_field structure,
@@ -269,6 +270,6 @@ void dump_hdr_field( struct hdr_field* hf )
 {
 	LM_ERR("type=%d, name=%.*s, body=%.*s, parsed=%p, next=%p\n",
 		hf->type, hf->name.len, ZSW(hf->name.s),
-		hf->body.len, ZSW(hf->body.s),
+		hf->body.len, redact_pii(hf->body.s),
 		hf->parsed, hf->next );
 }

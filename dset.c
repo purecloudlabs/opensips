@@ -37,6 +37,7 @@
 #include "mem/mem.h"
 #include "ip_addr.h"
 #include "usr_avp.h"
+#include "redact_pii.h"
 
 #define CONTACT "Contact: "
 #define CONTACT_LEN (sizeof(CONTACT) - 1)
@@ -321,7 +322,7 @@ int update_msg_branch_uri(unsigned int idx, str *val)
 	br = dsct->branches + idx;
 
 	if (val->len > MAX_URI_SIZE - 1) {
-		LM_ERR("too long uri: [%.*s]/%d\n", val->len, val->s, val->len);
+		LM_ERR("too long uri: [%.*s]/%d\n", val->len, redact_pii(val->s), val->len);
 		return -1;
 	}
 	br->branch.uri.s = br->uri; /* internal buffer */
@@ -350,7 +351,7 @@ int update_msg_branch_dst_uri(unsigned int idx, str *val)
 		br->branch.dst_uri.len = 0;
 	} else {
 		if (val->len > MAX_URI_SIZE - 1) {
-			LM_ERR("too long dst_uri: [%.*s]/%d\n", val->len, val->s,val->len);
+			LM_ERR("too long dst_uri: [%.*s]/%d\n", val->len, redact_pii(val->s),val->len);
 			return -1;
 		}
 		br->branch.dst_uri.s = br->dst_uri; /* internal buffer */

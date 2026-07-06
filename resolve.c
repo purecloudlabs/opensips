@@ -49,6 +49,7 @@
 #include "ip_addr.h"
 #include "globals.h"
 #include "blacklists.h"
+#include "redact_pii.h"
 
 fetch_dns_cache_f *dnscache_fetch_func=NULL;
 put_dns_cache_f *dnscache_put_func=NULL;
@@ -300,7 +301,7 @@ int get_dns_answer(union dns_query *answer,int anslen,char *qname,int qtype,int 
 		switch (type) {
 			case T_PTR:
 				if (strcasecmp(tname, bp) != 0) {
-					LM_ERR("asked for %s, got %s\n",tname,bp);
+					LM_ERR("asked for %s, got %s\n",redact_pii(tname),redact_pii(bp));
 					cp += n;
 					continue;	/* XXX - had_error++ ? */
 				}
@@ -333,7 +334,7 @@ int get_dns_answer(union dns_query *answer,int anslen,char *qname,int qtype,int 
 			case T_A:
 			case T_AAAA:
 				if (strcasecmp(global_he.h_name, bp) != 0) {
-					LM_ERR("asked for %s, got %s\n",global_he.h_name,bp);
+					LM_ERR("asked for %s, got %s\n",redact_pii(global_he.h_name),redact_pii(bp));
 					cp += n;
 					continue; /* XXX - had_error++ ? */
 				}
@@ -451,7 +452,7 @@ query:
 		if (size < 0) {
 			LM_DBG("Domain name not found: %s\n", query_name);
 			if (dnscache_put_func(name,af==AF_INET?T_A:T_AAAA,NULL,0,1,0) < 0)
-				LM_ERR("Failed to store %s - %d in cache\n",name,af);
+				LM_ERR("Failed to store %s - %d in cache\n",redact_pii(name),af);
 			return NULL;
 		}
 
@@ -485,7 +486,7 @@ query:
 			/* No addresses and no CNAME to follow - this is an error */
 			LM_WARN("No addresses and no CNAME for %s\n", query_name);
 			if (dnscache_put_func(name,af==AF_INET?T_A:T_AAAA,NULL,0,1,0) < 0)
-				LM_ERR("Failed to store %s - %d in cache\n",name,af);
+				LM_ERR("Failed to store %s - %d in cache\n",redact_pii(name),af);
 			return NULL;
 		}
 	}
@@ -496,7 +497,7 @@ query:
 	}
 
 	if (dnscache_put_func(name,af==AF_INET?T_A:T_AAAA,&global_he,-1,0,min_ttl) < 0)
-		LM_ERR("Failed to store %s - %d in cache\n",name,af);
+		LM_ERR("Failed to store %s - %d in cache\n",redact_pii(name),af);
 	return &global_he;
 }
 
@@ -1166,7 +1167,7 @@ query:
 		LM_DBG("lookup(%s, %d) failed\n", name, type);
 		if (cache) {
 			if (dnscache_put_func(name,type,NULL,0,1,0) < 0)
-				LM_ERR("Failed to store %s - %d in cache\n",name,type);
+				LM_ERR("Failed to store %s - %d in cache\n",redact_pii(name),type);
 		}
 		goto not_found;
 	}
@@ -1346,7 +1347,7 @@ query:
 
 	if (cache) {
 		if (dnscache_put_func(name,type,head,rdata_buf_len,0,min_ttl) < 0)
-			LM_ERR("Failed to store %s - %d in cache\n",name,type);
+			LM_ERR("Failed to store %s - %d in cache\n",redact_pii(name),type);
 	}
 	return head;
 error_boundary:
