@@ -52,6 +52,7 @@
 
 
 extern int port;
+extern int httpd_workers;
 extern str ip;
 extern str buffer;
 extern unsigned int hd_conn_timeout_s;
@@ -66,6 +67,99 @@ static union sockaddr_union httpd_server_info;
 extern int receive_buf_size;
 extern char *httpd_receive_buff;
 extern int httpd_receive_buff_pos;
+
+int httpd_listen_fd = -1;
+
+static int httpd_build_sockaddr(struct sockaddr_storage *ss, int *family,
+		int *dual_stack, char **ip_repr, char *reprbuf)
+{
+	struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)ss;
+	struct sockaddr_in *s4 = (struct sockaddr_in *)ss;
+
+	memset(ss, 0, sizeof *ss);
+	*dual_stack = 0;
+
+	if (ip.s && strcmp(ip.s, "*")) {
+		if (q_memchr(ip.s, ':', ip.len)) {
+			if (inet_pton(AF_INET6, ip.s, &s6->sin6_addr) <= 0) {
+				LM_ERR("failed to parse 'ip' modparam: %s\n", ip.s);
+				return -1;
+			}
+			s6->sin6_family = AF_INET6;
+			s6->sin6_port = htons(port);
+			*family = AF_INET6;
+			sprintf(reprbuf, "[%s]", !strcmp(ip.s, "::0") ? "::" : ip.s);
+			*ip_repr = reprbuf;
+			return sizeof *s6;
+		}
+
+		if (inet_pton(AF_INET, ip.s, &s4->sin_addr) <= 0) {
+			LM_ERR("failed to parse 'ip' modparam: %s\n", ip.s);
+			return -1;
+		}
+		s4->sin_family = AF_INET;
+		s4->sin_port = htons(port);
+		*family = AF_INET;
+		*ip_repr = ip.s;
+		return sizeof *s4;
+	}
+
+	s6->sin6_addr = in6addr_any;
+	s6->sin6_family = AF_INET6;
+	s6->sin6_port = htons(port);
+	*family = AF_INET6;
+	*dual_stack = 1;
+	*ip_repr = "*";
+	return sizeof *s6;
+}
+
+int httpd_pre_fork(void)
+{
+	struct sockaddr_storage ss;
+	int family, dual, salen, fd, on = 1, off = 0;
+	char *ip_repr, reprbuf[1 + IP_ADDR_MAX_STR_SIZE + 1];
+
+	if (httpd_workers <= 1)
+		return 0;
+
+	salen = httpd_build_sockaddr(&ss, &family, &dual, &ip_repr, reprbuf);
+	if (salen < 0)
+		return -1;
+
+	fd = socket(family, SOCK_STREAM, 0);
+	if (fd < 0) {
+		LM_ERR("failed to create HTTPD socket: %s\n", strerror(errno));
+		return -1;
+	}
+	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on) < 0)
+		LM_WARN("failed to set SO_REUSEADDR: %s\n", strerror(errno));
+	if (dual)
+		setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof off);
+
+	if (bind(fd, (struct sockaddr *)&ss, salen) < 0) {
+		LM_ERR("failed to bind HTTPD socket on %s:%d: %s\n",
+			ip_repr, port, strerror(errno));
+		close(fd);
+		return -1;
+	}
+	if (listen(fd, 1024) < 0) {
+		LM_ERR("failed to listen on HTTPD socket: %s\n", strerror(errno));
+		close(fd);
+		return -1;
+	}
+
+	httpd_listen_fd = fd;
+	return 0;
+}
+
+int httpd_post_fork(void)
+{
+	if (httpd_listen_fd >= 0) {
+		close(httpd_listen_fd);
+		httpd_listen_fd = -1;
+	}
+	return 0;
+}
 
 static const str MI_HTTP_U_URL = str_init("<html><body>"
 "Unable to parse URL!</body></html>");
@@ -760,7 +854,7 @@ void httpd_proc(int rank)
 	char *key_pem, *cert_pem, *ip_repr, ip6buf[1+IP_ADDR_MAX_STR_SIZE+1];
 	void *saddr;
 	struct sockaddr_in saddr4;
-	struct MHD_OptionItem mhd_opts[4];
+	struct MHD_OptionItem mhd_opts[5];
 	const union MHD_DaemonInfo *dmni;
 	int fd;
 
@@ -796,10 +890,6 @@ void httpd_proc(int rank)
 
 	} else
 		mhd_flags = mhd_flags | MHD_NO_FLAG;
-
-	mhd_opts[mhd_opt_n].option = MHD_OPTION_END;
-	mhd_opts[mhd_opt_n].value = 0;
-	mhd_opts[mhd_opt_n].ptr_value = NULL;
 
 	#if (MHD_VERSION <= 0x00095000)
 	mhd_flags = mhd_flags | MHD_USE_EPOLL_LINUX_ONLY;
@@ -869,12 +959,28 @@ void httpd_proc(int rank)
 	httpd_server_info.sin.sin_port = port;
 #endif
 
+	if (httpd_listen_fd >= 0) {
+		mhd_flags &= ~(MHD_USE_IPv6 | MHD_USE_DUAL_STACK);
+		mhd_opts[mhd_opt_n].option = MHD_OPTION_LISTEN_SOCKET;
+		mhd_opts[mhd_opt_n].value = httpd_listen_fd;
+		mhd_opts[mhd_opt_n].ptr_value = NULL;
+		mhd_opt_n++;
+	} else {
+		mhd_opts[mhd_opt_n].option = MHD_OPTION_SOCK_ADDR;
+		mhd_opts[mhd_opt_n].value = 0;
+		mhd_opts[mhd_opt_n].ptr_value = saddr;
+		mhd_opt_n++;
+	}
+
+	mhd_opts[mhd_opt_n].option = MHD_OPTION_END;
+	mhd_opts[mhd_opt_n].value = 0;
+	mhd_opts[mhd_opt_n].ptr_value = NULL;
+
 	LM_DBG("init_child [%d] - [%d] HTTP Server init [%s:%d]\n",
 		rank, getpid(), ip_repr, port);
 	set_proc_attrs("HTTPD %s:%d", ip_repr, port);
 	dmn = MHD_start_daemon(mhd_flags, port, NULL, NULL,
 			&(answer_to_connection), NULL,
-			MHD_OPTION_SOCK_ADDR, saddr,
 			MHD_OPTION_ARRAY, mhd_opts,
 			MHD_OPTION_END);
 

@@ -70,8 +70,10 @@ struct httpd_cb *httpd_cb_list = NULL;
 char *httpd_receive_buff = NULL;
 int httpd_receive_buff_pos=0;
 
-static const proc_export_t mi_procs[] = {
-	{"HTTPD",  0,  0, httpd_proc, 1,
+int httpd_workers = 1;
+
+static proc_export_t mi_procs[] = {
+	{"HTTPD",  httpd_pre_fork,  httpd_post_fork, httpd_proc, 1,
 		PROC_FLAG_INITCHILD|PROC_FLAG_HAS_IPC|PROC_FLAG_NEEDS_SCRIPT },
 	{NULL, 0, 0, NULL, 0, 0}
 };
@@ -88,6 +90,7 @@ static const param_export_t params[] = {
 	{"tls_cert_file", STR_PARAM, &tls_cert_file.s},
 	{"tls_key_file", STR_PARAM,  &tls_key_file.s},
 	{"tls_ciphers", STR_PARAM, &tls_ciphers.s},
+	{"workers",       INT_PARAM, &httpd_workers},
 	{NULL, 0, NULL}
 };
 
@@ -185,6 +188,12 @@ static int mod_init(void)
 			MIN_POST_BUF_SIZE);
 		return -1;
 	}
+
+	if (httpd_workers < 1) {
+		LM_ERR("invalid 'workers' value %d\n", httpd_workers);
+		return -1;
+	}
+	mi_procs[0].no = httpd_workers;
 	if (buffer.len == 0)
 		buffer.len = (pkg_mem_size/4);
 	LM_DBG("buf_size=[%d]\n", buffer.len);

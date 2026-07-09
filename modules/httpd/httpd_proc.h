@@ -39,6 +39,8 @@ extern struct MHD_Daemon *dmn;
 
 void httpd_proc(int rank);
 void httpd_proc_destroy(void);
+int httpd_pre_fork(void);
+int httpd_post_fork(void);
 
 #endif
 
