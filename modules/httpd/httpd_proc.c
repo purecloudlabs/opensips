@@ -41,6 +41,7 @@
 #include <microhttpd.h>
 #endif
 
+#include "../../globals.h"
 #include "../../pt.h"
 #include "../../sr_module.h"
 #include "../../str.h"
@@ -52,7 +53,6 @@
 
 
 extern int port;
-extern int httpd_workers;
 extern str ip;
 extern str buffer;
 extern unsigned int hd_conn_timeout_s;
@@ -70,8 +70,8 @@ extern int httpd_receive_buff_pos;
 
 int httpd_listen_fd = -1;
 
-static int httpd_build_sockaddr(struct sockaddr_storage *ss, int *family,
-		int *dual_stack, char **ip_repr, char *reprbuf)
+static int httpd_build_sockaddr(str *sip, int sport, struct sockaddr_storage *ss,
+		int *family, int *dual_stack, char **ip_repr, char *reprbuf)
 {
 	struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)ss;
 	struct sockaddr_in *s4 = (struct sockaddr_in *)ss;
@@ -79,50 +79,48 @@ static int httpd_build_sockaddr(struct sockaddr_storage *ss, int *family,
 	memset(ss, 0, sizeof *ss);
 	*dual_stack = 0;
 
-	if (ip.s && strcmp(ip.s, "*")) {
-		if (q_memchr(ip.s, ':', ip.len)) {
-			if (inet_pton(AF_INET6, ip.s, &s6->sin6_addr) <= 0) {
-				LM_ERR("failed to parse 'ip' modparam: %s\n", ip.s);
+	if (sip->s && strcmp(sip->s, "*")) {
+		if (q_memchr(sip->s, ':', sip->len)) {
+			if (inet_pton(AF_INET6, sip->s, &s6->sin6_addr) <= 0) {
+				LM_ERR("failed to parse 'ip' modparam: %s\n", sip->s);
 				return -1;
 			}
 			s6->sin6_family = AF_INET6;
-			s6->sin6_port = htons(port);
+			s6->sin6_port = htons(sport);
 			*family = AF_INET6;
-			sprintf(reprbuf, "[%s]", !strcmp(ip.s, "::0") ? "::" : ip.s);
+			sprintf(reprbuf, "[%s]", !strcmp(sip->s, "::0") ? "::" : sip->s);
 			*ip_repr = reprbuf;
 			return sizeof *s6;
 		}
 
-		if (inet_pton(AF_INET, ip.s, &s4->sin_addr) <= 0) {
-			LM_ERR("failed to parse 'ip' modparam: %s\n", ip.s);
+		if (inet_pton(AF_INET, sip->s, &s4->sin_addr) <= 0) {
+			LM_ERR("failed to parse 'ip' modparam: %s\n", sip->s);
 			return -1;
 		}
 		s4->sin_family = AF_INET;
-		s4->sin_port = htons(port);
+		s4->sin_port = htons(sport);
 		*family = AF_INET;
-		*ip_repr = ip.s;
+		*ip_repr = sip->s;
 		return sizeof *s4;
 	}
 
 	s6->sin6_addr = in6addr_any;
 	s6->sin6_family = AF_INET6;
-	s6->sin6_port = htons(port);
+	s6->sin6_port = htons(sport);
 	*family = AF_INET6;
 	*dual_stack = 1;
 	*ip_repr = "*";
 	return sizeof *s6;
 }
 
-int httpd_pre_fork(void)
+static int httpd_open_listen_socket(struct httpd_server *s)
 {
 	struct sockaddr_storage ss;
 	int family, dual, salen, fd, on = 1, off = 0;
 	char *ip_repr, reprbuf[1 + IP_ADDR_MAX_STR_SIZE + 1];
 
-	if (httpd_workers <= 1)
-		return 0;
-
-	salen = httpd_build_sockaddr(&ss, &family, &dual, &ip_repr, reprbuf);
+	salen = httpd_build_sockaddr(&s->ip, s->port, &ss, &family, &dual,
+			&ip_repr, reprbuf);
 	if (salen < 0)
 		return -1;
 
@@ -138,7 +136,7 @@ int httpd_pre_fork(void)
 
 	if (bind(fd, (struct sockaddr *)&ss, salen) < 0) {
 		LM_ERR("failed to bind HTTPD socket on %s:%d: %s\n",
-			ip_repr, port, strerror(errno));
+			ip_repr, s->port, strerror(errno));
 		close(fd);
 		return -1;
 	}
@@ -148,15 +146,37 @@ int httpd_pre_fork(void)
 		return -1;
 	}
 
-	httpd_listen_fd = fd;
+	return fd;
+}
+
+int httpd_pre_fork(void)
+{
+	int i;
+	struct httpd_server *s;
+
+	for (i = 0; i < httpd_n_servers; i++) {
+		s = &httpd_servers[i];
+		s->listen_fd = -1;
+		if (s->workers <= 1)
+			continue;
+		s->listen_fd = httpd_open_listen_socket(s);
+		if (s->listen_fd < 0)
+			return -1;
+	}
 	return 0;
 }
 
 int httpd_post_fork(void)
 {
-	if (httpd_listen_fd >= 0) {
-		close(httpd_listen_fd);
-		httpd_listen_fd = -1;
+	int i;
+	struct httpd_server *s;
+
+	for (i = 0; i < httpd_n_servers; i++) {
+		s = &httpd_servers[i];
+		if (s->listen_fd >= 0) {
+			close(s->listen_fd);
+			s->listen_fd = -1;
+		}
 	}
 	return 0;
 }
@@ -827,6 +847,40 @@ int httpd_callback(int fd, void *dmn, int was_timeout)
 void httpd_proc(int rank)
 {
 	struct httpd_cb *cb = httpd_cb_list;
+	struct httpd_server *s = NULL, *o;
+	int i, acc = 0;
+
+	for (i = 0; i < httpd_n_servers; i++) {
+		o = &httpd_servers[i];
+		if (rank < acc + o->workers) {
+			s = o;
+			break;
+		}
+		acc += o->workers;
+	}
+	if (!s) {
+		LM_ERR("cannot map HTTPD worker rank %d to a server\n", rank);
+		return;
+	}
+
+	ip = s->ip;
+	port = s->port;
+	buffer.len = s->buf_size;
+	hd_conn_timeout_s = s->conn_timeout;
+	post_buf_size = s->post_buf_size;
+	receive_buf_size = s->receive_buf_size;
+	tls_cert_file = s->tls_cert_file;
+	tls_key_file = s->tls_key_file;
+	tls_ciphers = s->tls_ciphers;
+	httpd_listen_fd = s->listen_fd;
+
+	for (i = 0; i < httpd_n_servers; i++) {
+		o = &httpd_servers[i];
+		if (o != s && o->listen_fd >= 0) {
+			close(o->listen_fd);
+			o->listen_fd = -1;
+		}
+	}
 
 	/*child's initial settings*/
 	if (init_mi_child()!=0) {
@@ -834,10 +888,19 @@ void httpd_proc(int rank)
 		return;
 	}
 
+	if (buffer.len == 0)
+		buffer.len = (pkg_mem_size/4);
+
 	/* Allocating http response buffer */
 	buffer.s = (char*)malloc(sizeof(char)*buffer.len);
 	if (buffer.s==NULL) {
 		LM_ERR("oom\n");
+		return;
+	}
+
+	httpd_receive_buff = pkg_malloc(receive_buf_size);
+	if (httpd_receive_buff == NULL) {
+		LM_ERR("oom for receive buffer\n");
 		return;
 	}
 

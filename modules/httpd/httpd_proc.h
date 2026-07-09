@@ -26,6 +26,8 @@
 #ifndef _MI_HTTP_HTTPD_PROC_H
 #define _MI_HTTP_HTTPD_PROC_H
 
+#include "../../str.h"
+
 #ifdef LIBMICROHTTPD
 #include <microhttpd.h>
 extern struct MHD_Daemon *dmn;
@@ -36,6 +38,24 @@ extern struct MHD_Daemon *dmn;
 #define MHD_RET int
 #endif
 #endif
+
+struct httpd_server {
+	str name;
+	str ip;
+	int port;
+	int buf_size;
+	int conn_timeout;
+	int post_buf_size;
+	int receive_buf_size;
+	str tls_cert_file;
+	str tls_key_file;
+	str tls_ciphers;
+	int workers;
+	int listen_fd;
+};
+
+extern struct httpd_server *httpd_servers;
+extern int httpd_n_servers;
 
 void httpd_proc(int rank);
 void httpd_proc_destroy(void);
