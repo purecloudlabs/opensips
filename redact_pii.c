@@ -21,7 +21,7 @@ redact_log_format_t redact_fmt = {{NULL, 0}, {NULL, 0}};
 	} while (0)
 
 inline const char* redact_pii(const char* input) {
-	static char buf[REDACT_BUF_SIZE];
+	static __thread char buf[REDACT_BUF_SIZE];
 	const char *safe = ZSW(input);
 	size_t input_len = 0; 
 	size_t idx = 0;
