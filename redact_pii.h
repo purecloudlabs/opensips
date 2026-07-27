@@ -35,7 +35,7 @@ typedef struct {
 } redact_log_format_t;
 
 extern int redact_pii_;
-extern char *redact_template;
+extern str redact_template;
 extern int redact_mode;
 extern redact_log_format_t redact_fmt;
 
