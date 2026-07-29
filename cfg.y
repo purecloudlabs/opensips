@@ -111,6 +111,7 @@
 #include "config.h"
 #include "mem/rpm_mem.h"
 #include "poll_types.h"
+#include "redact_pii.h"
 
 #ifdef SHM_EXTRA_STATS
 #include "mem/module_info.h"
@@ -395,6 +396,8 @@ extern int cfg_parse_only_routes;
 %token TOS
 %token DISABLE_DNS_FAILOVER
 %token REDACT_PII_
+%token REDACT_TEMPLATE
+%token REDACT_MODE
 %token DISABLE_DNS_BLACKLIST
 %token DST_BLACKLIST
 %token DISABLE_STATELESS_FWD
@@ -1597,7 +1600,54 @@ assign_stm: LOGLEVEL EQUAL snumber { IFOR();
 		| REDACT_PII_ EQUAL NUMBER { IFOR();
 										redact_pii_=$3;
 									}
-		| REDACT_PII_ error { yyerror("boolean value expected"); }				
+		| REDACT_PII_ error { yyerror("boolean value expected"); }
+		| REDACT_TEMPLATE EQUAL STRING { IFOR();
+										redact_template.s=$3;
+										redact_template.len=strlen($3);
+										if (redact_mode == REDACT_FORMAT) {
+											char *pct = strstr(redact_template.s, "%s");
+											if (pct) {
+												redact_fmt.left.s = redact_template.s;
+												redact_fmt.left.len = pct - redact_template.s;
+												redact_fmt.right.s = pct + 2;
+												redact_fmt.right.len = strlen(pct + 2);
+											} else {
+												redact_fmt.left.s = redact_template.s;
+												redact_fmt.left.len = redact_template.len;
+												redact_fmt.right.s = "";
+												redact_fmt.right.len = 0;
+											}
+										}
+									}
+		| REDACT_TEMPLATE error { yyerror("string value expected"); }
+		| REDACT_MODE EQUAL STRING { IFOR();
+										if (strcasecmp($3, "replace")==0)
+											redact_mode=REDACT_REPLACE;
+										else if (strcasecmp($3, "append")==0)
+											redact_mode=REDACT_APPEND;
+										else if (strcasecmp($3, "prepend")==0)
+											redact_mode=REDACT_PREPEND;
+										else if (strcasecmp($3, "format")==0) {
+											redact_mode=REDACT_FORMAT;
+											if (redact_template.s) {
+												char *pct = strstr(redact_template.s, "%s");
+												if (pct) {
+													redact_fmt.left.s = redact_template.s;
+													redact_fmt.left.len = pct - redact_template.s;
+													redact_fmt.right.s = pct + 2;
+													redact_fmt.right.len = strlen(pct + 2);
+												} else {
+													redact_fmt.left.s = redact_template.s;
+													redact_fmt.left.len = redact_template.len;
+													redact_fmt.right.s = "";
+													redact_fmt.right.len = 0;
+												}
+											}
+										}
+										else
+											yyerror("redact_mode must be: replace|append|prepend|format");
+									}
+		| REDACT_MODE error { yyerror("string value expected (replace|append|prepend|format)"); }
 		| DISABLE_DNS_BLACKLIST EQUAL NUMBER { IFOR();
 										disable_dns_blacklist=$3;
 									}
