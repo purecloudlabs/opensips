@@ -1405,7 +1405,7 @@ inline static int handle_tcp_worker(struct tcp_worker* tcp_c, int fd_i)
 			tcpconn->flags&=~F_CONN_REMOVED_WRITE;
 			break;
 		case CONN_ERROR_TCPW:
-			LM_ERR("TCP_DBG - main: received conn %p / %u as faulty "
+			LM_INFO("TCP_DBG - main: received conn %p / %u as faulty "
 				"(state %d, rfcnt=%d)\n", tcpconn, tcpconn->id,
 				tcpconn->state, tcpconn->refcnt);
 		case CONN_DESTROY:

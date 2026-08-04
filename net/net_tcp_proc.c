@@ -136,7 +136,7 @@ static void tcp_receive_timeout(void)
 		if (con->state<0){   /* kill bad connections */
 			/* S_CONN_BAD or S_CONN_ERROR, remove it */
 			/* fd will be closed in tcpconn_release */
-			LM_ERR("TCP_DBG - conn %p / %u found as bad, relasing back "
+			LM_INFO("TCP_DBG - conn %p / %u found as bad, relasing back "
 				"to main\n", con, con->id);
 
 			reactor_del_reader(con->fd, -1/*idx*/, IO_FD_CLOSING/*io_flags*/ );
