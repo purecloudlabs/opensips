@@ -428,6 +428,7 @@ static int receive_urecord_insert(bin_packet_t *packet)
 {
 	str d, aor, kv_str;
 	urecord_t *r;
+	map_t kv_storage;
 	udomain_t *domain;
 	int sl;
 	short pkg_ver = get_bin_pkg_version(packet);
@@ -449,7 +450,7 @@ static int receive_urecord_insert(bin_packet_t *packet)
 	if (get_urecord(domain, &aor, &r) == 0)
 		goto out;
 
-	if (insert_urecord(domain, &aor, &r, 1) != 0) {
+	if (insert_urecord(domain, &aor, &r, 1, NULL, NULL) != 0) {
 		unlock_udomain(domain, &aor);
 		goto out_err;
 	}
@@ -463,7 +464,11 @@ static int receive_urecord_insert(bin_packet_t *packet)
 
 	if (pkg_ver >= UL_BIN_V5) {
 		bin_pop_str(packet, &kv_str);
-		r->kv_storage = store_deserialize(&kv_str);
+		kv_storage = store_deserialize(&kv_str);
+		if (kv_storage) {
+			store_destroy(r->kv_storage);
+			r->kv_storage = kv_storage;
+		}
 	}
 
 out:
@@ -608,7 +613,7 @@ static int receive_ucontact_insert(bin_packet_t *packet)
 		LM_INFO("failed to fetch local urecord - creating new one "
 			"(ci: '%.*s') \n", callid.len, callid.s);
 
-		if (insert_urecord(domain, &aor, &record, 1) != 0) {
+		if (insert_urecord(domain, &aor, &record, 1, NULL, NULL) != 0) {
 			LM_ERR("failed to insert new record\n");
 			unlock_udomain(domain, &aor);
 			goto error;
@@ -772,7 +777,7 @@ static int receive_ucontact_update(bin_packet_t *packet)
 		LM_INFO("failed to fetch local urecord - create new record and contact"
 			" (ci: '%.*s')\n", callid.len, callid.s);
 
-		if (insert_urecord(domain, &aor, &record, 1) != 0) {
+		if (insert_urecord(domain, &aor, &record, 1, NULL, NULL) != 0) {
 			LM_ERR("failed to insert urecord\n");
 			unlock_udomain(domain, &aor);
 			goto error;
