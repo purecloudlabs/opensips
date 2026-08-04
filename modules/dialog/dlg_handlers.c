@@ -968,6 +968,7 @@ static void dlg_update_req_info(str *buffer, struct dlg_cell *dlg, int leg,
 	if (t && is_invite(t))
 		dlg_leg_push_cseq_map(dlg, t, DLG_CALLER_LEG, &msg);
 	dlg_update_out_sdp(dlg, leg, other_leg(dlg, leg), &msg,
+			msg.first_line.type == SIP_REQUEST &&
 			msg.REQ_METHOD != METHOD_ACK);
 	free_sip_msg(&msg);
 }
@@ -2169,7 +2170,7 @@ after_unlock5:
 		return;
 	}
 
-	if ( (event==DLG_EVENT_REQ || event==DLG_EVENT_REQACK)
+	if ( (event==DLG_EVENT_REQ || event==DLG_EVENT_REQACK || event==DLG_EVENT_REQPRACK)
 	&& (new_state==DLG_STATE_CONFIRMED || new_state==DLG_STATE_CONFIRMED_NA) ) {
 		LM_DBG("sequential request successfully processed (dst_leg=%d)\n",
 			dst_leg);

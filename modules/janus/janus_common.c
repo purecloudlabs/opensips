@@ -112,6 +112,10 @@ int janus_raise_event(janus_connection *conn, cJSON *request)
 	}
 
 	full_json = cJSON_Print(request);
+	if (!full_json) {
+		LM_ERR("cJSON_Print failed\n");
+		goto err_free_params;
+	}
 	cJSON_Minify(full_json);
 	full_json_s.s = full_json;
 	full_json_s.len = strlen(full_json);
@@ -191,10 +195,15 @@ int handle_janus_json_request(janus_connection *conn, cJSON *request)
 	}
 
 	full_json = cJSON_Print(request);
+	if (!full_json) {
+		LM_ERR("cJSON_Print failed\n");
+		return 1;
+	}
 	cJSON_Minify(full_json);
 
 	reply->text.s = shm_strdup(full_json);
 	if (reply->text.s == NULL) {
+		pkg_free(full_json);
 		/* we're out of mem, let the requestor timeout, don't disconnect janus */
 		return 1;
 	}
@@ -220,24 +229,32 @@ int populate_janus_handler_id(janus_connection *conn, cJSON *request)
 	aux = cJSON_GetObjectItem(request, "janus");
 	if (aux == NULL || aux->type != cJSON_String ||
 	(reply_status.s = aux->valuestring) == NULL) {
-		LM_ERR("Unexpected JANUS reply received - %s\n",cJSON_Print(request));
+		char *dbg = cJSON_Print(request);
+		LM_ERR("Unexpected JANUS reply received - %s\n", dbg);
+		pkg_free(dbg);
 		return -1;
 	}
 
 	if (memcmp(reply_status.s,"success",7) != 0) {
-		LM_ERR("non-succesful JANUS reply received - %s\n",cJSON_Print(request));
+		char *dbg = cJSON_Print(request);
+		LM_ERR("non-succesful JANUS reply received - %s\n", dbg);
+		pkg_free(dbg);
 		return -1;
 	}
 
 	aux = cJSON_GetObjectItem(request, "data");
 	if (aux == NULL || aux->type != cJSON_Object) {
-		LM_ERR("Unexpected JANUS reply received, no data in %s\n",cJSON_Print(request));
+		char *dbg = cJSON_Print(request);
+		LM_ERR("Unexpected JANUS reply received, no data in %s\n", dbg);
+		pkg_free(dbg);
 		return -1;
 	}
 
 	aux2 = cJSON_GetObjectItem(aux, "id");
 	if (aux2 == NULL || aux2->type != cJSON_Number) {
-		LM_ERR("Unexpected JANUS reply received, id is not number %s\n",cJSON_Print(request));
+		char *dbg = cJSON_Print(request);
+		LM_ERR("Unexpected JANUS reply received, id is not number %s\n", dbg);
+		pkg_free(dbg);
 		return -1;
 	}
 

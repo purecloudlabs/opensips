@@ -51,6 +51,7 @@
 #include "../reactor.h"
 #include "../timer.h"
 #include "../ipc.h"
+#include "../cfg_reload.h"
 
 #include "tcp_passfd.h"
 #include "net_tcp_proc.h"
@@ -1093,6 +1094,8 @@ static inline void tcpconn_destroy(struct tcp_connection* tcpconn)
 		/* force timeout */
 		tcpconn->lifetime=0;
 		tcpconn->state=S_CONN_BAD;
+		sh_log(tcpconn->hist, TCP_DEL_DELAY, "tcpconn_destroy delayed, (%d)",
+			tcpconn->refcnt);
 		LM_DBG("delaying (%p, flags %04x) ref = %d ...\n",
 				tcpconn, tcpconn->flags, tcpconn->refcnt);
 
@@ -1402,6 +1405,9 @@ inline static int handle_tcp_worker(struct tcp_worker* tcp_c, int fd_i)
 			tcpconn->flags&=~F_CONN_REMOVED_WRITE;
 			break;
 		case CONN_ERROR_TCPW:
+			LM_ERR("TCP_DBG - main: received conn %p / %u as faulty "
+				"(state %d, rfcnt=%d)\n", tcpconn, tcpconn->id,
+				tcpconn->state, tcpconn->refcnt);
 		case CONN_DESTROY:
 		case CONN_EOF:
 			/* WARNING: this will auto-dec. refcnt! */
@@ -1555,8 +1561,11 @@ inline static int handle_worker(struct process_table* p, int fd_i)
 			tcpconn->flags&=~F_CONN_REMOVED_WRITE;
 			break;
 		case ASYNC_WRITE_GENW:
+			sh_log(tcpconn->hist,TCP_UNREF,"ASYNC_WRITE_GENW, (%d)",
+				tcpconn->refcnt);
 			if (tcpconn->state==S_CONN_BAD){
 				tcpconn->lifetime=0;
+				tcpconn_put(tcpconn);
 				break;
 			}
 			tcpconn_put(tcpconn);
@@ -2041,7 +2050,8 @@ static int fork_dynamic_tcp_process(void *foo)
 		tcp_workers[r].pid = getpid();
 
 		if (tcp_worker_proc_reactor_init(tcp_workers[r].main_unix_sock)<0||
-		init_child(20000) < 0) {
+		init_child(20000) ||
+		self_update_routing_script() < 0) {
 			goto error;
 		}
 
@@ -2330,6 +2340,7 @@ mi_response_t *mi_tcp_list_conns(const mi_params_t *params,
 					/* add one node for each conn */
 					add_mi_number( conn_item, MI_SSTR("Alias port"),
 						conn->con_aliases[j].port );
+
 			}
 		}
 

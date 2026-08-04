@@ -9,7 +9,7 @@ Build-Depends: bison,
                dpkg-dev (>= 1.16.1.1),
                flex,
                libconfuse-dev,
-               libcurl4-gnutls-dev,
+               libcurl4-openssl-dev,
                libdb-dev (>= 4.6.19),
                libfdcore6 (>= 1.2.1) | base-files,
                libfdproto6 (>= 1.2.1) | base-files,
@@ -29,7 +29,9 @@ Build-Depends: bison,
                libbson-dev | base-files,
                libmongoc-dev | base-files,
                libncurses5-dev,
-               libpcre3-dev,
+               opentelemetry-cpp-dev <opentelemetry>,
+               libpcre2-dev <!nopcre2>,
+               libpcre3-dev <nopcre2>,
                libperl-dev,
                libpq-dev,
                librabbitmq-dev,
@@ -119,7 +121,7 @@ Description: very fast and configurable SIP server
  XMLRPC Interface.
  .
  This package contains the main OpenSIPS binary along with the principal modules
- and support binaries including opensipsmc configuration tool.
+ and support binaries.
 
 Package: opensips-auth-jwt-module
 Architecture: any

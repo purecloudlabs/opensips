@@ -24,6 +24,7 @@
  *  2009-01-14  initial version (Iñaki Baz Castillo)
  *  2023-08-12  export pcres_match to MI (Fabien Aunay)
  *  2023-08-12  export pcres_match_group to MI (Fabien Aunay)
+ *  2025-09-17  switch to libpcre2 (Steven Ayre)
  */
 
 
@@ -39,7 +40,38 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifdef PCRE2_LIB
+#define PCRE2_CODE_UNIT_WIDTH 8
+#define PCRE2_ERR int
+#include <pcre2.h>
+#else
+#define pcre2_code pcre
+#define PCRE2_SIZE int
+#define PCRE2_ERR const char *
+#define PCRE2_CASELESS PCRE_CASELESS
+#define PCRE2_MULTILINE PCRE_MULTILINE
+#define PCRE2_DOTALL PCRE_DOTALL
+#define PCRE2_EXTENDED PCRE_EXTENDED
+#define PCRE2_ERROR_NOMATCH PCRE_ERROR_NOMATCH
+#define PCRE2_UCHAR unsigned char
+#define PCRE2_SPTR char *
+#define PCRE2_INFO_SIZE PCRE_INFO_SIZE
+#define PCRE2_INFO_CAPTURECOUNT PCRE_INFO_CAPTURECOUNT
+#define pcre2_pattern_info(subst_comp, flag, ret) \
+	pcre_fullinfo(subst_comp, NULL, flag, ret)
+#define pcre2_compile(pattern, _, flags, error, erroffset, ctx) \
+	pcre_compile(pattern, flags, error, erroffset, NULL)
+#define pcre2_code_free pcre_free
+#define pcre2_get_error_message(error, error_str, error_str_len) \
+	do { \
+		int _len = strlen(error); \
+		if (_len > error_str_len - 1) \
+			_len = error_str_len - 1; \
+		memcpy(error_str, error, _len); \
+		error_str[_len] = '\0'; \
+	} while (0)
 #include <pcre.h>
+#endif
 #include "../../sr_module.h"
 #include "../../dprint.h"
 #include "../../pt.h"
@@ -55,6 +87,8 @@
 #define FILE_MAX_LINE 500        /*!< Max line size in the file */
 #define MAX_GROUPS 20            /*!< Max number of groups */
 #define GROUP_MAX_SIZE 8192      /*!< Max size of a group */
+
+#define ERROR_BUF_SIZE 100
 
 
 /*
@@ -78,8 +112,8 @@ static int pcre_extended         = 0;
 /*
  * Module internal parameter variables
  */
-static pcre **pcres;
-static pcre ***pcres_addr;
+static pcre2_code **pcres;
+static pcre2_code ***pcres_addr;
 static int *num_pcres;
 static int pcre_options = 0x00000000;
 
@@ -219,24 +253,24 @@ static int mod_init(void)
 		/* PCRE options */
 		if (pcre_caseless != 0) {
 			LM_DBG("PCRE CASELESS enabled\n");
-			pcre_options = pcre_options | PCRE_CASELESS;
+			pcre_options = pcre_options | PCRE2_CASELESS;
 		}
 		if (pcre_multiline != 0) {
 			LM_DBG("PCRE MULTILINE enabled\n");
-			pcre_options = pcre_options | PCRE_MULTILINE;
+			pcre_options = pcre_options | PCRE2_MULTILINE;
 		}
 		if (pcre_dotall != 0) {
 			LM_DBG("PCRE DOTALL enabled\n");
-			pcre_options = pcre_options | PCRE_DOTALL;
+			pcre_options = pcre_options | PCRE2_DOTALL;
 		}
 		if (pcre_extended != 0) {
 			LM_DBG("PCRE EXTENDED enabled\n");
-			pcre_options = pcre_options | PCRE_EXTENDED;
+			pcre_options = pcre_options | PCRE2_EXTENDED;
 		}
 		LM_DBG("PCRE options: %i\n", pcre_options);
 
 		/* Pointer to pcres */
-		if ((pcres_addr = shm_malloc(sizeof(pcre **))) == 0) {
+		if ((pcres_addr = shm_malloc(sizeof(pcre2_code **))) == 0) {
 			LM_ERR("no memory for pcres_addr\n");
 			goto err;
 		}
@@ -277,13 +311,14 @@ static int load_pcres(int action)
 	FILE *f;
 	char line[FILE_MAX_LINE];
 	char **patterns = NULL;
-	pcre *pcre_tmp = NULL;
-	int pcre_size;
+	pcre2_code *pcre_tmp = NULL;
+	size_t pcre_size;
 	int pcre_rc;
-	const char *pcre_error;
-	int pcre_erroffset;
+	PCRE2_ERR pcre_error;
+	PCRE2_UCHAR pcre_error_str[ERROR_BUF_SIZE];
+	PCRE2_SIZE pcre_erroffset;
 	int num_pcres_tmp = 0;
-	pcre **pcres_tmp = NULL;
+	pcre2_code **pcres_tmp = NULL;
 
 	/* Get the lock */
 	lock_get(reload_lock);
@@ -418,7 +453,7 @@ static int load_pcres(int action)
 	}
 
 	/* Temporal pointer of pcres */
-	if ((pcres_tmp = pkg_malloc(sizeof(pcre *) * num_pcres_tmp)) == 0) {
+	if ((pcres_tmp = pkg_malloc(sizeof(pcre2_code *) * num_pcres_tmp)) == 0) {
 		LM_ERR("no more memory for pcres_tmp\n");
 		goto err;
 	}
@@ -429,14 +464,15 @@ static int load_pcres(int action)
 	/* Compile the patters */
 	for (i=0; i<num_pcres_tmp; i++) {
 
-		pcre_tmp = pcre_compile(patterns[i], pcre_options, &pcre_error, &pcre_erroffset, NULL);
+		pcre_tmp = pcre2_compile((PCRE2_SPTR)patterns[i], PCRE2_ZERO_TERMINATED, pcre_options, &pcre_error, &pcre_erroffset, NULL);
 		if (pcre_tmp == NULL) {
-			LM_ERR("pcre_tmp compilation of '%s' failed at offset %d: %s\n", patterns[i], pcre_erroffset, pcre_error);
+                	pcre2_get_error_message(pcre_error, pcre_error_str, sizeof(pcre_error_str));
+			LM_ERR("pcre_tmp compilation of '%s' failed at offset %lu: %s\n", patterns[i], (unsigned long)pcre_erroffset, pcre_error_str);
 			goto err;
 		}
-		pcre_rc = pcre_fullinfo(pcre_tmp, NULL, PCRE_INFO_SIZE, &pcre_size);
+		pcre_rc = pcre2_pattern_info(pcre_tmp, PCRE2_INFO_SIZE, &pcre_size);
 		if (pcre_rc) {
-			printf("pcre_fullinfo on compiled pattern[%i] yielded error: %d\n", i, pcre_rc);
+			printf("pcre2_pattern_info on compiled pattern[%i] yielded error: %d\n", i, pcre_rc);
 			goto err;
 		}
 
@@ -446,7 +482,7 @@ static int load_pcres(int action)
 		}
 
 		memcpy(pcres_tmp[i], pcre_tmp, pcre_size);
-		pcre_free(pcre_tmp);
+		pcre2_code_free(pcre_tmp);
 		pkg_free(patterns[i]);
 	}
 
@@ -459,7 +495,7 @@ static int load_pcres(int action)
 		}
 		shm_free(pcres);
 	}
-	if ((pcres = shm_malloc(sizeof(pcre *) * num_pcres_tmp)) == 0) {
+	if ((pcres = shm_malloc(sizeof(pcre2_code *) * num_pcres_tmp)) == 0) {
 		LM_ERR("no more memory for pcres\n");
 		goto err;
 	}
@@ -467,7 +503,7 @@ static int load_pcres(int action)
 		pcres[i] = NULL;
 	}
 	for (i=0; i<num_pcres_tmp; i++) {
-		pcre_rc = pcre_fullinfo(pcres_tmp[i], NULL, PCRE_INFO_SIZE, &pcre_size);
+		pcre_rc = pcre2_pattern_info(pcres_tmp[i], PCRE2_INFO_SIZE, &pcre_size);
 		if ((pcres[i] = shm_malloc(pcre_size)) == 0) {
 			LM_ERR("no more memory for pcres[%i]\n", i);
 			goto err;
@@ -553,48 +589,68 @@ static void free_shared_memory(void)
 /*! \brief Return true if the argument matches the regular expression parameter */
 static int w_pcre_match(struct sip_msg* _msg, str* string, str* _regex_s)
 {
-	pcre *pcre_re = NULL;
+	pcre2_code *pcre_re = NULL;
 	int pcre_rc;
-	const char *pcre_error;
-	int pcre_erroffset;
+	PCRE2_ERR pcre_error;
+	PCRE2_UCHAR pcre_error_str[ERROR_BUF_SIZE];
+	PCRE2_SIZE pcre_erroffset;
+#ifdef PCRE2_LIB
+	pcre2_match_data *match_data;
+#endif
 	str regex;
 
 	if (pkg_nt_str_dup(&regex, _regex_s) < 0)
 		return -1;
 
-	pcre_re = pcre_compile(regex.s, pcre_options, &pcre_error, &pcre_erroffset, NULL);
+	pcre_re = pcre2_compile((PCRE2_SPTR)regex.s, PCRE2_ZERO_TERMINATED, pcre_options, &pcre_error, &pcre_erroffset, NULL);
 	if (pcre_re == NULL) {
-		LM_ERR("pcre_re compilation of '%s' failed at offset %d: %s\n", regex.s, pcre_erroffset, pcre_error);
+                pcre2_get_error_message(pcre_error, pcre_error_str, sizeof(pcre_error_str));
+		LM_ERR("pcre_re compilation of '%s' failed at offset %lu: %s\n", regex.s, (unsigned long)pcre_erroffset, pcre_error_str);
 		pkg_free(regex.s);
 		return -4;
 	}
 
+#ifndef PCRE2_LIB
 	pcre_rc = pcre_exec(
+			pcre_re, /* the compiled pattern */
+			NULL, /* no extra data - we didn't study the pattern */
+			string->s, /* the subject string */
+			string->len, /* the length of the subject */
+			0, /* start at offset 0 in the subject */
+			0, /* default options */
+			NULL, /* output vector for substring information */
+			0); /* number of elements in the output vector */
+#else
+	match_data = pcre2_match_data_create(0, NULL); // no captures needed
+
+	pcre_rc = pcre2_match(
 		pcre_re,                    /* the compiled pattern */
-		NULL,                       /* no extra data - we didn't study the pattern */
-		string->s,                   /* the matching string */
-		(int)(string->len),          /* the length of the subject */
+		(PCRE2_SPTR)string->s,                  /* the matching string */
+		(PCRE2_SIZE)(string->len),  /* the length of the subject */
 		0,                          /* start at offset 0 in the string */
 		0,                          /* default options */
-		NULL,                       /* output vector for substring information */
-		0);                         /* number of elements in the output vector */
+		match_data,                 /* match data block */
+		NULL);                      /* match context */
+
+	pcre2_match_data_free(match_data);
+#endif
 
 	/* Matching failed: handle error cases */
 	if (pcre_rc < 0) {
 		switch(pcre_rc) {
-			case PCRE_ERROR_NOMATCH:
+			case PCRE2_ERROR_NOMATCH:
 				LM_DBG("'%s' doesn't match '%s'\n", string->s, regex.s);
 				break;
 			default:
 				LM_DBG("matching error '%d'\n", pcre_rc);
 				break;
 		}
-		pcre_free(pcre_re);
+		pcre2_code_free(pcre_re);
 		pkg_free(regex.s);
 		return -1;
 	}
 
-	pcre_free(pcre_re);
+	pcre2_code_free(pcre_re);
 	pkg_free(regex.s);
 	LM_DBG("'%s' matches '%s'\n", string->s, regex.s);
 	return 1;
@@ -606,6 +662,9 @@ static int w_pcre_match_group(struct sip_msg* _msg, str* string, int* _num_pcre)
 {
 	int num_pcre;
 	int pcre_rc;
+#ifdef PCRE2_LIB
+	pcre2_match_data *match_data;
+#endif
 
 	/* Check if group matching feature is enabled */
 	if (file == NULL) {
@@ -625,22 +684,37 @@ static int w_pcre_match_group(struct sip_msg* _msg, str* string, int* _num_pcre)
 
 	lock_get(reload_lock);
 
+#ifndef PCRE2_LIB
 	pcre_rc = pcre_exec(
+			(*pcres_addr)[num_pcre], /* the compiled pattern */
+			NULL, /* no extra data - we didn't study the pattern */
+			string->s, /* the subject string */
+			string->len, /* the length of the subject */
+			0, /* start at offset 0 in the subject */
+			0, /* default options */
+			NULL, /* output vector for substring information */
+			0); /* number of elements in the output vector */
+#else
+	match_data = pcre2_match_data_create(0, NULL); // no captures needed
+
+	pcre_rc = pcre2_match(
 		(*pcres_addr)[num_pcre],    /* the compiled pattern */
-		NULL,                       /* no extra data - we didn't study the pattern */
-		string->s,                   /* the matching string */
-		(int)(string->len),          /* the length of the subject */
+		(PCRE2_SPTR)string->s,                  /* the matching string */
+		(PCRE2_SIZE)(string->len),  /* the length of the subject */
 		0,                          /* start at offset 0 in the string */
 		0,                          /* default options */
-		NULL,                       /* output vector for substring information */
-		0);                         /* number of elements in the output vector */
+		match_data,                 /* match data block */
+		0);                         /* match context */
+
+	pcre2_match_data_free(match_data);
+#endif
 
 	lock_release(reload_lock);
 
 	/* Matching failed: handle error cases */
 	if (pcre_rc < 0) {
 		switch(pcre_rc) {
-			case PCRE_ERROR_NOMATCH:
+			case PCRE2_ERROR_NOMATCH:
 				LM_DBG("'%s' doesn't match pcres[%i]\n", string->s, num_pcre);
 				break;
 			default:

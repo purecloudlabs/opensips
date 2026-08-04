@@ -96,8 +96,23 @@ struct tm_binds {
 	set_localT_holder_f setlocalTholder;
 	tgetbranch_f       get_branch_index;
 
-	/* Return: 1 on success, -1 otherwise */
-	int (*t_wait_for_new_branches) (struct sip_msg *msg);
+	/**
+	 * Keep the transaction in an unresolved state (no final response), even if
+	 * all pending branches are completed.  The transaction will then complete
+	 * when either the specified @num_br number of branches have completed, or
+	 * if it times out.
+	 *
+	 * Return: 1 on success, -1 otherwise
+	 */
+	int (*t_wait_for_new_branches) (struct sip_msg *msg, unsigned int num_br);
+
+	/**
+	 * Stop waiting for any still-pending phony branch created by
+	 * t_wait_for_new_branches().
+	 *
+	 * Return: 1 on success, -1 otherwise
+	 */
+	int (*t_wait_no_more_branches) (void);
 
 	/**
 	 * Injects and relays a new branch for the current transaction using the
