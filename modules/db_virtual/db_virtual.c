@@ -336,31 +336,55 @@ int init_private_handles(void){
     return -1;
 }
 
+static str db_virtual_probe_sql = str_init("SELECT 1");
+
+/* Real reachability check. db_postgres lazy_connect makes init() a
+ * handle alloc only; this ping forces PQconnect on the probe handle.
+ * Do not call this from db_virtual_init() — that would open sockets
+ * in every SIP worker. */
+static int db_virtual_ping(db_func_t *f, db_con_t *con)
+{
+	db_res_t *res = NULL;
+	int rc;
+
+	if (!f || !con)
+		return -1;
+
+	if (!f->raw_query)
+		return 0;
+
+	rc = f->raw_query(con, &db_virtual_probe_sql, &res);
+	if (res && f->free_result)
+		f->free_result(con, res);
+	return rc;
+}
+
 static void reconnect_timer(unsigned int ticks, void *data)
 {
     LM_DBG("reconnect with timer\n");
     int i,j;
 
     db_con_t * con;
+    db_func_t * f;
 
     for(i=0; i < global-> size; i++){
         for(j=0; j < global->set_list[i].size; j++){
             /* if CAN DOWN */
             if(!(global->set_list[i].db_list[j].flags & CAN_USE)){
-                con =
-                    global->set_list[i].db_list[j].dbf.init(
-                    &global->set_list[i].db_list[j].db_url);
-                if(!con){
+                f = &global->set_list[i].db_list[j].dbf;
+                con = f->init(&global->set_list[i].db_list[j].db_url);
+                if(!con || db_virtual_ping(f, con) != 0){
                      LM_DBG("Cant reconnect on timer to db %.*s, %i\n",
                         global->set_list[i].db_list[j].db_url.len,
                         global->set_list[i].db_list[j].db_url.s,
                              global->set_list[i].db_list[j].flags);
-
+                    if (con)
+                        f->close(con);
                 }else{
                     LM_DBG("Can reconnect on timer to db %.*s\n",
                             global->set_list[i].db_list[j].db_url.len,
                         global->set_list[i].db_list[j].db_url.s);
-                    global->set_list[i].db_list[j].dbf.close(con);
+                    f->close(con);
                     global->set_list[i].db_list[j].flags |= CAN_USE;
                 }
             }
