@@ -155,6 +155,10 @@ struct socket_info_full* new_sock_info(struct socket_id *sid, str *orig_name)
 		si->mark = sid->mark;
 	}
 
+	if (sid->subnet_mask) {
+		si->subnet_mask = sid->subnet_mask;
+	}
+
 	/* advertised socket information */
 	/* Make sure the adv_sock_string is initialized, because if there is
 	 * no adv_sock_name, no other code will initialize it!
@@ -242,6 +246,7 @@ void free_sock_info(struct socket_info_full* sif)
 		if(si->adv_port_str.s) pkg_free(si->adv_port_str.s);
 		if(si->adv_sock_str.s) pkg_free(si->adv_sock_str.s);
 		if(si->tag_sock_str.s) pkg_free(si->tag_sock_str.s);
+		if(si->subnet) pkg_free(si->subnet);
 		for (bond_si = si->bond_sis; bond_si; bond_si = next_bond_si) {
 			next_bond_si = bond_si->next;
 			pkg_free(bond_si);
@@ -509,6 +514,54 @@ found:
 }
 
 
+struct socket_info_full* find_si_matching_subnet(str* host, unsigned short proto) {
+	struct socket_info_full* sif;
+	struct socket_info* si;
+	struct socket_info_full** list;
+	unsigned short c_proto;
+	struct ip_addr* ip6;
+	struct ip_addr* ip4;
+	struct ip_addr* ip;
+
+	c_proto=proto?proto:PROTO_UDP;
+	do {
+		list=get_sock_info_list(c_proto);
+
+		if (list==0){
+			LM_WARN("unknown proto %d\n", c_proto);
+			goto not_found; /* false */
+		}
+
+		for (sif=*list; sif; sif=sif->next) {
+			si = &sif->socket_info;
+			ip4 = str2ip(host);
+			if (ip4) {
+				ip = ip4;
+			} else {
+				ip6 = str2ip6(host);
+				ip = ip6;
+
+				if (ip6 == 0) continue;
+			}
+
+			if (si->subnet) {
+				LM_DBG("Subnet for address found '%s'\n", si->address_str.s);
+				if (matchnet(ip, si->subnet) == 1) {
+					goto found;
+				} else {
+					LM_DBG("Subnet not matched '%s' with mask '%d' not matched on host '%s'\n",
+							si->address_str.s, si->subnet_mask, host->s);
+				}
+			} else {
+				LM_DBG("No subnet for address '%s'\n", si->address_str.s);
+			}
+		}
+	}while( (proto==0) && (c_proto=next_proto(c_proto)) );
+not_found:
+	return 0;
+found:
+	return sif;
+}
 
 /* checks if the proto: ip:port is one of the address we listen on
  * and returns the corresponding socket_info structure.
@@ -710,6 +763,7 @@ static int expand_interface(const struct socket_info *si, struct socket_info_ful
 	sid.adv_port = si->adv_port;
 	sid.adv_name = si->adv_name_str.s; /* it is NULL terminated */
 	sid.tag = si->tag.s; /* it is NULL terminated */
+	sid.subnet_mask = si->subnet_mask;
 #ifdef HAVE_IFADDRS
 	/* use the getifaddrs interface to get all the interfaces */
 	struct ifaddrs *addrs;
@@ -956,6 +1010,16 @@ int fix_socket(struct socket_info_full *sif, int add_aliases)
 		memcpy(si->address_str.s, tmp, strlen(tmp)+1);
 		si->address_str.len=strlen(tmp);
 	}
+
+		if (si->subnet_mask > 0) {
+			si->subnet = mk_net_bitlen(&si->address, si->subnet_mask);
+			if (si->subnet == 0) {
+				LM_ERR("Failed to add subnet mask '%d 'to socket '%s'\n", si->subnet_mask, si->address_str.s);
+				goto error;
+			}
+			LM_DBG("Added subnet mask '%d 'to socket '%s'\n", si->subnet_mask, si->address_str.s);
+		}
+
 	/* set is_ip (1 if name is an ip address, 0 otherwise) */
 	if ( auto_aliases && (si->address_str.len==si->name.len) &&
 			(strncasecmp(si->address_str.s, si->name.s,
