@@ -20,6 +20,7 @@
 
 #include <freeDiameter/extension.h>
 #include <sys/eventfd.h>
+#include <inttypes.h>
 
 #include "../../ut.h"
 #include "../../lib/list.h"
@@ -113,6 +114,7 @@ static struct dm_cond *dm_get_cond(int type, diameter_reply_cb *cb, void *param)
 		return NULL;
 	}
 	memset(cond, 0, sizeof *cond);
+	cond->ref = 1;
 	cond->type = type;
 	switch (type) {
 	case DM_TYPE_EVENT:
@@ -274,6 +276,8 @@ static void dm_cond_event_resume(int sender, void *param)
 	} while (ret < 0 && (errno == EINTR || errno == EAGAIN));
 	if (ret < 0)
 		LM_ERR("could not notify resume: %s\n", strerror(errno));
+
+	dm_cond_unref(cond);
 }
 
 static void dm_cond_signal(struct dm_cond *cond)
@@ -281,9 +285,10 @@ static void dm_cond_signal(struct dm_cond *cond)
 	LM_INFO("singalling %p/%d\n", cond, cond->type);
 	switch (cond->type) {
 	case DM_TYPE_EVENT:
+		dm_cond_ref(cond);
 		if (ipc_send_rpc(cond->sync.event.pid, dm_cond_event_resume, cond) < 0) {
 			LM_ERR("could not resume async MI command!\n");
-			shm_free(cond);
+			dm_cond_unref(cond);
 		}
 		break;
 	case DM_TYPE_COND:
@@ -295,7 +300,6 @@ static void dm_cond_signal(struct dm_cond *cond)
 	case DM_TYPE_CB:
 		if (cond->sync.cb.f)
 			cond->sync.cb.f(NULL, &cond->rpl, cond->sync.cb.p);
-		shm_free(cond);
 		break;
 	}
 }
@@ -356,6 +360,7 @@ static int dm_auth_reply(struct msg **_msg, struct avp * avp, struct session * s
 		rpl_cond->rpl.is_error = 0;
 	}
 	dm_cond_signal(rpl_cond);
+	dm_cond_unref(rpl_cond);
 
 out:
 	FD_CHECK(fd_msg_free(msg));
@@ -481,7 +486,7 @@ static int dm_avps2json(void *root, cJSON *avps)
 			break;
 
 		case AVP_TYPE_INTEGER64:
-			LM_DBG("%2d. got int64   AVP %s (%u), value: %ld\n", i, dm_avp.avp_name, h->avp_code, h->avp_value->i64);
+			LM_DBG("%2d. got int64   AVP %s (%u), value: %" PRId64 "\n", i, dm_avp.avp_name, h->avp_code, h->avp_value->i64);
 			num_val = (double)h->avp_value->i64;
 			break;
 
@@ -491,7 +496,7 @@ static int dm_avps2json(void *root, cJSON *avps)
 			break;
 
 		case AVP_TYPE_UNSIGNED64:
-			LM_DBG("%2d. got uint64  AVP %s (%u), value: %lu\n", i, dm_avp.avp_name, h->avp_code, h->avp_value->u64);
+			LM_DBG("%2d. got uint64  AVP %s (%u), value: %" PRIu64 "\n", i, dm_avp.avp_name, h->avp_code, h->avp_value->u64);
 			num_val = (double)h->avp_value->u64;
 			break;
 
@@ -519,6 +524,7 @@ static int dm_avps2json(void *root, cJSON *avps)
 add:
 		cJSON_AddItemToObject(item, dm_avp.avp_name, val);
 		cJSON_AddItemToArray(avps, item);
+		item = NULL;
 
 skip:
 		FD_CHECK_GT(fd_msg_browse(it, MSG_BRW_NEXT, &it, NULL));
@@ -576,7 +582,12 @@ static int dm_receive_req(struct msg **_req, struct avp * avp, struct session * 
 		}
 	}
 
-	init_str(&avp_arr, cJSON_PrintUnformatted(avps));
+	avp_arr.s = cJSON_PrintUnformatted(avps);
+	if (!avp_arr.s) {
+		LM_ERR("cJSON_PrintUnformatted failed\n");
+		goto error;
+	}
+	avp_arr.len = strlen(avp_arr.s);
 
 	/* keep the request for a while in order to be able to generate the answer */
 	if (!dm_server_autoreply_error)
@@ -688,10 +699,12 @@ static int dm_receive_msg(struct msg **_msg, struct avp * avp, struct session * 
 
 	if (!hash_find_key(pending_replies, tid)) {
 		LM_ERR("Transaction_Id %.*s already processed!\n", tid.len, tid.s);
+		hash_unlock(pending_replies, hentry);
 		goto out;
 	}
 
 	rpl_cond->rpl.json = avps;
+	avps = NULL;
 
 	hash_remove_key(pending_replies, tid);
 	hash_unlock(pending_replies, hentry);
@@ -710,8 +723,11 @@ static int dm_receive_msg(struct msg **_msg, struct avp * avp, struct session * 
 		rpl_cond->rpl.is_error = 0;
 	}
 	dm_cond_signal(rpl_cond);
+	dm_cond_unref(rpl_cond);
 
 out:
+	if (avps)
+		cJSON_Delete(avps);
 	cJSON_InitHooks(NULL);
 
 	FD_CHECK(fd_msg_free(msg));
@@ -825,7 +841,53 @@ int dm_add_pending_reply(const str *callid, struct dm_cond *reply_cond)
 	}
 
 	*cond_holder = reply_cond;
+	dm_cond_ref(reply_cond);
 	hash_unlock(pending_replies, hentry);
+
+	return 0;
+}
+
+struct dm_find_cond_ctx {
+	struct dm_cond *cond;
+	str key;
+	int found;
+};
+
+static int dm_match_pending_cond(void *param, str key, void *value)
+{
+	struct dm_find_cond_ctx *ctx = (struct dm_find_cond_ctx *)param;
+
+	if (value != ctx->cond)
+		return 0;
+
+	ctx->key = key;
+	ctx->found = 1;
+	return 1;
+}
+
+int dm_drop_pending_reply_cond(struct dm_cond *reply_cond)
+{
+	struct dm_find_cond_ctx ctx;
+	unsigned int hentry;
+
+	if (!reply_cond)
+		return 0;
+
+	for (hentry = 0; hentry < hash_size(pending_replies); hentry++) {
+		memset(&ctx, 0, sizeof ctx);
+		ctx.cond = reply_cond;
+
+		hash_lock(pending_replies, hentry);
+		map_for_each(pending_replies->entries[hentry], dm_match_pending_cond, &ctx);
+		if (!ctx.found) {
+			hash_unlock(pending_replies, hentry);
+			continue;
+		}
+
+		hash_remove(pending_replies, hentry, ctx.key);
+		hash_unlock(pending_replies, hentry);
+		return 1;
+	}
 
 	return 0;
 }
@@ -1933,21 +1995,22 @@ static void dm_push_queue(aaa_message *msg, struct dm_cond *cond)
 	pthread_mutex_unlock(msg_send_lk);
 }
 
-int _dm_send_message_async(aaa_conn *_, aaa_message *req, int *fd)
+int _dm_send_message_async(aaa_conn *_, aaa_message *req, int *fd, struct dm_cond **cond)
 {
-	struct dm_cond *cond;
+	struct dm_cond *_cond;
 
 	if (!req)
 		return -1;
 
-	cond = dm_get_cond(DM_TYPE_EVENT, NULL, NULL);
-	if (!cond) {
+	_cond = dm_get_cond(DM_TYPE_EVENT, NULL, NULL);
+	if (!_cond) {
 		LM_ERR("out of memory for cond\n");
 		return -1;
 	}
 
-	*fd = cond->sync.event.fd;
-	dm_push_queue(req, cond);
+	*fd = _cond->sync.event.fd;
+	*cond = _cond;
+	dm_push_queue(req, _cond);
 
 	LM_DBG("message queued for async sending\n");
 
@@ -1997,13 +2060,14 @@ static int _dm_get_message_reply(struct dm_cond *cond, diameter_reply *rpl)
 
 int _dm_get_message_response(struct dm_cond *cond, char **rpl_avps)
 {
-	cJSON *obj;
-	diameter_reply rpl;
-	int rc = _dm_get_message_reply(cond, &rpl);
+	int rc;
+
+	LM_DBG("reply received, Result-Code: %d (%s)\n", cond->rpl.rc,
+			cond->rpl.is_error ? "FAILURE" : "SUCCESS");
+	rc = (cond->rpl.is_error ? -1 : 0);
 
 	if (rpl_avps) {
-		obj = dm_api_get_reply(&rpl);
-		*rpl_avps = cJSON_PrintUnformatted(obj);
+		*rpl_avps = cJSON_PrintUnformatted(cond->rpl.json);
 		LM_DBG("AVPs: %s\n", *rpl_avps);
 	}
 	return rc;
@@ -2186,6 +2250,7 @@ void _dm_destroy_message(aaa_message *msg)
 
 	dm = (struct dm_message *)msg->avpair;
 	dm_free_avps(&dm->avps);
+	dm_cond_unref(dm->reply_cond);
 	shm_free(dm);
 
 	shm_free(msg);

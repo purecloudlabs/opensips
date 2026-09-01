@@ -335,6 +335,17 @@ endif
 
 # Enable verbose compile logs
 VARS += NICER=0
+VARS += PYTHON=python
+
+#
+# check pcre2 vs pcre3 profile
+#
+ifneq (,$(filter nopcre2,$(DEB_BUILD_PROFILES)))
+	VARS += PCRE_LIB=pcre
+endif
+
+export WOLFSSL_EXTRA_CFLAGS=-Wno-stringop-overflow
+
 
 # support parallel compiling
 NJOBS =

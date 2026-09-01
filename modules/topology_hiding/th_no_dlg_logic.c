@@ -30,6 +30,7 @@
 #include "thinfo_codec.h"
 #include <stdint.h>
 #include <string.h>
+#include <limits.h>
 
 #define START_THINFO_BUF_SZ 1000
 #define THINFO_MAX_BUFFER_SIZE 10000
@@ -602,6 +603,16 @@ static inline int _th_no_dlg_onrequest(struct sip_msg *req, uint16_t flags, str 
 							    ((contact_body_t *) ((_m)->contact->parsed))->contacts == NULL || \
                                 ((contact_body_t *) ((_m)->contact->parsed))->contacts->next != NULL)
 
+static inline int topo_ct_short_len(int len, short *out, const char *field)
+{
+	if (len < 0 || len > SHRT_MAX) {
+		LM_ERR("%s too long for encoded contact (%d)\n", field, len);
+		return -1;
+	}
+	*out = (short)len;
+	return 0;
+}
+
 static char* build_encoded_contact_suffix_legacy(struct sip_msg* msg, str *routes, unsigned int rrs_to_ignore, int *suffix_len, int flags) {
 	short rr_len,ct_len,addr_len,flags_len,enc_len;
 	char *suffix_plain = NULL,*suffix_enc = NULL,*p = NULL,*s = NULL;
@@ -631,15 +642,17 @@ static char* build_encoded_contact_suffix_legacy(struct sip_msg* msg, str *route
 
 	if (routes && routes->len > 0) {
 		rr_set = *routes;
-		rr_len = (short)routes->len;
+		if (topo_ct_short_len(routes->len, &rr_len, "route set") < 0)
+			return NULL;
 		LM_DBG("XXX: adding [%.*s]\n", routes->len, routes->s);
 	} else if(msg->record_route){
 		if (print_rr_body(msg->record_route, &rr_set, !is_req, 0, &rrs_to_ignore) != 0){
 			LM_ERR("failed to print route records \n");
 			return NULL;
 		}
-		rr_len = (short)rr_set.len;
 		rr_set_free_str = rr_set.s;
+		if (topo_ct_short_len(rr_set.len, &rr_len, "route set") < 0)
+			goto error;
 	} else {
 		rr_len = 0;
 	}
@@ -649,14 +662,17 @@ static char* build_encoded_contact_suffix_legacy(struct sip_msg* msg, str *route
 		goto error;
 	} else {
 		contact = ((contact_body_t *)msg->contact->parsed)->contacts->uri;
-		ct_len = (short)contact.len;
+		if (topo_ct_short_len(contact.len, &ct_len, "contact") < 0)
+			goto error;
 	}
 
 	flags_str.s = int2str(flags, &flags_str.len);
-	flags_len = (short)flags_str.len;
-	
-	addr_len = (short)msg->rcv.bind_address->sock_str.len;
-	local_len += rr_len + ct_len + flags_len + addr_len; 
+	if (topo_ct_short_len(flags_str.len, &flags_len, "flags") < 0)
+		goto error;
+
+	if (topo_ct_short_len(msg->rcv.bind_address->sock_str.len, &addr_len, "bind address") < 0)
+		goto error;
+	local_len += rr_len + ct_len + flags_len + addr_len;
 	enc_len = th_ct_enc_scheme == ENC_BASE64 ?
 		calc_word64_encode_len(local_len) : calc_word32_encode_len(local_len);
 	total_len = enc_len +  
