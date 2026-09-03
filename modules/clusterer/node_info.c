@@ -73,6 +73,7 @@ int add_node_info(node_info_t **new_info, cluster_info_t **cl_list, int *int_val
 	char *host;
 	int hlen, port;
 	int proto;
+	int rc;
 	struct hostent *he;
 	int cluster_id;
 	cluster_info_t *cluster = NULL;
@@ -205,6 +206,18 @@ int add_node_info(node_info_t **new_info, cluster_info_t **cl_list, int *int_val
 	(*new_info)->proto = proto;
 
 	if (int_vals[INT_VALS_NODE_ID_COL] != current_id) {
+		/* a peer whose URL is one of our own listeners would make us ping
+		 * ourselves and then reject the packets as having a bad source;
+		 * typically a stale row left behind by a previous instance which
+		 * used to own this address */
+		if (grep_sock_info(&st, port, proto)) {
+			LM_ERR("Node [%d] has URL <%.*s> which is a local socket, "
+				"skipping it; check for stale rows in the clusterer table\n",
+				int_vals[INT_VALS_NODE_ID_COL], (*new_info)->url.len,
+				(*new_info)->url.s);
+			goto skip;
+		}
+
 		he = sip_resolvehost(&st, (unsigned short *) &port,
 			(unsigned short *)&proto, 0, 0);
 		if (!he) {
@@ -277,6 +290,11 @@ int add_node_info(node_info_t **new_info, cluster_info_t **cl_list, int *int_val
 
 	return 0;
 error:
+	rc = -1;
+	goto cleanup;
+skip:
+	rc = 1;
+cleanup:
 	if (*new_info) {
 		if ((*new_info)->sip_addr.s)
 			shm_free((*new_info)->sip_addr.s);
@@ -291,8 +309,9 @@ error:
 			shm_free((*new_info)->sp_info);
 
 		shm_free(*new_info);
+		*new_info = NULL;
 	}
-	return -1;
+	return rc;
 }
 
 #define check_val( _col, _val, _type, _not_null, _is_empty_str) \

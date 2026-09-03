@@ -840,24 +840,24 @@ static void handle_cap_update(bin_packet_t *packet, node_info_t *source)
 		bin_pop_int(packet, &node_id);
 
 		if (node_id == current_id) {
-			bin_pop_int(packet, &nr_cap);
-			for (j = 0; j < nr_cap; j++) {
-				bin_pop_str(packet, &cap);
-				bin_pop_int(packet, &cap_state);
-			}
-			continue;
-		}
-		node = get_node_by_id(source->cluster, node_id);
-		if (!node) {
-			LM_ERR("Unknown id [%d] in capability update from node [%d]\n",
-				node_id, source->node_id);
-			return;
+			node = NULL;
+		} else {
+			node = get_node_by_id(source->cluster, node_id);
+			/* the source may know nodes that we don't, e.g. when it has
+			 * loaded a newer version of the DB; skip those, the rest of the
+			 * update is still valid and must still be flooded onwards */
+			if (!node)
+				LM_WARN("Unknown id [%d] in capability update from node [%d], "
+					"skipping it\n", node_id, source->node_id);
 		}
 
 		bin_pop_int(packet, &nr_cap);
 		for (j = 0; j < nr_cap; j++) {
 			bin_pop_str(packet, &cap);
 			bin_pop_int(packet, &cap_state);
+
+			if (!node)
+				continue;
 
 			lock_get(node->lock);
 
