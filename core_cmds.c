@@ -1251,7 +1251,7 @@ static int w_socket_belongs_to_bond(struct sip_msg *msg, str *sock_desc,
 
 static int w_f_close_tcp_sock(struct sip_msg *msg, str *host, int *port)
 {
-	int fd, n, i, closed_no = 0;
+	int n, i, closed_no = 0;
 	struct hostent *he;
 	struct ip_addr ip;
 	struct tcp_connection *c;
@@ -1264,9 +1264,9 @@ static int w_f_close_tcp_sock(struct sip_msg *msg, str *host, int *port)
 
 	for (i = 0; he->h_addr_list[i]; ++i) {
 		hostent2ip_addr(&ip, he, i);
-		n = tcp_conn_get(0, &ip, *port, PROTO_TCP, NULL, &c, &fd, NULL);
+		n = tcp_conn_get(0, &ip, *port, PROTO_TCP, NULL, &c, NULL);
 		if (n < 0 || c == 0) continue;
-		shutdown(fd, SHUT_RDWR);
+		shutdown(c->fd, SHUT_RDWR);
 		c->state = S_CONN_BAD;
 		tcp_conn_release(c, 0);
 		closed_no += 1;

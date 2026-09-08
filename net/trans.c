@@ -136,7 +136,6 @@ int trans_load(void)
 				return -1;
 			}
 			found_proto = 1;
-			/* all good now */
 			found_all++;
 			/* copy necessary info */
 			protos[pi.id].id = pi.id;
