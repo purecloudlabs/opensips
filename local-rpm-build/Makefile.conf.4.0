@@ -1,0 +1,20 @@
+# Makefile.conf for local RPM build — matches sipproxy-builds 4.0 template
+
+exclude_modules?= aaa_diameter aaa_radius auth_jwt cachedb_cassandra cachedb_couchbase cachedb_memcached cachedb_mongodb cachedb_redis carrierroute cgrates compression cpl_c db_berkeley db_http db_mysql db_oracle db_perlvdb db_sqlite db_unixodbc emergency event_rabbitmq event_kafka event_sqs h350 http2d identity jabber launch_darkly ldap lua mi_xmlrpc mmgeoip osp perl pi_http presence presence_dialoginfo presence_mwi presence_reginfo presence_xml presence_dfks proto_ipsec proto_sctp proto_wss pua pua_bla pua_dialoginfo pua_mi pua_reginfo pua_usrloc pua_xmpp python regex rabbitmq_consumer rls rtp.io siprec sngtc snmpstats stir_shaken tls_wolfssl xcap xcap_client xml xmpp opentelemetry
+
+include_modules?= json db_postgres dialplan proto_tls tls_mgm exec httpd mi_http event_flatstore rest_client uuid tls_openssl tracer mi_fifo userblacklist proto_bin clusterer cachedb_local dns_cache usrloc registrar cachedb_dynamodb cachedb_sql
+
+DEFS+= -DPKG_MALLOC #Use a faster malloc
+DEFS+= -DSHM_MMAP #Use mmap instead of SYSV shared memory
+DEFS+= -DUSE_MCAST #Compile in support for IP Multicast
+DEFS+= -DDISABLE_NAGLE #Disable the TCP NAgle Algorithm ( lower delay )
+DEFS+= -DSTATISTICS #Enable the statistics manager
+DEFS+= -DHAVE_RESOLV_RES #Support for changing some of the resolver parameters
+DEFS+= -DF_MALLOC #Fast memory allocator with minimal runtime overhead
+DEFS+= -DQ_MALLOC #Quality assurance memory allocator with runtime safety checks
+DEFS+= -DHP_MALLOC #High performance allocator with fine-grained locking
+DEFS+= -DDBG_MALLOC #Include additional, debug-enabled allocator flavors
+DEFS+= -DF_PARALLEL_MALLOC #Fast memory allocator with paralel buckets
+
+PREFIX ?= /usr/local
+BASEDIR ?= /tmp
