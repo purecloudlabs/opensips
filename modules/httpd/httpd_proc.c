@@ -961,6 +961,15 @@ void httpd_proc(int rank)
 	auth_password = s->auth_password;
 	httpd_listen_fd = s->listen_fd;
 
+	/* Close listen sockets belonging to other server instances */
+	for (i = 0; i < httpd_n_servers; i++) {
+		o = &httpd_servers[i];
+		if (o != s && o->listen_fd >= 0) {
+			close(o->listen_fd);
+			o->listen_fd = -1;
+		}
+	}
+
 	/*child's initial settings*/
 	if (init_mi_child()!=0) {
 		LM_ERR("failed to init the mi child process\n");
