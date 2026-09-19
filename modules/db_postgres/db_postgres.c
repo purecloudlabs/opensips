@@ -39,6 +39,7 @@ int db_postgres_exec_query_threshold = 0;   /* Warning in case DB query
 					       takes too long disabled by default*/
 int max_db_queries = 2;
 int pq_timeout = DEFAULT_PSQL_TIMEOUT;
+int pg_lazy_connect = 0; /* Don't be lazy, connect on start */
 
 int db_postgres_bind_api(const str* mod, db_func_t *dbb);
 
@@ -64,6 +65,7 @@ static const param_export_t params[] = {
 	{"max_db_queries", INT_PARAM, &max_db_queries},
 	{"timeout", INT_PARAM, &pq_timeout},
 	{"use_tls", INT_PARAM, &use_tls},
+	{"lazy_connect", INT_PARAM, &pg_lazy_connect},
 	{0, 0, 0}
 };
 
