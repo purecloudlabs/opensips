@@ -300,24 +300,24 @@ int dlg_replicated_create(bin_packet_t *packet, struct dlg_cell *cell,
 	/* link the dialog into the hash */
 	_link_dlg_unsafe(d_entry, dlg);
 
-	DLG_BIN_POP(str, packet, vars, pre_linking_error);
-	DLG_BIN_POP(str, packet, profiles, pre_linking_error);
-	DLG_BIN_POP(int, packet, dlg->user_flags, pre_linking_error);
-	DLG_BIN_POP(int, packet, dlg->mod_flags, pre_linking_error);
+	DLG_BIN_POP(str, packet, vars, post_linking_error);
+	DLG_BIN_POP(str, packet, profiles, post_linking_error);
+	DLG_BIN_POP(int, packet, dlg->user_flags, post_linking_error);
+	DLG_BIN_POP(int, packet, dlg->mod_flags, post_linking_error);
 
-	DLG_BIN_POP(int, packet, dlg->flags, pre_linking_error);
+	DLG_BIN_POP(int, packet, dlg->flags, post_linking_error);
 	/* also save the dialog into the DB on this instance */
 	dlg->flags |= DLG_FLAG_NEW;
 
-	DLG_BIN_POP(int, packet, dlg->tl.timeout, pre_linking_error);
+	DLG_BIN_POP(int, packet, dlg->tl.timeout, post_linking_error);
 	DLG_BIN_POP(int, packet, dlg->legs[DLG_CALLER_LEG].last_gen_cseq,
-		pre_linking_error);
+		post_linking_error);
 	DLG_BIN_POP(int, packet, dlg->legs[callee_idx(dlg)].last_gen_cseq,
-		pre_linking_error);
+		post_linking_error);
 
-	DLG_BIN_POP_ROUTE( packet, dlg, on_answer, pre_linking_error);
-	DLG_BIN_POP_ROUTE( packet, dlg, on_timeout, pre_linking_error);
-	DLG_BIN_POP_ROUTE( packet, dlg, on_hangup, pre_linking_error);
+	DLG_BIN_POP_ROUTE( packet, dlg, on_answer, post_linking_error);
+	DLG_BIN_POP_ROUTE( packet, dlg, on_timeout, post_linking_error);
+	DLG_BIN_POP_ROUTE( packet, dlg, on_hangup, post_linking_error);
 
 	if (dlg->tl.timeout <= (unsigned int)(unsigned long) time(0))
 		dlg->tl.timeout = 0;
@@ -411,6 +411,10 @@ int dlg_replicated_create(bin_packet_t *packet, struct dlg_cell *cell,
 	unref_dlg(dlg, 1);
 	return 0;
 
+
+post_linking_error:
+	/* dialog was linked but not yet timer-inserted or ref-bumped */
+	unlink_unsafe_dlg(d_entry, dlg);
 pre_linking_error:
 	dlg_unlock(d_table, d_entry);
 	if (dlg)
@@ -439,7 +443,9 @@ int dlg_replicated_update(bin_packet_t *packet)
 	struct dlg_entry *d_entry;
 	int rcv_flags, save_new_flag, save_sync_flag;
 	unsigned int h_id;
+	unsigned int new_state;
 	short pkg_ver = get_bin_pkg_version(packet);
+	int state;
 
 	bin_pop_str(packet, &call_id);
 	bin_pop_str(packet, &from_tag);
@@ -482,7 +488,18 @@ int dlg_replicated_update(bin_packet_t *packet)
 	}
 
 	bin_skip_int(packet, 1);
-	bin_pop_int(packet, &dlg->state);
+	state = dlg->state;
+	bin_pop_int(packet, &new_state);
+	/* Update stats when the dialog moves between confirmed, early, and other states. */
+	if ((state == DLG_STATE_CONFIRMED_NA || state == DLG_STATE_CONFIRMED) !=
+			(new_state == DLG_STATE_CONFIRMED_NA || new_state == DLG_STATE_CONFIRMED) ||
+			(state == DLG_STATE_EARLY) != (new_state == DLG_STATE_EARLY)) {
+		update_dlg_stats(dlg, -1);
+		dlg->state = new_state;
+		update_dlg_stats(dlg, 1);
+	} else {
+		dlg->state = new_state;
+	}
 
 	/* sockets */
 	bin_skip_str(packet, 2);

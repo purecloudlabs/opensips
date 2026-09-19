@@ -201,7 +201,7 @@ static void dlg_src_unref_session(void *p)
 {
 	struct src_sess *ss = (struct src_sess *)p;
 	/* if the dialog is not in termination state, we should not delete it */
-	if (ss->ctx->dlg->state < DLG_STATE_DELETED)
+	if (ss->ctx->dlg && ss->ctx->dlg->state < DLG_STATE_DELETED)
 		return;
 	srec_hlog(ss, SREC_UNREF, "dlg recording unref");
 	SIPREC_UNREF(ss);
@@ -370,6 +370,8 @@ static int srec_b2b_notify(struct sip_msg *msg, str *key, int type,
 		 * ongoing media sessions */
 		if (ss->flags & SIPREC_ONGOING)
 			return 0;
+		if (!ss->ctx->dlg || ss->ctx->dlg->state >= DLG_STATE_DELETED)
+			return 0;
 		if (srs_skip_failover(msg->first_line.u.reply.status) ||
 				srs_do_failover(ss) < 0) {
 			LM_DBG("no more to failover!\n");
@@ -398,7 +400,7 @@ static int srec_b2b_notify(struct sip_msg *msg, str *key, int type,
 		goto no_recording;
 	}
 
-	if (ss->ctx->dlg->state >= DLG_STATE_DELETED) {
+	if (!ss->ctx->dlg || ss->ctx->dlg->state >= DLG_STATE_DELETED) {
 		LM_ERR("dialog already in deleted state!\n");
 		goto no_recording;
 	}
@@ -429,16 +431,18 @@ no_recording:
 			LM_ERR("Cannot send bye for recording session with key %.*s\n",
 					req.b2b_key->len, req.b2b_key->s);
 	}
-	if (ss->ctx->dlg->state >= DLG_STATE_DELETED)
-		LM_DBG("rtp context already destroyed!\n");
-	else
-		srec_rtp.copy_delete(ss->ctx->rtp, &ss->instance, &ss->media);
+	if (ss->ctx->dlg) {
+		if (ss->ctx->dlg->state >= DLG_STATE_DELETED)
+			LM_DBG("rtp context=%p already destroyed dlg=%p!\n", ss->ctx, ss->ctx->dlg);
+		else
+			srec_rtp.copy_delete(ss->ctx->rtp, &ss->instance, &ss->media);
+	}
 
 	if (ss->flags & SIPREC_STARTED)
 		raise_siprec_stop_event(ss);
 	srec_logic_destroy(ss, 0);
 
-	if (!(ss->flags & SIPREC_DLG_CBS)) {
+	if (ss->ctx->dlg && !(ss->flags & SIPREC_DLG_CBS)) {
 		/* if the dialog has already been engaged, then we need to keep the
 		 * reference until the end of the dialog, where it will be cleaned up */
 		srec_dlg.dlg_ctx_put_ptr(ss->ctx->dlg, srec_dlg_idx, NULL);
@@ -496,6 +500,9 @@ static int srs_send_invite(struct src_sess *sess)
 			"Require: siprec" CRLF
 			"Content-Type: multipart/mixed;boundary=" OSS_BOUNDARY CRLF
 		);
+
+	if (!sess->initial_sdp.s)
+		return 0;
 
 	memset(&ci, 0, sizeof ci);
 	ci.method.s = INVITE;

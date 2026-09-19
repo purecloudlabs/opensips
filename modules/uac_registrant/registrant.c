@@ -691,12 +691,15 @@ int run_reg_tm_cback(void *e_data, void *data, void *r_data)
 			LM_ERR("FAKED_REPLY\n");
 			goto done;
 		}
-		if (0 == parse_min_expires(msg)) {
-			rec->expires = (unsigned int)(long)msg->min_expires->parsed;
-			if(send_register(cb_param->hash_index, rec, NULL)==1)
+		/* do we have a Min-Expires with a resonable value (a shorter than
+		 * 5 seconds registration is not considered resonable) */
+		if (0 == parse_min_expires(msg) && 5<=(unsigned int)(long)msg->min_expires->parsed) {
+			rec->wanted_expires = (unsigned int)(long)msg->min_expires->parsed;
+			if(send_register(cb_param->hash_index, rec, NULL)==1) {
 				rec->state = REGISTERING_STATE;
-			else
+			} else {
 				rec->state = INTERNAL_ERROR_STATE;
+			}
 		} else {
 			rec->state = REGISTRAR_ERROR_STATE;
 			rec->registration_timeout = now + (failure_retry_interval?failure_retry_interval:rec->expires) - timer_interval;
@@ -795,7 +798,7 @@ int send_register(unsigned int hash_index, reg_record_t *rec, str *auth_hdr)
 	cb_param->uac = rec;
 
 	/* get the string version of expires */
-	expires = int2str((unsigned long)(rec->expires), &expires_len);
+	expires = int2str((unsigned long)(rec->wanted_expires), &expires_len);
 
 	p = extra_hdrs.s;
 	memcpy(p, contact_hdr.s, contact_hdr.len);

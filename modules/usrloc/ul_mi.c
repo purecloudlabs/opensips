@@ -32,6 +32,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include "../../mi/mi.h"
 #include "../../dprint.h"
 #include "../../ut.h"
@@ -115,7 +116,7 @@ static inline int mi_add_aor_node(mi_item_t *aor_item, urecord_t* r,
 		if (add_mi_string(ct_item, MI_SSTR("Contact"), c->c.s, c->c.len) < 0)
 			return -1;
 
-		if (add_mi_string_fmt(ct_item, MI_SSTR("ContactID"), "%lu", c->contact_id) < 0)
+		if (add_mi_string_fmt(ct_item, MI_SSTR("ContactID"), "%" PRIu64, c->contact_id) < 0)
 			return -1;
 
 		if (c->expires == 0) {
@@ -520,7 +521,7 @@ mi_response_t *mi_usrloc_add(const mi_params_t *params,
 
 	n = get_urecord( dom, &aor, &r);
 	if ( n==1) {
-		if (insert_urecord( dom, &aor, &r, 0) < 0)
+		if (insert_urecord( dom, &aor, &r, 0, NULL, NULL) < 0)
 			goto lock_error;
 
 		c = 0;

@@ -1832,6 +1832,12 @@ static inline int rtpengine_connect_node(struct rtpe_node *pnode)
 	}
 	pkg_free(hostname);
 
+	if (res->ai_addrlen > sizeof(pnode->ai_addr)) {
+		LM_ERR("RTP proxy address is too large\n");
+		freeaddrinfo(res);
+		return 0;
+	}
+
 	rtpe_socks[pnode->idx] = socket((pnode->rn_umode == 6)
 			? AF_INET6 : AF_INET, SOCK_DGRAM, 0);
 	if ( rtpe_socks[pnode->idx] == -1) {
@@ -1849,7 +1855,7 @@ static inline int rtpengine_connect_node(struct rtpe_node *pnode)
 	}
 
 	pnode->ai_addrlen = res->ai_addrlen;
-	memcpy(&(pnode->ai_addr), res->ai_addr, res->ai_addrlen);
+	memcpy(&pnode->ai_addr.s, res->ai_addr, res->ai_addrlen);
 
 	freeaddrinfo(res);
 	return 1;
@@ -2635,6 +2641,8 @@ end:
 	return ret;
 }
 
+static void pkg_free_wrapper(void *p) { pkg_free(p); }
+
 static int rtpe_function_call_prepare(bencode_buffer_t *bencbuf, struct sip_msg *msg, enum rtpe_operation op,
          struct ng_flags_parse *ng_flags, str *flags_str, str *body_in, bencode_item_t *extra_dict, char **err)
 {
@@ -2808,8 +2816,12 @@ static int rtpe_function_call_prepare(bencode_buffer_t *bencbuf, struct sip_msg 
 		goto error;
 	}
 
+	/* flags_nt.s must remain valid until the bencode buffer is serialized
+	 * and sent, because parse_flags() stores pointers into it (via bencode_str
+	 * and bencode_dictionary_add_len) for key=value flags like media-address.
+	 * Register it for cleanup when the bencode buffer is freed. */
 	if (flags_nt.s)
-		pkg_free(flags_nt.s);
+		bencode_buffer_destroy_add(bencbuf, pkg_free_wrapper, flags_nt.s);
 
 	return 1;
 
@@ -2828,13 +2840,12 @@ static bencode_item_t *rtpe_function_call(bencode_buffer_t *bencbuf, struct sip_
 	str error;
 	struct rtpe_node *node, *failed_node;
 	char *cp, *err = NULL;
-	pv_value_t val;
+	pv_value_t val, socket_val;
 	struct rtpe_ignore_node *ignore_list = NULL;
-	int ret;
+	int ret, forced_socket;
 	memset(&ng_flags, 0, sizeof(ng_flags));
 	error.len = 0;
 	error.s = "";
-	pv_value_t socket_val;
 
 	/*** get & init basic stuff needed ***/
 	if (rtpe_function_call_prepare(bencbuf, msg, op, &ng_flags, flags_str, body_in, extra_dict,&err) < 0)
@@ -2847,10 +2858,10 @@ static bencode_item_t *rtpe_function_call(bencode_buffer_t *bencbuf, struct sip_
 	}
 
 	/*** If the spvar "sock_var" has been specified, parse it into a (socket_val) STR variable ***/
-	if (spvar) {
-		memset(&socket_val, 0, sizeof(pv_value_t));
+	memset(&socket_val, 0, sizeof(pv_value_t));
+	if (spvar)
 		pv_get_spec_value(msg, spvar, &socket_val);
-	}
+	forced_socket = socket_val.rs.len > 0;
 
 	failed_node = NULL;
 
@@ -2867,16 +2878,23 @@ static bencode_item_t *rtpe_function_call(bencode_buffer_t *bencbuf, struct sip_
 		if (spvar && (socket_val.rs.len > 0)) {
 			LM_DBG("Sending command [%d] to RTPEngine socket: [%.*s] set id: [%d]\n", op, (int)(socket_val.rs.len), (char *)(socket_val.rs.s), set->id_set);
 			node = lookup_rtpe_node(set, &socket_val.rs);
-			if (node == NULL) {
-				RTPE_STOP_READ();
-				goto error;
+			socket_val.rs.s = NULL;
+			socket_val.rs.len = 0;
+			if (node && ((node->rn_disabled = rtpe_test(node, node->rn_disabled, 0)) ||
+					rtpe_is_ignore_node(ignore_list, node))) {
+				LM_DBG("RTPEngine socket [%.*s] is not available\n",
+						node->rn_url.len, node->rn_url.s);
+				node = NULL;
 			}
 
+			if (node == NULL && op == OP_OFFER)
+				node = select_rtpe_node(ng_flags.call_id, set, ignore_list);
+		} else if (forced_socket && op != OP_OFFER) {
+			node = NULL;
 		} else if (snode && snode->s) {
 			if ((node = get_rtpe_node(snode, set)) == NULL && op == OP_OFFER)
 				node = select_rtpe_node(ng_flags.call_id, set, ignore_list);
 			snode = NULL;
-
 		} else {
 			node = select_rtpe_node(ng_flags.call_id, set, ignore_list);
 		}
@@ -3657,7 +3675,7 @@ static int start_async_send_rtpe_command(struct rtpe_node *node, bencode_item_t 
 			LM_ERR("can't create socket %d \n",errno);
 			goto badproxy;
 		}
-		if (connect(fd, &(node->ai_addr), node->ai_addrlen) < 0) {
+		if (connect(fd, &node->ai_addr.s, node->ai_addrlen) < 0) {
 			LM_ERR("can't connect to RTP proxy %s (%d:%s)\n",node->rn_url.s,errno,strerror(errno));
 			close(fd);
 			goto badproxy;
@@ -4768,6 +4786,10 @@ static void rtpengine_raise_event(int sender, void *p)
 				break;
 			default:
 				jstring.s = cJSON_PrintUnformatted(param);
+				if (!jstring.s) {
+					LM_ERR("cJSON_PrintUnformatted failed\n");
+					break;
+				}
 				jstring.len = strlen(jstring.s);
 				err = evi_param_add_str(eparams, &name, &jstring);
 				cJSON_PurgeString(jstring.s);
@@ -5020,6 +5042,7 @@ static int rtpengine_api_offer(struct rtp_relay_session *sess,
 			fill_rtpengine_node(server, &val.rs);
 		else
 			LM_ERR("could not retrieve the value of the used rtpengine!\n");
+		pv_set_value(sess->msg, &media_pvar, EQ_T, NULL);
 	}
 	return ret;
 }

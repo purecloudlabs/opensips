@@ -93,12 +93,9 @@ build() {
 	# create documentation targets
 	make \
 		BASEDIR="$pkgdir" PREFIX=/usr LIBDIR=lib \
-		doxygen \
-		modules-docbook-html \
-		modules-readme
+		doxygen
 		# dbschema-docbook-html
 		# dbschema-docbook-pdf \
-		# modules-docbook-pdf \
 }
 
 package_opensips-git() {
@@ -128,7 +125,7 @@ package_opensips-git() {
 		'mongo-c-driver: C-Interface for Mongo-DB support'
 		'net-snmp: SNMP support'
 		'osptoolkit: OSP Toolkit support'
-		'pcre: Perl Regular-Expression support'
+		'pcre2: Perl Regular-Expression support'
 		'perl: Perl support'
 		'postgresql-libs: PostgreSQL-DB support'
 		'python2: Python v2 support'
@@ -202,7 +199,7 @@ package_opensips-git-documentation() {
 
 	msg2 "install documentation targets"
 	make \
-		BASEDIR="$pkgdir" PREFIX=/usr LIBDIR=lib install-doc install-modules-docbook
+		BASEDIR="$pkgdir" PREFIX=/usr LIBDIR=lib install-doc
 
 	DOC_DIR="$pkgdir/usr/share/doc/${_pkgname}"
 

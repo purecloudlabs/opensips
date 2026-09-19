@@ -25,6 +25,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <limits.h>
 #include <sys/types.h>
 #include "../../mem/shm_mem.h"
 #include "../../mem/mem.h"
@@ -45,6 +46,26 @@ static str imc_hdr_ctype = { "Content-Type: text/plain\r\n",  26};
 int imc_send_message(str *src, str *dst, str *headers, str *body);
 int imc_room_broadcast(imc_room_p room, str *ctype, str *body);
 void imc_inv_callback( struct cell *t, int type, struct tmcb_params *ps);
+
+static int imc_body_print_user(str *body, const char *fmt, str *user)
+{
+	body->s = imc_body_buf;
+	body->len = snprintf(body->s, IMC_BUF_SIZE, fmt, user->len, user->s);
+
+	if(body->len < 0)
+	{
+		LM_ERR("unable to print message\n");
+		body->len = 0;
+		return -1;
+	}
+	if(body->len >= IMC_BUF_SIZE)
+	{
+		LM_ERR("buffer size overflow\n");
+		body->len = 0;
+		return -1;
+	}
+	return body->len;
+}
 
 /**
  * parse cmd
@@ -220,10 +241,8 @@ int imc_handle_create(struct sip_msg* msg, imc_cmd_t *cmd,
 			}
 			LM_DBG("added as member [%.*s]\n",member->uri.len, member->uri.s);
 			/* send info message */
-			body.s = imc_body_buf;
-			body.len = snprintf(body.s, IMC_BUF_SIZE,
-				"*** <%.*s> has joined the room",
-				member->uri.len, member->uri.s);
+			body.len = imc_body_print_user(&body,
+					"*** <%.*s> has joined the room", &member->uri);
 			if(body.len>0)
 				imc_room_broadcast(room, &imc_hdr_ctype, &body);
 
@@ -322,9 +341,8 @@ int imc_handle_join(struct sip_msg* msg, imc_cmd_t *cmd,
 
 build_inform:
 	/* send info message */
-	body.s = imc_body_buf;
-	body.len = snprintf(body.s, IMC_BUF_SIZE, "*** <%.*s> has joined the room",
-					member->uri.len, member->uri.s);
+	body.len = imc_body_print_user(&body, "*** <%.*s> has joined the room",
+			&member->uri);
 	if(body.len>0)
 		imc_room_broadcast(room, &imc_hdr_ctype, &body);
 
@@ -549,9 +567,8 @@ int imc_handle_accept(struct sip_msg* msg, imc_cmd_t *cmd,
 	member->flags &= ~IMC_MEMBER_INVITED;
 
 	/* send info message */
-	body.s = imc_body_buf;
-	body.len = snprintf(body.s, IMC_BUF_SIZE, "*** <%.*s> has joined the room",
-					member->uri.len, member->uri.s);
+	body.len = imc_body_print_user(&body, "*** <%.*s> has joined the room",
+			&member->uri);
 	if(body.len>0)
 		imc_room_broadcast(room, &imc_hdr_ctype, &body);
 
@@ -689,9 +706,8 @@ int imc_handle_remove(struct sip_msg* msg, imc_cmd_t *cmd,
 	member->flags |= IMC_MEMBER_DELETED;
 	imc_del_member(room, &inv_uri.user, &inv_uri.host);
 
-	body.s = imc_body_buf;
-	body.len = snprintf(body.s, IMC_BUF_SIZE, "*** <%.*s> has joined the room",
-					member->uri.len, member->uri.s);
+	body.len = imc_body_print_user(&body, "*** <%.*s> has joined the room",
+			&member->uri);
 	if(body.len>0)
 		imc_room_broadcast(room, &imc_hdr_ctype, &body);
 
@@ -740,10 +756,8 @@ int imc_handle_deny(struct sip_msg* msg, imc_cmd_t *cmd,
 
 #if 0
 	/* send info message */
-	body.s = imc_body_buf;
-	body.len = snprintf(body.s, IMC_BUF_SIZE,
-			"The user [%.*s] has denied the invitation",
-			src->user.len, src->user.s);
+	body.len = imc_body_print_user(&body,
+			"The user [%.*s] has denied the invitation", &src->user);
 	if(body.len>0)
 		imc_send_message(&room->uri, &memeber->uri, &imc_hdr_ctype, &body);
 #endif
@@ -771,8 +785,10 @@ int imc_handle_list(struct sip_msg* msg, imc_cmd_t *cmd,
 	imc_member_p member = 0;
 	imc_member_p imp = 0;
 	str room_name;
-	str body;
+	str body = {0, 0};
 	char *p;
+	int marker_len;
+	int entry_len;
 
 	/* the user wants to leave the room */
 	room_name = cmd->param[0].s?cmd->param[0]:dst->user;
@@ -793,7 +809,43 @@ int imc_handle_list(struct sip_msg* msg, imc_cmd_t *cmd,
 				src->user.len, src->user.s,	room_name.len, room_name.s);
 		goto error;
 	}
-	p = imc_body_buf;
+
+	body.len = sizeof("Members:\n") - 1;
+	imp = room->members;
+	while(imp)
+	{
+		if((imp->flags&IMC_MEMBER_INVITED)||(imp->flags&IMC_MEMBER_DELETED)
+				|| (imp->flags&IMC_MEMBER_SKIP))
+		{
+			imp = imp->next;
+			continue;
+		}
+
+		marker_len = ((imp->flags & IMC_MEMBER_OWNER) ||
+				(imp->flags & IMC_MEMBER_ADMIN)) ? 1 : 0;
+		if(imp->uri.len > INT_MAX - marker_len - 1)
+		{
+			LM_ERR("member uri too large [%d]\n", imp->uri.len);
+			goto error;
+		}
+		entry_len = marker_len + imp->uri.len + 1;
+		if(entry_len > INT_MAX - 1 - body.len)
+		{
+			LM_ERR("member list too large\n");
+			goto error;
+		}
+		body.len += entry_len;
+		imp = imp->next;
+	}
+
+	body.s = pkg_malloc(body.len + 1);
+	if(body.s == NULL)
+	{
+		LM_ERR("no more pkg memory\n");
+		goto error;
+	}
+
+	p = body.s;
 	memcpy(p, "Members:\n", 9);
 	p+=9;
 	imp = room->members;
@@ -810,24 +862,25 @@ int imc_handle_list(struct sip_msg* msg, imc_cmd_t *cmd,
 			*p++ = '*';
 		else if(imp->flags & IMC_MEMBER_ADMIN)
 			*p++ = '~';
-		strncpy(p, imp->uri.s, imp->uri.len);
+		memcpy(p, imp->uri.s, imp->uri.len);
 		p += imp->uri.len;
 		*p++ = '\n';
 		imp = imp->next;
 	}
 
-	imc_release_room(room);
-
 	/* write over last '\n' */
 	*(--p) = 0;
-	body.s   = imc_body_buf;
 	body.len = p-body.s;
 	LM_DBG("members = [%.*s]\n", body.len, body.s);
 	imc_send_message(&room->uri, &member->uri, &imc_hdr_ctype, &body);
 
+	pkg_free(body.s);
+	imc_release_room(room);
 
 	return 0;
 error:
+	if(body.s)
+		pkg_free(body.s);
 	if(room!=NULL)
 		imc_release_room(room);
 	return -1;
@@ -883,10 +936,8 @@ int imc_handle_exit(struct sip_msg* msg, imc_cmd_t *cmd,
 		/* delete user */
 		member->flags |= IMC_MEMBER_DELETED;
 		imc_del_member(room, &src->user, &src->host);
-		body.s = imc_body_buf;
-		body.len = snprintf(body.s, IMC_BUF_SIZE,
-				"The user [%.*s] has left the room",
-				src->user.len, src->user.s);
+		body.len = imc_body_print_user(&body,
+				"The user [%.*s] has left the room", &src->user);
 		if(body.len>0)
 			imc_room_broadcast(room, &imc_hdr_ctype, &body);
 	}
@@ -997,10 +1048,14 @@ int imc_handle_unknown(struct sip_msg* msg, imc_cmd_t *cmd, str *src, str *dst)
 	body.len = snprintf(body.s, IMC_BUF_SIZE,
 		"invalid command '%.*s' - send ''%.*shelp' for details",
 		cmd->name.len, cmd->name.s, imc_cmd_start_str.len, imc_cmd_start_str.s);
-
-	if(body.len<=0)
+	if(body.len <= 0)
 	{
 		LM_ERR("unable to print message\n");
+		return -1;
+	}
+	if(body.len >= IMC_BUF_SIZE)
+	{
+		LM_ERR("buffer size overflow\n");
 		return -1;
 	}
 
@@ -1236,4 +1291,3 @@ error:
 		shm_free(*ps->param);
 	return;
 }
-

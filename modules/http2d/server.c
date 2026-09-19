@@ -584,7 +584,7 @@ static int on_request_recv(nghttp2_session *session,
 	rc = pthread_cond_timedwait(&ng_h2_response->cond,
 			&ng_h2_response->mutex, &wait_until);
 	diff_ns = get_clock_diff(&begin);
-	LM_DBG("waited %lld ns in total\n", diff_ns);
+	LM_DBG("waited %llu ns in total\n", diff_ns);
 	if (rc != 0) {
 		pthread_mutex_unlock(&ng_h2_response->mutex);
 
@@ -635,7 +635,7 @@ static int on_frame_recv_callback(nghttp2_session *session,
 	switch (frame->hd.type) {
 	case NGHTTP2_DATA:
 	case NGHTTP2_HEADERS:
-		LM_DBG("h2 header [%d], %p %ld\n", frame->hd.type, frame->headers.nva, frame->headers.nvlen);
+		LM_DBG("h2 header [%d], %p %zu\n", frame->hd.type, frame->headers.nva, frame->headers.nvlen);
 		/* Check that the client request has finished */
 		if (frame->hd.flags & NGHTTP2_FLAG_END_STREAM) {
 			stream_data =
@@ -1049,4 +1049,3 @@ void http2_server(int rank)
 	run(int2str(h2_port, NULL), h2_tls_key.s, h2_tls_cert.s);
 	LM_ERR("HTTP2 server exiting!\n");
 }
-
