@@ -1423,8 +1423,7 @@ static mi_response_t *mi_reload_2(const mi_params_t *params,
 static int init_rld_vers_key(cache_entry_t *c_entry, db_handlers_t *db_hdls)
 {
 	str rld_vers_key;
-	int reload_version;
-	int rc;
+	int reload_version = -1;
 
 	/* set up reload version counter for this entry in cachedb */
 	rld_vers_key.len = c_entry->id.len + 23;
@@ -1436,12 +1435,12 @@ static int init_rld_vers_key(cache_entry_t *c_entry, db_handlers_t *db_hdls)
 	memcpy(rld_vers_key.s, c_entry->id.s, c_entry->id.len);
 	memcpy(rld_vers_key.s + c_entry->id.len, "_sql_cacher_reload_vers", 23);
 
-	/* add(0) atomically creates the counter if missing, or no-ops if not */
-	rc = db_hdls->cdbf.add(db_hdls->cdbcon, &rld_vers_key, 0, 0, &reload_version);
+	db_hdls->cdbf.add(db_hdls->cdbcon, &rld_vers_key, 1, 0, &reload_version);
+	db_hdls->cdbf.sub(db_hdls->cdbcon, &rld_vers_key, 1, 0, &reload_version);
 
 	pkg_free(rld_vers_key.s);
 
-	if (rc < 0)
+	if (reload_version != 0)
 		return -1;
 
 	return 0;
@@ -1454,9 +1453,9 @@ static void cache_init_load(int sender, void *param)
 	for (db_hdls = db_hdls_list; db_hdls; db_hdls = db_hdls->next) {
 
 		if (init_rld_vers_key(db_hdls->c_entry, db_hdls) < 0) {
-			LM_ERR("Failed to set up reload version counter in cachedb for "
+			LM_ERR("Failed to set up reload version counter in cahchedb for "
 				"entry: %.*s\n", db_hdls->c_entry->id.len, db_hdls->c_entry->id.s);
-			continue;
+			return;
 		}
 
 		/* cache the entire table in full caching mode */
