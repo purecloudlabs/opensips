@@ -92,7 +92,8 @@ static int httpd_build_sockaddr(str *sip, int sport, struct sockaddr_storage *ss
 			s6->sin6_family = AF_INET6;
 			s6->sin6_port = htons(sport);
 			*family = AF_INET6;
-			sprintf(reprbuf, "[%s]", !strcmp(sip->s, "::0") ? "::" : sip->s);
+			snprintf(reprbuf, 1 + IP_ADDR_MAX_STR_SIZE + 1, "[%s]",
+					!strcmp(sip->s, "::0") ? "::" : sip->s);
 			*ip_repr = reprbuf;
 			return sizeof *s6;
 		}
@@ -1063,7 +1064,8 @@ void httpd_proc(int rank)
 			saddr6.sin6_family = AF_INET6;
 			saddr6.sin6_port = htons(port);
 			saddr = &saddr6;
-			sprintf(ip6buf, "[%s]", !strcmp(ip.s, "::0") ? "::" : ip.s);
+			snprintf(ip6buf, sizeof(ip6buf), "[%s]",
+					!strcmp(ip.s, "::0") ? "::" : ip.s);
 			ip_repr = ip6buf;
 			mhd_flags |= MHD_USE_IPv6;
 		} else {
