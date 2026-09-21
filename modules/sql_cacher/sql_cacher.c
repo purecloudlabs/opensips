@@ -1016,7 +1016,8 @@ static db_handlers_t *db_init_test_conn(cache_entry_t *c_entry)
 	return new_db_hdls;
 }
 
-static int inc_cache_rld_vers(db_handlers_t *db_hdls, int *rld_vers)
+static int update_cache_rld_vers(db_handlers_t *db_hdls, int increment,
+								int *rld_vers)
 {
 	str rld_vers_key;
 
@@ -1029,15 +1030,19 @@ static int inc_cache_rld_vers(db_handlers_t *db_hdls, int *rld_vers)
 	memcpy(rld_vers_key.s, db_hdls->c_entry->id.s, db_hdls->c_entry->id.len);
 	memcpy(rld_vers_key.s + db_hdls->c_entry->id.len, "_sql_cacher_reload_vers", 23);
 
-	if (db_hdls->cdbf.add(db_hdls->cdbcon, &rld_vers_key, 1, 0, rld_vers) < 0) {
-		LM_ERR("Failed to increment reload version integer from cachedb\n");
-		pkg_free(rld_vers_key.s);
-		return -1;
+	if (db_hdls->cdbf.add(db_hdls->cdbcon, &rld_vers_key,
+		increment, 0, rld_vers) < 0) {
+		LM_ERR("Failed to update reload version integer from cachedb\n");
+		goto error;
 	}
 
 	pkg_free(rld_vers_key.s);
 
 	return 0;
+
+error:
+	pkg_free(rld_vers_key.s);
+	return -1;
 }
 
 static int load_entire_table(cache_entry_t *c_entry, db_handlers_t *db_hdls,
@@ -1106,7 +1111,7 @@ static int load_entire_table(cache_entry_t *c_entry, db_handlers_t *db_hdls,
 
 	lock_cache_writes(db_hdls->c_entry->cache_lock);
 
-	if (inc_rld_vers && inc_cache_rld_vers(db_hdls, &reload_vers) < 0) {
+	if (update_cache_rld_vers(db_hdls, inc_rld_vers, &reload_vers) < 0) {
 		unlock_cache_writes(db_hdls->c_entry->cache_lock);
 		goto error;
 	}
@@ -1389,7 +1394,7 @@ static mi_item_t *mi_reload(const mi_params_t *params, str *key)
 													"database, key not found\n"));
 		} else {
 			/* 'invalidate' all keys by increasing the reload version counter */
-			if (inc_cache_rld_vers(db_hdls, &rld_vers) < 0)
+			if (update_cache_rld_vers(db_hdls, 1, &rld_vers) < 0)
 				return init_mi_error(500, MI_SSTR("ERROR Invalidating cache"));
 		}
 	} else {
@@ -1420,40 +1425,15 @@ static mi_response_t *mi_reload_2(const mi_params_t *params,
 	return mi_reload(params, &key);
 }
 
-static int init_rld_vers_key(cache_entry_t *c_entry, db_handlers_t *db_hdls)
-{
-	str rld_vers_key;
-	int reload_version;
-	int rc;
-
-	/* set up reload version counter for this entry in cachedb */
-	rld_vers_key.len = c_entry->id.len + 23;
-	rld_vers_key.s = pkg_malloc(rld_vers_key.len);
-	if (!rld_vers_key.s) {
-		LM_ERR("No more pkg memory\n");
-		return -1;
-	}
-	memcpy(rld_vers_key.s, c_entry->id.s, c_entry->id.len);
-	memcpy(rld_vers_key.s + c_entry->id.len, "_sql_cacher_reload_vers", 23);
-
-	/* add(0) atomically creates the counter if missing, or no-ops if not */
-	rc = db_hdls->cdbf.add(db_hdls->cdbcon, &rld_vers_key, 0, 0, &reload_version);
-
-	pkg_free(rld_vers_key.s);
-
-	if (rc < 0)
-		return -1;
-
-	return 0;
-}
-
 static void cache_init_load(int sender, void *param)
 {
 	db_handlers_t *db_hdls;
+	int unused_rld_vers;
 
 	for (db_hdls = db_hdls_list; db_hdls; db_hdls = db_hdls->next) {
 
-		if (init_rld_vers_key(db_hdls->c_entry, db_hdls) < 0) {
+		/* set up reload version counter for this entry in cachedb */
+		if (update_cache_rld_vers(db_hdls, 0, &unused_rld_vers) < 0) {
 			LM_ERR("Failed to set up reload version counter in cachedb for "
 				"entry: %.*s\n", db_hdls->c_entry->id.len, db_hdls->c_entry->id.s);
 			continue;
