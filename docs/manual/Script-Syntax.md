@@ -21,7 +21,7 @@ Configuring the network listeners, available transport protocols, forking (and n
 
 Example:
 
-```c
+```opensips
 
 disable_tcp = yes
 listen = udp:192.168.4.00:5060
@@ -41,7 +41,7 @@ In regards to the OpenSIPS modules,the modules that are to be loaded (no module 
 Once the modules are loaded, the parameters of the modules may be set using the **modparam** directive - to list of available parameters for each module, the type of parameter value (integer or string) can be found in the [documentation of the modules](Modules.md), the *Parameters* section.
 
 Examples:
-```c
+```opensips
 
 loadmodule "modules/mi_datagram/mi_datagram.so"
 modparam("mi_datagram", "socket_name", "udp:127.0.0.1:4343")
@@ -51,7 +51,7 @@ modparam("mi_datagram", "children_count", 3)
 
 or 
 
-```c
+```opensips
 
 mpath="/usr/local/opensips_proxy/lib/modules"
 loadmodule "mi_datagram.so"
@@ -76,7 +76,7 @@ There are different types of routes :
 What are the existing **top routes**, when they are triggered, what kind of SIP messages is handled, what SIP operations are allowed and other are documented in the [types of routes section](Script-Routes.md).  
 \
 The **sub-routes** have names and they are to be called from any other route (top or sub) in the script via their names. The **sub-routes** may take parameters (when called) or return a numerical code (avoid returning 0 value as this will terminate your whole script. The **sub-routes** are similar to functions / procedure in any programing language.
-See the [description of the *route*](Script-CoreFunctions.md#setuser) directive.
+See the [description of the *route*](Script-CoreFunctions.md#setuseruser) directive.
 
 ## Data Types
 
@@ -88,22 +88,22 @@ The OpenSIPS scripting language supports the following data types:
   * Max value: +2,147,483,647 == 2 ^ 31 - 1
   * Min value: -2,147,483,648 == - 2 ^ 31
 * *string* (unlimited size)
-  * note that some functions which use strings may have internal buffers which limit the maximum size of the strings (e.g. the [xlog()](https://docs.opensips.org/manual/4-0/script-corefunctions#socket_belongs_to_bond) function's output buffer is configurable via [xlog_buf_size](https://docs.opensips.org/manual/4-0/script-coreparameters#udp_workers))
+  * note that some functions which use strings may have internal buffers which limit the maximum size of the strings (e.g. the [xlog()](./Script-CoreFunctions.md#xloglog_level-format_string) function's output buffer is configurable via [xlog_buf_size](./Script-CoreParameters.md#xlog_buf_size))
 * *double* (packed as string), through the **[mathops](../../modules/mathops/README.md)** module
 
 ### Complex
 
-* *list* via the **[`$avp` variable](https://docs.opensips.org/manual/4-0/script-corevar#avp_variables)**
-* *map* via the **[`$json`](../../modules/json/README.md#pv_json)** and **[`$xml`](../../modules/xml/README.md#pv_xml)** variables
+* *list* via the **[`$avp` variable](./Script-CoreVar.md#avp-variables)**
+* *map* via the **[`$json`](../../modules/json/README.md#jsonid)** and **[`$xml`](../../modules/xml/README.md#xmlpath)** variables
 
 ## Function Calling Conventions
-All OpenSIPS [core](https://docs.opensips.org/manual/4-0/script-corefunctions) and [module](https://docs.opensips.org/manual/4-0/function-index) functions internally share the same function interface, such that they benefit from the following calling convention:
+All OpenSIPS [core](./Script-CoreFunctions.md) and module functions internally share the same function interface, such that they benefit from the following calling convention:
 
   
 
 * **any integer or string function parameter may also be passed using a "holder" variable**
 
-```text
+```opensips
 
 ds_select_dst(1, 1); 
 
@@ -111,7 +111,7 @@ ds_select_dst(1, 1);
 
 ... is equivalent to:
 
-```text
+```opensips
 
 $var(x) = 1;
 ds_select_dst($var(x), $var(x));
@@ -122,7 +122,7 @@ ds_select_dst($var(x), $var(x));
 
 * **any string function parameter can be passed as a format string**
 
-```text
+```opensips
 
 set_dlg_profile("caller", "$var(country_code)_$var(area)_$fU");
 
@@ -141,7 +141,7 @@ Literal **"$"** characters can be included in a format string using the **"$$"**
 
 * **input or output variables passed to functions must not be quoted**:
 
-```text
+```opensips
 
 ds_count(1, "a", $var(out_result));
 
@@ -151,12 +151,12 @@ ds_count(1, "a", $var(out_result));
 
 * **integers no longer need to be passed as double-quoted strings**:
 
-```text del={2-2}
+```opensips del={2-2}
 # this is deprecated
 ds_select_dst("1", "1");
 ```
 
-```text
+```opensips
 
 ds_select_dst(1, 1);
 

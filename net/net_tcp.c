@@ -303,6 +303,10 @@ int tcp_dispatch_msg(char *msg, int len,
 		LM_BUG("negative TCP message length: %d\n", len);
 		return -1;
 	}
+	if (len && !msg) {
+		LM_BUG("NULL TCP message buffer with non-zero length: %d\n", len);
+		return -1;
+	}
 	if (data_len < 0) {
 		LM_BUG("negative TCP dispatch data length: %d\n", data_len);
 		return -1;
@@ -1630,6 +1634,8 @@ static inline void tcp_complete_read(struct tcp_job *job)
 
 	tcpconn = job->conn;
 
+	tcpconn->flags &= ~F_CONN_READ_QUEUED;
+
 	if (job->resp == -2) {
 		tcp_fail_conn(tcpconn, "Timeout waiting for a complete message", 1);
 		return;
@@ -1673,7 +1679,8 @@ static inline void tcp_complete_write(struct tcp_job *job)
 	pending_chunks = (tcpconn->async && tcpconn->async->pending);
 	lock_release(&tcpconn->write_lock);
 
-	if ((tcpconn->flags & F_CONN_REMOVED_READ) && tcpconn->fd != -1) {
+	if ((tcpconn->flags & F_CONN_REMOVED_READ) &&
+			!(tcpconn->flags & F_CONN_READ_QUEUED) && tcpconn->fd != -1) {
 		if (reactor_add_reader(tcpconn->fd, F_TCPCONN, RCT_PRIO_NET,
 				tcpconn) < 0) {
 			LM_ERR("failed to add TCP conn %p for read events\n", tcpconn);
@@ -1823,14 +1830,25 @@ inline static int handle_tcpconn_ev(struct tcp_connection* tcpconn, int fd_i,
 
 	if (event_type == IO_WATCH_READ) {
 		LM_DBG("data available on %p %d\n", tcpconn, tcpconn->fd);
+		if (tcpconn->flags & F_CONN_READ_QUEUED) {
+			LM_BUG("read job already queued for TCP conn %p\n", tcpconn);
+			if (!(tcpconn->flags & F_CONN_REMOVED_READ) && tcpconn->fd != -1) {
+				if (reactor_del_reader(tcpconn->fd, fd_i, 0) == -1)
+					return -1;
+				tcpconn->flags |= F_CONN_REMOVED_READ;
+			}
+			return 0;
+		}
 		if (reactor_del_reader(tcpconn->fd, fd_i, 0) == -1)
 			return -1;
 		tcpconn->flags |= F_CONN_REMOVED_READ;
+		tcpconn->flags |= F_CONN_READ_QUEUED;
 		tcpconn_ref(tcpconn); /* refcnt ++ */
 		sh_log(tcpconn->hist, TCP_REF, "tcp-main read queued, (%d)",
 			tcpconn->refcnt);
 		if (tcp_queue_job(tcpconn, TCP_READ_JOB) < 0) {
 			LM_ERR("failed queuing TCP read job\n");
+			tcpconn->flags &= ~F_CONN_READ_QUEUED;
 			if (reactor_add_reader(tcpconn->fd, F_TCPCONN, RCT_PRIO_NET,
 					tcpconn) < 0) {
 				tcp_fail_conn(tcpconn, "Failed queueing read", 0);
@@ -1868,11 +1886,17 @@ inline static int handle_tcpconn_ev(struct tcp_connection* tcpconn, int fd_i,
 
 			/* now that we completed the async connection, we also need to
 			 * listen for READ events, otherwise these will get lost */
-			if (tcpconn->flags & F_CONN_REMOVED_READ) {
-					reactor_add_reader(tcpconn->fd, F_TCPCONN, RCT_PRIO_NET,
+			if ((tcpconn->flags & F_CONN_REMOVED_READ) &&
+					!(tcpconn->flags & F_CONN_READ_QUEUED)) {
+				if (reactor_add_reader(tcpconn->fd, F_TCPCONN, RCT_PRIO_NET,
+						tcpconn) < 0) {
+					LM_ERR("failed to re-arm TCP conn %p for read events\n",
 						tcpconn);
-					tcpconn->flags &= ~F_CONN_REMOVED_READ;
+					tcp_fail_conn(tcpconn, "Failed to re-arm read", 0);
+					return 0;
 				}
+				tcpconn->flags &= ~F_CONN_REMOVED_READ;
+			}
 
 			goto async_write;
 		} else {

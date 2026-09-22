@@ -1,6 +1,6 @@
 ---
 title: "H350 Module"
-description: "The OpenSIPS H350 module enables an OpenSIPS SIP proxy server to access SIP account data stored in an LDAP [RFC4510](#RFC4510) directory containing H.350 [H350](#H350) *commObjects*. ITU-T Recommendation H.350 standardizes LDAP object classes to store Real-Time Communication (RTC) account data. I..."
+description: "The OpenSIPS H350 module enables an OpenSIPS SIP proxy server to access SIP account data stored in an LDAP [RFC4510](https://tools.ietf.org/html/rfc4510) directory containing H.350 [H350](https://www.itu.int/rec/T-REC-H.350/en) *commObjects*."
 ---
 
 ## Admin Guide
@@ -9,10 +9,10 @@ description: "The OpenSIPS H350 module enables an OpenSIPS SIP proxy server to a
 ### Overview
 
 
-The OpenSIPS H350 module enables an OpenSIPS SIP proxy server to access SIP account data stored in an LDAP [RFC4510](#RFC4510) directory containing H.350 [H350](#H350) *commObjects*. ITU-T Recommendation H.350 standardizes LDAP object classes to store Real-Time Communication (RTC) account data. In particular, *H.350.4* [H350 4](#H350-4) defines an object class called *sipIdentity* that includes attribute specifications for SIP account data like SIP URI, SIP digest username/password, or service level. This allows to store SIP account data in a vendor neutral way and lets different entities, like SIP proxies, provisioning, or billing applications, access the data in a standardized format.
+The OpenSIPS H350 module enables an OpenSIPS SIP proxy server to access SIP account data stored in an LDAP [RFC4510](https://tools.ietf.org/html/rfc4510) directory containing H.350 [H350](https://www.itu.int/rec/T-REC-H.350/en) *commObjects*. ITU-T Recommendation H.350 standardizes LDAP object classes to store Real-Time Communication (RTC) account data. In particular, *H.350.4* [H350 4](https://www.itu.int/rec/T-REC-H.350.4/en) defines an object class called *sipIdentity* that includes attribute specifications for SIP account data like SIP URI, SIP digest username/password, or service level. This allows to store SIP account data in a vendor neutral way and lets different entities, like SIP proxies, provisioning, or billing applications, access the data in a standardized format.
 
 
-The *ViDe H.350 Cookbook* [vide H350 cookbook](#vide-H350-cookbook)  is a good reference for deploying an H.350 directory. Besides general information on H.350, LDAP, and related standards, this document explains how to set up an H.350/LDAP directory and discusses different deployment scenarios.
+The *ViDe H.350 Cookbook* is a good reference for deploying an H.350 directory. Besides general information on H.350, LDAP, and related standards, this document explains how to set up an H.350/LDAP directory and discusses different deployment scenarios.
 
 
 The H350 module uses the OpenSIPS LDAP module to import H.350 attribute values into the OpenSIPS routing script variable space. The module exports functions to parse and store the H.350 attribute values from the OpenSIPS routing script. It allows a script writer to implement H.350 based SIP digest authentication, call forwarding, SIP URI alias to AOR rewriting, and service level parsing.
@@ -81,7 +81,7 @@ objectClass                   top
 
 
 The module depends on the following modules (the listed modules
-        must be loaded before this module):
+must be loaded before this module):
 
 
 - LDAP
@@ -91,11 +91,11 @@ The module depends on the following modules (the listed modules
 
 
 The following libraries or applications must be installed before
-        running OpenSIPS with this module loaded:
+running OpenSIPS with this module loaded:
 
 
 - OpenLDAP library (libldap), libldap header files
-            (libldap-dev) are needed for compilation
+(libldap-dev) are needed for compilation
 
 
 ### Exported Parameters
@@ -110,7 +110,7 @@ Name of the LDAP session to be used for H.350 queries, as defined in the LDAP mo
 Default value: ""
 
 
-```c title="ldap_session parameter usage"
+```opensips title="ldap_session parameter usage"
 modparam("h350", "ldap_session", "h350");
             
 ```
@@ -125,7 +125,7 @@ Base LDAP DN to start LDAP search for H.350 entries. For best performance, this 
 Default value: ""
 
 
-```c title="base_dn parameter usage"
+```opensips title="base_dn parameter usage"
 modparam("h350", "base_dn", "ou=h350,dc=example,dc=com");
             
 ```
@@ -140,7 +140,7 @@ LDAP search scope for H.350 queries, one of "one", "base", or "sub".
 Default value: "one"
 
 
-```c title="search_scope parameter usage"
+```opensips title="search_scope parameter usage"
 modparam("h350", "search_scope", "sub");
             
 ```
@@ -188,7 +188,7 @@ H.350 SIPIdentitySIPURI to search for in directory.
 This function can be used from REQUEST_ROUTE, FAILURE_ROUTE, BRANCH_ROUTE, and ONREPLY_ROUTE.
 
 
-```c title="Example Usage"
+```opensips title="Example Usage"
 #
 # H.350 lookup for callee
 #
@@ -263,7 +263,7 @@ Specification for authentication password AVP, e.g. `$avp(pwd)`.
 This function can be used from REQUEST_ROUTE, FAILURE_ROUTE, BRANCH_ROUTE, and ONREPLY_ROUTE.
 
 
-```c title="Example Usage"
+```opensips title="Example Usage"
 # -- auth params --
 modparam("auth", "username_spec", "$avp(auth_user)")
 modparam("auth", "password_spec", "$avp(auth_pwd)")
@@ -356,7 +356,7 @@ route[1]
 #### h350_result_call_preferences(avp_name_prefix)
 
 
-This function parses the callPreferenceURI attribute of an H.350 commObject, which must have been fetched through *h350_*_lookup* or *ldap_search*. callPreferenceURI is a multi-valued attribute that stores call preference rules like e.g. forward-on-busy or forward-unconditionally. *Directory services architecture for call forwarding and preferences* [H350 6](#H350-6) defines a format for simple call forwarding rules:
+This function parses the callPreferenceURI attribute of an H.350 commObject, which must have been fetched through *h350_*_lookup* or *ldap_search*. callPreferenceURI is a multi-valued attribute that stores call preference rules like e.g. forward-on-busy or forward-unconditionally. *Directory services architecture for call forwarding and preferences* [H350 6](https://www.itu.int/rec/T-REC-H.350.6/en) defines a format for simple call forwarding rules:
 
 
 `target_uri type[:argument]`
@@ -452,7 +452,7 @@ Name prefix for call forwarding rule AVPs, as described above.
 This function can be used from REQUEST_ROUTE, FAILURE_ROUTE, BRANCH_ROUTE, and ONREPLY_ROUTE.
 
 
-```c title="Example Usage"
+```opensips title="Example Usage"
 #
 # H.350 lookup for callee
 #
@@ -500,13 +500,13 @@ if ($avp(callee_pref_u) != NULL)
 #### h350_result_service_level(avp_name_prefix)
 
 
-*Directory services architecture for SIP* [H350 4](#H350-4) defines a multi-valued LDAP attribute named SIPIdentityServiceLevel, which can be used to store SIP account service level values in an LDAP directory. This function parses the SIPIdentityServiceLevel attribute and stores all service level values as AVPs for later retrieval in the OpenSIPS routing script. The function accesses the H.350 commObject fetched by a call to *h350_*_lookup* or *ldap_search*.
+*Directory services architecture for SIP* [H350 4](https://www.itu.int/rec/T-REC-H.350.4/en) defines a multi-valued LDAP attribute named SIPIdentityServiceLevel, which can be used to store SIP account service level values in an LDAP directory. This function parses the SIPIdentityServiceLevel attribute and stores all service level values as AVPs for later retrieval in the OpenSIPS routing script. The function accesses the H.350 commObject fetched by a call to *h350_*_lookup* or *ldap_search*.
 
 
 The resulting AVPs have a name of the form `avp_name_prefix + SIPIdentityServiceLevel attribute value`, and an integer value of `1`.
 
 
-```c title="Example SIPIdentityServiceLevel values and resulting AVPs"
+```opensips title="Example SIPIdentityServiceLevel values and resulting AVPs"
 SIPIdentityServiceLevel: longdistance
 SIPIdentityServiceLevel: international
 SIPIdentityServiceLevel: 900
@@ -554,7 +554,7 @@ Name prefix for service level AVPs, as described above.
 This function can be used from REQUEST_ROUTE, FAILURE_ROUTE, BRANCH_ROUTE, and ONREPLY_ROUTE.
 
 
-```c title="Example Usage"
+```opensips title="Example Usage"
 #
 # H.350 SIP digest authentication for caller
 #

@@ -4,9 +4,25 @@ name: Unit Tests
 
 # Controls when the action will run. 
 on:
-  # Triggers the workflow on all push or pull request events
+  # Triggers the workflow on push or pull request events touching source
   push:
+    paths:
+      - '**/Makefile*'
+      - '**/*.c'
+      - '**/*.cpp'
+      - '**/*.h'
+      - 'cfg.y'
+      - 'cfg.lex'
+      - 'scripts/**'
   pull_request:
+    paths:
+      - '**/Makefile*'
+      - '**/*.c'
+      - '**/*.cpp'
+      - '**/*.h'
+      - 'cfg.y'
+      - 'cfg.lex'
+      - 'scripts/**'
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -18,7 +34,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:${{ matrix.os }}
+      image: ghcr.io/opensips/ubuntu-ci:${{ matrix.os }}
       options: >-
         -v sources:/__w/${{ github.event.repository.name }}/${{ github.event.repository.name }}
     env:
@@ -28,13 +44,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [22.04]
-        compiler: ['gcc', 'clang', 'gcc-11', 'gcc-12', 'clang-11', 'clang-12', 'clang-13', 'clang-14', 'clang-15', 'gcc-arm64-qemu-cross', 'gcc-arm32-qemu-cross', 'clang-arm64-qemu-cross', 'clang-arm32-qemu-cross']
+        os: [20.04, 22.04, 24.04, 26.04]
+        compiler: ['gcc', 'clang']
         include:
-          - os: 20.04
-            compiler: 'gcc'
-          - os: 20.04
-            compiler: 'clang'
           - os: 20.04
             compiler: 'gcc-9'
           - os: 20.04
@@ -59,14 +71,39 @@ jobs:
             compiler: 'clang-18'
           - os: 24.04
             compiler: 'clang-19'
+          - os: 22.04
+            compiler: 'gcc-11'
+          - os: 22.04
+            compiler: 'gcc-12'
+          - os: 22.04
+            compiler: 'clang-11'
+          - os: 22.04
+            compiler: 'clang-12'
+          - os: 22.04
+            compiler: 'clang-13'
+          - os: 22.04
+            compiler: 'clang-14'
+          - os: 22.04
+            compiler: 'clang-15'
+          - os: 22.04
+            compiler: 'gcc-arm64-qemu-cross'
+          - os: 22.04
+            compiler: 'gcc-arm32-qemu-cross'
+          - os: 22.04
+            compiler: 'clang-arm64-qemu-cross'
+          - os: 22.04
+            compiler: 'clang-arm32-qemu-cross'
+          - os: 26.04
+            compiler: 'gcc-14'
+          - os: 26.04
+            compiler: 'clang-18'
+          - os: 26.04
+            compiler: 'clang-19'
+          - os: 26.04
+            compiler: 'clang-20'
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      - name: Install git
-        run: |
-          apt-get update
-          apt-get install -y git lsb-release gnupg2 wget
-
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v5
         with:
@@ -86,9 +123,7 @@ jobs:
         run: sh -x scripts/build/start_container.sh
 
       - name: Install dependencies
-        run: |
-          sh -x scripts/build/reset_sources.sh
-          sh -x scripts/build/install_depends.sh
+        run: sh -x scripts/build/install_depends.sh
 
       - name: Get libtap
         run: git clone https://github.com/zorgnax/libtap.git lib/libtap

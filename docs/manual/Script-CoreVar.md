@@ -3,7 +3,10 @@ title: "Core Variables"
 description: "The OpenSIPS variables can be easily identified in the script as all their names (or notations) start with the $ sign."
 ---
 
-**OpenSIPS** provides multiple type of variables to be used in the routing script. The difference between the types of variables comes from (1) the visibility of the variable (when it is visible), (2) what the variable is attached to (where the variable resides), (3) read-write status of the variable (some types of the variables are read-only and (4) how multiple values (for the same variable are handled).
+**OpenSIPS** provides multiple types of variables to be used in the routing script. The difference between the types of variables comes from:
+* *its context* - a variable is attached to a context, like the context of a SIP message, of a SIP transaction or dialog. The variable will be visible all the time within that context (across all the script routes where the context is present)
+* *read-write status* - some types of variables are read-only
+* *number of values* - some variables may keep multiple values at the same time
 
 The **OpenSIPS** variables can be easily identified in the script as all their names (or notations) start with the **$** sign.
 
@@ -14,9 +17,9 @@ The complete syntax for a pseudo variable is:
 
 The fields written in italics are optional.
 The fields meaning is:
-* **name**(compulsory) - the pseudo-variable name(type).  
-Ex: pvar, avp, ru, DLG_status, etc.
-* **subname** - the identifier of a certain pv from the given type.  
+* **name**(mandatory) - the pseudo-variable name(type).  
+Ex: var, avp, ru, DLG_status, etc.
+* **subname** - the identifier of a certain pv of a given type.  
 Ex: hdr(From), avp(name).
 * **index** - a pv can store more than one value - it can refer to a list of values. You can access a certain value from the list if you specify its index. You can also specify indexes with negative values, -1 means the last inserted, -2 the value before the previous inserted one.
 * **transformation** - a series of processing actions can be applied on pseudo-variable. You can find the whole list of possible transformations [here](Script-Tran.md). The transformations can be cascaded, using the output of one transformation as the input of another.     
@@ -26,39 +29,39 @@ Usage examples:
 * Only **name**: `$ru`
 * **Name** and *'subname*: `$hdr(Contact)`
 * **Name** and **index**: `$(ct[0])`
-* **Name**, **subname** and **index**: `$(avp(i:10)[2])`
+* **Name**, **subname** and **index**: `$(avp(caller_dids)[2])`
 * **Context** 
   * `$(<request>ru)` from a reply route will get the Request-URI from the request
   * `$(<reply>hdr(Contact))` context can be used from failure route to access information from the reply 
 
 Types of variables:
 
-* [**script variables**](#script_variables) - as the name says, these variables are strictly bound to the script routes. The variables are visible only in the routing blocks - they are not message or transaction related, but they are process related (script variables will be inherited by script routes executed by the same **OpenSIPS** process).  
-Script variables are read write and they can have integer or string values. A script variable can only hold a single value. A new assignment (or write operation) will overwrite the existing value.
+* [**script variables**](#script-variables) - as the name says, these variables are strictly bound to the script routes.
 
-* [**AVP - Attribute Value Pair**](#avp_variables) - the AVPs are dynamic variables (as name) that can be created - the AVPS are linked to a singular message or transaction (if stateful processing is used). A message or a transaction will initially (when received or created) have an empty list of AVPS attached to it. During the routing script, the script directly or functions called from script may create new AVPS that will automatically attached to the message/transaction. The AVPS will be visible in all routes where any message (reply or request) of the transaction will be processed - branch_route , failure_route, onreply_route (for this last route you need to enable the TM parameter *onreply_avp_mode*).  
-AVPs are read write and an existing AVP can be even deleted (removed). An AVP may contain multiple values - a new assignment (or write operation) will add a new value to the AVP; the values are kept in "last added first to be used" order (stack).  
+* [**AVP - Attribute Value Pair**](#avp-variables) - the AVPs are dynamic variables (as name) that can be created and attached to a SIP message or transaction (if stateful processing is used). So, you may see them as transaction level variables.
 
-A special index **append** is defined to allow you to add a new value at the end of the list (at the bottom of the stack) - `$(avp(name)[append])` = "last value";
+* [**reference variables**](#reference-variables) - variables to provide access to information from the current context - the current SIP message, transaction, dialog, or from the current process (non SIP information).
 
-* [**pseudo variables**](#scripting_variables) - pseudo-variables (or PV) provide access to information from the processed SIP message (headers, RURI, transport level info, a.s.o) or from **OpenSIPS** inners (time values, process PID, return code of a function). Depending of what info they provide, the PVs are either bound to the message, either to nothing  (global). Most of the PVs are read-only and only several allow write operations. A PV may return several values or only one, depending of the referred info (if can have multiple values or not).  
-Standard PV is read-only and returns a single value (if not otherwise documented).
+* [**escape sequences**](#escape-sequences) - escape sequences used to format the strings; they are actually not variables, but rather formatters.
 
-* [**escape sequences**](#escape_sequences) - escape sequences used to format the strings; they are actually not variables, but rather formatters.
+
 
 ## Script variables
 
-**Naming**: `$var(name)` 
+**Naming**: `$var(name)`
+
+These variables are attached to the script, being persistent to the whole execution of a top route (including all its sub-routes). Once the execution of the top route ended, the script variables are lost, not to be used again. Also, be careful and initialize them when used for the first time (in a top route) as you may inherite garbage.
+Script variables are read write and they can have integer or string values.
+A script variable can only hold a single value. A new assignment (or write operation) will overwrite the existing value.
+
 
 **Hints**:
 * if you want to start using a script variable in a route, better initialize it with same value (or reset it), otherwise you may inherit a value from a previous route that was executed by the same process.
-* script variables are faster than AVPs, as they directly reference a memory location.
-* the value of script variables persists over a **OpenSIPS** process.
 * a script variable can only hold one value.
 
 Example of usage:
 
-```bash
+```opensips
 
 $var(a) = 2;  # sets the value of variable 'a' to integer '2'
 $var(a) = "2";  # sets the value of variable 'a' to string '2'
@@ -72,13 +75,18 @@ if( [ $var(a) & 4 ] ) {
 
 ```
 
-Setting a variable to NULL is actually initializing the value to integer '0'. Script variables don't have NULL value.
 
 ## AVP variables
 
 **Naming**: `$avp(name)` or `$(avp(name)[N])`
 
+A message or a transaction will initially (when received or created) have an empty list of AVPS attached to it. During the routing script, the script directly or functions called from script may create new AVPS that will automatically attached to the message/transaction. The AVPS will be visible in all routes where any message (reply or request) of the transaction will be processed - `branch_route` , `failure_route`, `onreply_route` (for this last route you need to enable the TM parameter *onreply_avp_mode*).
+AVPs are read write and an existing AVP can be even deleted (removed).
+An AVP may contain multiple values - a new assignment (or write operation) will add a new value to the AVP; the values are kept in "last added first to be used" order (stack).
+
 When using the index "N" you can force the AVP to return a certain value (the N-th value). If no index is given, the first value will be returned.
+A special index **append** is defined to allow you to add a new value at the end of the list (at the bottom of the stack) - `$(avp(name)[append])` = "last value";
+
 
 **Hints**:
 * to enable AVPs in onreply_route, use "modparam("tm", "onreply_avp_mode", 1)"
@@ -88,7 +96,7 @@ When using the index "N" you can force the AVP to return a certain value (the N-
 
 Example of usage:
 * Transaction persistence example
-```c
+```opensips
 
 # enable avps in onreply route
 modparam("tm", "onreply_avp_mode", 1)
@@ -97,12 +105,12 @@ route{
 ...
 $avp(tmp) = $Ts ; # store the current time (at request processing)
 ...
-t_onreply("1");
+t_onreply("handle_reply");
 t_relay();
 ...
 }
 
-onreply_route[1] {
+onreply_route[handle_reply] {
 	if (t_check_status("200")) {
 		# calculate the setup time
 		$var(setup_time) = $Ts - $avp(tmp);
@@ -112,48 +120,53 @@ onreply_route[1] {
 ```
 
 * Multiple values example
-```bash
+```opensips
 
-$avp(my_arr) = "one";
+$avp(demo) = "one";
 # we have a single value
 
-$avp(my_arr) = "two";
+$avp(demo) = "two";
 # we have two values ("two","one")
 
-$avp(my_arr) = "three";
+$avp(demo) = "three";
 # we have three values ("three","two","one")
 
-xlog("accessing values with no index: $avp(my_arr)\n");
+xlog("accessing values with no index: $avp(demo)\n");
 # this will print the first value, which is the last added value -> "three"
 
-xlog("accessing values with no index: $(avp(my_arr)[2])\n");
+xlog("accessing values with no index: $(avp(demo)[2])\n");
 # this will print the index 2 value (third one), -> "one"
 
 # remove the first value of the avp (lastly added one); if there is only one value, the AVP itself will be destroyed
-$avp(my_arr) = NULL;
+$avp(demo) = NULL;
 
 # delete all values and destroy the AVP
-$avp(my_arr) := NULL;
+$avp(demo) := NULL;
 
 # delete the value located at a certain index 
-$(avp(my_arr)[1]) = NULL;
+$(avp(demo)[1]) = NULL;
 
 # overwrite the value at a certain index
-$(avp(my_arr)[0]) = "zero";
+$(avp(demo)[0]) = "zero";
 
 ```
 
-The **AVPOPS** module provides a lot of useful functions to operate AVPs (like checking values, pushing values into different other locations, deleting AVPs, etc).
 
-## Scripting Variables
+
+## Reference Variables
 
 **Naming**: `$name`
 
-**Hints**:
-* the PV tokens can be given as parameters to different script functions and they will be replaced with a value before the execution of the function.
-* most of PVs are made available by **OpenSIPS** core, but there are also module exporting PV (to make available info specific to that module) - check the modules documentation.
+They provide access to information from the SIP message/transaction/dialog or OpenSIPS internals.
+For example, a reference variable may allow access to the processed SIP message (headers, RURI, transport level info, and so on) or from **OpenSIPS** internals (time values, process PID, return code of a function). Depending of what info they provide, the PVs are either bound to the message, either to nothing  (global).
+Most of the reference variables are read-only and only several allow write operations. The reference variables may return several values or only one, depending of the referred info (if can have multiple values or not).  
+Standard reference variables are read-only and return a single value (if not otherwise documented).
 
-Predefined (provided by core) PVs are listed in alphabetical order.
+**Hints**:
+* most of reference variables are made available by **OpenSIPS** core, but there are also module exporting such variables (to make available info specific to that module) - check the modules documentation.
+* the reference variables are also known as *pseudo-variables* or *PV*. This is an old terminology.
+
+Predefined (provided by core) PVs are listed in alphabetical order:
 
 ### URI in SIP Request's P-Asserted-Identity header - $ai
 
@@ -187,6 +200,10 @@ Predefined (provided by core) PVs are listed in alphabetical order.
 
 `$auth.nonce` - the nonce string from Authorization or Proxy-Authorization header
 
+### Auth cnonce - $auth.cnonce
+
+`$auth.cnonce` - the client nonce string from Authorization or Proxy-Authorization header
+
 ### Auth opaque - $auth.opaque
 
 `$auth.opaque` - the opaque string from Authorization or Proxy-Authorization header
@@ -209,98 +226,16 @@ Predefined (provided by core) PVs are listed in alphabetical order.
 
 ### Acc username - $Au
 
-`$Au` - username for accounting purposes. It's a selective pseudo variable (inherited from acc module). It returns `$au` if exits or From username otherwise.
+`$Au` - username for accounting purposes. It's a selective pseudo variable (inherited from acc module). It returns `$au` if it exists or From username otherwise.
 
 ### Argument options - $argv
 
 `$argv` - provides access to command line arguments specified with '-o' option.
 Examples:
-```text
+```opensips
 
    # for option '-o foo=0'
    xlog("foo is $argv(foo) \n");
-
-```
-
-### Branch flags list - $bf
-
-`$bf` - displays a list with the branch flags set for the current SIP request  
-
-> [!WARNING]
-> TO BECOME OBSOLETE, replaced by [`$msg.branch.flags`](#msg.branch.flags)
-
-### Branch - $branch
-
-`$branch` - this variable is used for creating new branches by writing into it the value of a SIP URI.  
-
-> [!WARNING]
-> TO BECOME OBSOLETE, replaced by [`$msg.branch.uri`](#msg.branch.uri)
-
-Examples:
-```text
-
-   # creates a new branch
-   $branch = "sip:new@doamin.org";
-   # print its URI
-   xlog("last added branch has URI $(branch(uri)[-1]) \n");
-
-```
-
-### Branch fields - $branch.fields
-
-`$branch()` - this variable provides read/write access to all fields/attributes of an already existing branch (prior created with append_branch() ). The fields of the branch are:
-* uri - the RURI of the branch  (string value)
-* duri - destination URI of the branch (outbound proxy of the branch)  (string value)
-* q - q value of the branch (int value)
-* path - the PATH string for this branch (string value)
-* flags - the branch flags of this branch (int value)
-* socket - the local socket to be used for relaying this branch (string value)
-The variable accepts also index `$(branch(uri)[1])` for accessing a specific branch (multiple branches can be defined at a moment). The index starts from 0 (first branch). If the index is negative, it is considered the n-th branch from the end ( index -1 means the last branch).  
-
-To get all branches, use the * index - `$(branch(uri)[*])`.  
-
-> [!WARNING]
-> TO BECOME OBSOLETE, replaced by [`$msg.branch.uri`](#msg.branch.uri)
-
-Examples:
-```text
-
-   # creates the first branch
-   append_branch();
-   # creates the second branch
-   force_send_socket(udp:194.068.1.12:5060);
-   $du = "sip:194.068.4.00";
-   append_branch("sip:foo@bar.com","0.5");
-
-   # display branches
-   xlog("----- branch 0: $(branch(uri)[0]) , $(branch(q)[0]), $(branch(duri)[0]), $(branch(path)[0]), $(branch(flags)[0]), $(branch(socket)[0]) \n");
-   xlog("----- branch 1: $(branch(uri)[1]) , $(branch(q)[1]), $(branch(duri)[1]), $(branch(path)[1]), $(branch(flags)[1]), $(branch(socket)[1]) \n");
-
-   # do some changes over the branches
-   $branch(uri) = "sip:user@domain.ro";   # set URI for the first branch
-   $(branch(q)[0]) = 1000;  # set to 1.00 for the first branch
-   $(branch(socket)[1]) = NULL;  # reset the socket of the second branch
-   $branch(duri) = NULL;  # reset the destination URI or the first branch
-
-```
-
-> [!IMPORTANT]
-> It is R/W variable (you can assign values to it from routing logic)
-
-
-### Branch flag - $branch.flag
-
-`$branch.flag(flag_name)[]` - this variable provides read/write access to the value of a single certain branch flag (identified by name). The values accepted for writing are 1 (set) and 0 (unset). The returned values are 1/"true" (set) and 0/"false" (unset). An index is accepted, in order to access the flag for a certain branch. By default the 0 (or current) branch accessed (for more on index, see the the [branch.fields](#branch.fields) variable) - note that "*" is not accepted.  
-
-> [!WARNING]
-> TO BECOME OBSOLETE, replaced by [`$msg.branch.flag`](#msg.branch.flag)
-
-```text
-
-  setbflag("X");
-  xlog("---- flag value is $branch.flag(X) \n");
-  $branch.flag(X) = off;
-  xlog("---- flag value is $branch.flag(X) \n");
 
 ```
 
@@ -351,7 +286,7 @@ Examples:
 * `$(ct[n])` - the n-th contact instance form the beginning of message, starting with index 0
 * `$(ct[-n])` - the n-th contact instance form the end of the message, starting with index -1 (the last contact instance)
 
-### Fields of a contact instance - $ct.fields
+### Fields of a contact instance - $ct.fields(field)
 
 `$ct.fields()` - reference to the fields of a contact instance/body (see above). Supported fields are:
 * name - display name
@@ -415,6 +350,8 @@ Examples:
 `$du` - reference to destination uri (outbound proxy to be used for sending the request)
 If loose_route() returns TRUE a destination uri is set according to the first Route header.
 
+Alias: `$duri`
+
 > [!IMPORTANT]
 > It is R/W variable (you can assign values to it from routing logic)
 
@@ -443,6 +380,8 @@ If loose_route() returns TRUE a destination uri is set according to the first Ro
 
 `$fd` - reference to domain in URI of 'From' header
 
+Alias: `$from.domain`
+
 ### From display name - $fn
 
 `$fn` - reference to display name of 'From' header
@@ -455,9 +394,13 @@ If loose_route() returns TRUE a destination uri is set according to the first Ro
 
 `$fu` - reference to URI of 'From' header
 
+Alias: `$from`
+
 ### From URI username - $fU
 
 `$fU` - reference to username in URI of 'From' header
+
+Alias: `$from.user`
 
 ### OpenSIPS Log level - $log_level
 
@@ -466,7 +409,7 @@ This function is very helpful if you are tracing and debugging only a specific p
 
 Example of usage:
 
-```text
+```opensips
 log_level= -1 # errors only
 .....
 {
@@ -478,7 +421,7 @@ $log_level = NULL; # reset the log level of the current process to its default l
 }
 ```
 
-### SIP message buffer
+### SIP message buffer - $mb
 
 `$mb` - reference to SIP message buffer
 
@@ -496,8 +439,8 @@ $log_level = NULL; # reset the log level of the current process to its default l
 
 ### Message branch - $msg.branch
 
-`$msg.branch` - similar to [`$branch`](#branch), this variable is used for creating new message branches by writing into it the value of a SIP URI. By reading this variable, you get the SIP URI of the current/last added branch (or of the RURI branch if no additional branch was added so far).
-```text
+`$msg.branch` - this variable is used for creating new message branches by writing into it the value of a SIP URI. By reading this variable, you get the SIP URI of the current/last added branch (or of the RURI branch if no additional branch was added so far).
+```opensips
 
    # creates a new branch
    $msg.branch = "sip:new@domain.org";
@@ -508,13 +451,13 @@ $log_level = NULL; # reset the log level of the current process to its default l
 
 ### SIP URI of a message branch - $msg.branch.uri
 
-`$msg.branch.uri` -  gives read / write access over the SIP URI (as string) of an existing message branch. The message branches are created via [append_msg_branch()](Script-CoreFunctions.md#append_branch) core function or by various modules (like "registrar" module). The message branches are consumed by the TM "t_relay()" function (they are converted to TM branches).  
+`$msg.branch.uri` -  gives read / write access over the SIP URI (as string) of an existing message branch. The message branches are created via [append_msg_branch()](Script-CoreFunctions.md#append_msg_branchuri-qvalue-flags) core function or by various modules (like "registrar" module). The message branches are consumed by the TM "t_relay()" function (they are converted to TM branches).  
 
 The variable supports indexing - it starts from 0, meaning the RURI (or message) branch. The newly added branches will start from 1. So the branch 0 exists all
-the time, there is no need to creat it. If no index is specified, the current/last added branch (or of the RURI branch if no additional branch was added so far) will be considered. Negative values are also accepted, meaning indexing from the last branch ( -1 is the latest/higher branch) to the RURI branch. An ***** / ALL index will return the comma separated list with the values from all branches.  
+the time, there is no need to create it. If no index is specified, the current/last added branch (or of the RURI branch if no additional branch was added so far) will be considered. Negative values are also accepted, meaning indexing from the last branch ( -1 is the latest/higher branch) to the RURI branch. An ***** / ALL index will return the comma separated list with the values from all branches.  
 
 The variable can be used in REQUEST and FAILURE routes.
-```text
+```opensips
 
    # creates a new branch
    $msg.branch = "sip:new@domain.org";
@@ -525,36 +468,36 @@ The variable can be used in REQUEST and FAILURE routes.
 
 ```
 
-### Destiation URI of a message branch - $msg.branch.duri
+### Destination URI of a message branch - $msg.branch.duri
 
-`$msg.branch.duri` -  100% similar to [`$msg.branch.uri`](#msg.branch.uri), but operating with the Detination-URI value of the message branch.
+`$msg.branch.duri` -  100% similar to [`$msg.branch.uri`](#sip-uri-of-a-message-branch---msgbranchuri), but operating with the Destination-URI value of the message branch.
 
 ### PATH of a message branch - $msg.branch.path
 
-`$msg.branch.path` -  100% similar to [`$msg.branch.uri`](#msg.branch.uri), but operating with the PATH value of the message branch.
+`$msg.branch.path` -  100% similar to [`$msg.branch.uri`](#sip-uri-of-a-message-branch---msgbranchuri), but operating with the PATH value of the message branch.
 
 ### Q of a message branch - $msg.branch.q
 
-`$msg.branch.q` -  100% similar to [`$msg.branch.uri`](#msg.branch.uri), but operating with the Q value of the message branch.
+`$msg.branch.q` -  100% similar to [`$msg.branch.uri`](#sip-uri-of-a-message-branch---msgbranchuri), but operating with the Q value of the message branch.
 
 ### Flags of a message branch - $msg.branch.flags
 
-`$msg.branch.flags` -  100% similar to [`$msg.branch.uri`](#msg.branch.uri), but operating with list (comma separated) of per-branch flags (which are set for the branch).
+`$msg.branch.flags` -  100% similar to [`$msg.branch.uri`](#sip-uri-of-a-message-branch---msgbranchuri), but operating with list (comma separated) of per-branch flags (which are set for the branch).
 
 ### SIP socket of a message branch - $msg.branch.socket
 
-`$msg.branch.socket` -  100% similar to [`$msg.branch.uri`](#msg.branch.uri), but operating with the (forced) socket value of the message branch.
+`$msg.branch.socket` -  100% similar to [`$msg.branch.uri`](#sip-uri-of-a-message-branch---msgbranchuri), but operating with the (forced) socket value of the message branch.
 
 ### A flag of a message branch - $msg.branch.flag()
 
-`$msg.branch.flag()` -  similar to [`$msg.branch.uri`](#msg.branch.uri), but operating over a single branch flag (for the current branch).  
+`$msg.branch.flag()` -  similar to [`$msg.branch.uri`](#sip-uri-of-a-message-branch---msgbranchuri), but operating over a single branch flag (for the current branch).  
 
-The accepted values are 0 for FALSE, pozitive non-zero for TRUE. The returned values are 0 for FALSE and 1 for TRUE.  
+The accepted values are 0 for FALSE, positive non-zero for TRUE. The returned values are 0 for FALSE and 1 for TRUE.  
 
 > [!NOTE]
 > the */ALL index cannot be used here.
 
-```text
+```opensips
 
    # creates a new branch
    $msg.branch = "sip:new@domain.org";
@@ -568,14 +511,14 @@ The accepted values are 0 for FALSE, pozitive non-zero for TRUE. The returned va
 
 ### An attribute of a message branch - $msg.branch.attr()
 
-`$msg.branch.attr()` -  similar to [`$msg.branch.uri`](#msg.branch.uri), but operating over a single branch attribute (attached to the current branch).  
+`$msg.branch.attr()` -  similar to [`$msg.branch.uri`](#sip-uri-of-a-message-branch---msgbranchuri), but operating over a single branch attribute (attached to the current branch).  
 
 An attribute can have whatever name (no need to be pre-defined) and it can have a single value (at a time), string or integer.  
 
 > [!NOTE]
 > the */ALL index cannot be used here.
 
-```text
+```opensips
 
    # creates a new branch
    $msg.branch = "sip:new@domain.org";
@@ -587,12 +530,12 @@ An attribute can have whatever name (no need to be pre-defined) and it can have 
 
 ### Index of the last message branch - $msg.branch.last_idx
 
-`$msg.branch.last_idx()` -  returns the index of the last message branch. IF no additional branche were added, it will return 0, the index of the RURI branch. Then the returned value will get incremented with each append_msg_branch().  
+`$msg.branch.last_idx` -  returns the index of the last message branch. IF no additional branches were added, it will return 0, the index of the RURI branch. Then the returned value will get incremented with each append_msg_branch().  
 
 ### Message flag - $msg.flag
 
 `$msg.flag(flag_name)` - this variable provides read/write access to the value of a single certain message flag (identified by name). The values accepted for writing are 1 (set) and 0 (unset). The returned values are 1/"true" (set) and 0/"false" (unset).
-```text
+```opensips
 
   setflag("X");
   xlog("---- flag value is $msg.flag(X) \n");
@@ -604,7 +547,7 @@ An attribute can have whatever name (no need to be pre-defined) and it can have 
 ### Message is request  - $msg.is_request
 
 `$msg.is_request` - this variable tells if the current SIP message is a request or not. The returned values are 1/"true" (request) and 0/"false" (reply).
-```text
+```opensips
 
   xlog("---- this message is a request:  $msg.is_request \n");
   if ( $msg.is_request )
@@ -615,7 +558,7 @@ An attribute can have whatever name (no need to be pre-defined) and it can have 
 ### Message type - $msg.type
 
 `$msg.type` - this variable returns the type of the current  message. The returned values are "request" (request) or "reply" (reply).
-```text
+```opensips
 
   xlog("---- this message is a SIP $msg.type \n");
 
@@ -637,15 +580,21 @@ An attribute can have whatever name (no need to be pre-defined) and it can have 
 
 `$ou` - reference to request's original URI
 
+Alias: `$ouri`
+
 ### Username in SIP Request's original URI - $oU
 
 `$oU` - reference to username in request's original URI
+
+### Path header - $path
+
+`$path` - reference to the Path header body.
 
 ### Route parameter - $param
 `$param(idx)` - retrieves the parameters of the route. The index can be an integer, or a pseudo-variable (index starts at 1).  
 
 Example:
-```c
+```opensips
 
    route {
       ...
@@ -669,7 +618,7 @@ Example:
 `$proxy_protocol(field)` - retrieves Proxy Protocol information from the transport layer. Supported fields are: **src_ip**, **src_port**, **dst_ip**, **dst_port**, **af**  
 
 Example:
-```text
+```opensips
 
    route {
       ...
@@ -699,6 +648,8 @@ Example:
 ### Domain in SIP Request's URI - $rd
 
 `$rd` - reference to domain in request's URI
+
+Alias: `$ruri.domain`
 
 > [!IMPORTANT]
 > It is R/W variable (you can assign values to it routing script)
@@ -762,6 +713,8 @@ The variable receives an index, starting with 0, indicating the return value tha
 
 `$ru` - reference to request's URI
 
+Alias: `$ruri`
+
 > [!IMPORTANT]
 > It is R/W variable (you can assign values to it routing script)
 
@@ -769,6 +722,8 @@ The variable receives an index, starting with 0, indicating the return value tha
 ### Username in SIP Request's URI - $rU
 
 `$rU` - reference to username in request's URI
+
+Alias: `$ruri.user`
 
 > [!IMPORTANT]
 > It is R/W variable (you can assign values to it routing script)
@@ -786,7 +741,7 @@ The variable receives an index, starting with 0, indicating the return value tha
 
 `$sdp` - Read/Write reference to the SDP body of the current SIP message
 
-```bash
+```opensips
 
 # READ operation on the SIP msg SDP
 $sdp
@@ -806,10 +761,10 @@ $(<reply>sdp) = $var(rtpengine_sdp);
 
 `$sdp.line` - Read/Write reference to SDP body lines, with filtering support
 
-```bash
+```opensips
 
 # Fetch the 1st, 2nd, 3rd, etc. attribute line (starting with "a=")
-$sdp.line(a=)         # fetch first "a=" lin
+$sdp.line(a=)         # fetch first "a=" line
 $sdp.line(a=[0])      # equivalent, "a=" line at index 0
 $sdp.line(a=ptime[1]) # "a=ptime" line at index 1
 $sdp.line(a=[100])    # will likely yield NULL
@@ -833,7 +788,7 @@ $sdp.line(m=audio[1]/RTQ)         # NULL
 
 `$sdp.stream` - Read/Write reference to SDP body streams, with filtering support
 
-```bash
+```opensips
 
 # Within a desired stream, you can first filter by line...
 $sdp.stream(/a=ptime);         # first “a=ptime” line from Stream #0 ("m=", matching any stream type)
@@ -841,7 +796,7 @@ $sdp.stream([1]/a=ptime);      # first “a=ptime” line from Stream #1 ("m=", 
 $sdp.stream(audio[1]/a=ptime); # first “a=ptime” line from Audio Stream #1 ("m=audio...")
 $sdp.stream(a[1]/a=ptime);     # first “a=ptime” line from Audio Stream #1 ("m=a...")
 $sdp.stream(video[1]/a=nortpproxy) = NULL;  # delete entire line starting with "a=nortpproxy" from Video Stream #1
-$sdp.stream(v[1]/a=nortpproxy:/[0]) = “yes”;   # set first "a=nortpproxy" line "yes" value, in Video Stream #1
+$sdp.stream(v[1]/a=nortpproxy:/[0]) = "yes";   # set first "a=nortpproxy" line "yes" value, in Video Stream #1
 
 # ... and, additionally, by token
 $sdp.stream(video[1]/a=fmtp:115/bitrate=) = 48000; # set "bitrate=" to 48000, under "a=fmtp:115" line #0, as part of Video Stream #1
@@ -854,7 +809,7 @@ $sdp.stream(video[1]/a=fmtp:115/bitrate=) = 48000; # set "bitrate=" to 48000, un
 
 `$sdp.session` - Read/Write reference to the SDP body session, with filtering support
 
-```bash
+```opensips
 
 # Within the SDP session (i.e. until the 1st "m=" line), you can first filter by line...
 $sdp.session(a=ptime);            # 1st “a=ptime” line at Session level
@@ -873,7 +828,7 @@ $sdp.session(a=rtpmap/telephone-event\/) = "8000";  # Match 1st "a=rtpmap" line 
 
 This variable is especially useful in order to match a line having one specific attribute (e.g. "the rtpmap= line for PCMU codec"), then changing a different attribute within the same stream.  Example:
 
-```text
+```opensips
 
 $var(line_idx) = $sdp.stream.idx(video/a=fmtp/packetization-mode=); # locate index of first "a=fmtp" line, containing a packetization-mode= attribute
 $var(data) = $sdp.line([$var(line_idx)]); # grab the full line data
@@ -886,7 +841,9 @@ $sdp.line([$var(line_idx)]) = $var(data); # re-write the line
 
 `$si` - reference to IP source address of the message
 
-### Socket inbound - $socket_in
+Alias: `$src_ip`
+
+### Socket inbound - $socket_in / $socket_in(field)
 
 `$socket_in` - read-only variable to get the description (proto:ip:port format) of the inbound socket (used for receiving the message).
   
@@ -894,23 +851,23 @@ $sdp.line([$var(line_idx)]) = $var(data); # re-write the line
 The variable also offers detailed read-only access to various attributes/sub-fields of the socket, as  `$socket_in()`. The sub-fields of the socket are:
 * ip - the IP part of the socket
 * port - the port part of the socket
-* proto - the name of the protocol of the socket (as "UDP", "TPC", etc)
-* advertised_ip - the advertised IP part of the socket (it may be NULL if no advertising is done on this particlar socket)
-* advertised_port - the advertised part part of the socket (it may be NULL if no advertising is done on this particlar socket)
+* proto - the name of the protocol of the socket (as "UDP", "TCP", etc)
+* advertised_ip - the advertised IP part of the socket (it may be NULL if no advertising is done on this particular socket)
+* advertised_port - the advertised port part of the socket (it may be NULL if no advertising is done on this particular socket)
 * tag - the socket internal tag/alias 
 * anycast - if the socket uses an anycast IP or not (returns 0 if not, 1 if yes)
 * af - the address family of the socket's IP. It's value is "INET" if IPv4 or "INET6" if IPv6.
 For more details on the meaning of these sub-fields, please also read about the [socket definition](Script-CoreParameters.md#shm_memlog_size).
 
-### Socket outbound - $socket_out
+### Socket outbound - $socket_out / $socket_out(field)
 
-`$socket_out` - read-write variable for reading or changing the outbound socket of the message. Originally (before being written/changed) it will return the same socket description as [`$socket_in`](#socket_in) (the inbound socket will be used as outbound socket also). In addition, it also supports the `forced` sub-field, which returns a socket description only if a socket had been explicitly forced; thus, as opposed to the regular [`$socket_out`](#socket_ou), if no socket had explicitly been forced, the variable returns NULL.
+`$socket_out` - read-write variable for reading or changing the outbound socket of the message. Originally (before being written/changed) it will return the same socket description as [`$socket_in`](#socket-inbound---socket_in--socket_infield) (the inbound socket will be used as outbound socket also). In addition, it also supports the `forced` sub-field, which returns a socket description only if a socket had been explicitly forced; thus, as opposed to the regular [`$socket_out`](#socket-outbound---socket_out--socket_outfield), if no socket had explicitly been forced, the variable returns NULL.
 
   
 
-The variable also offers detailed read-only access to various attributes/sub-fields of the socket, as  `$socket_out()`**. It provides the same sub-fields as the [`$socket_in`](#socket_in) variable.**
+The variable also offers detailed read-only access to various attributes/sub-fields of the socket, as  `$socket_out()`. **It provides the same sub-fields as the [`$socket_in`](#socket-inbound---socket_in--socket_infield) variable.**
 
-```text
+```opensips
 
    $socket_out = "udp:11.11.11.11:5060";
    xlog("The outbound port is $socket_out(port)\n");
@@ -925,6 +882,8 @@ The variable also offers detailed read-only access to various attributes/sub-fie
 
 `$td` - reference to domain in URI of 'To' header
 
+Alias: `$to.domain`
+
 ### To display name - $tn
 
 `$tn` - reference to display name of 'To' header
@@ -937,9 +896,13 @@ The variable also offers detailed read-only access to various attributes/sub-fie
 
 `$tu` - reference to URI of 'To' header
 
+Alias: `$to`
+
 ### To URI Username - $tU
 
 `$tU` - reference to username in URI of 'To' header
+
+Alias: `$to.user`
 
 ### Formatted date and time - $time
 
@@ -971,18 +934,18 @@ The variable also offers detailed read-only access to various attributes/sub-fie
 
 ### SIP Headers - $hdr
 
-`$(hdr(name)[N])` - represents the body of the N-th header identified by 'name'. If [N] is omitted then the body of the first header is printed. The first header is got when N=0, for the second N=1, a.s.o. To print the last header of that type, use -1, no other negative values are supported now. No white spaces are allowed inside the specifier (before `}`, before or after `{`, [, ] symbols). When N='*', all headers of that type are printed.
+`$(hdr(name)[N])` - represents the body of the N-th header identified by 'name'. If [N] is omitted then the body of the first header is printed. The first header is retrieved when N=0, for the second N=1, and so on. To print the last header of that type, use -1, no other negative values are supported now. No white spaces are allowed inside the specifier (before `}`, before or after `{`, [, ] symbols). When N='*', all headers of that type are printed.
 
 The module should identify most of compact header names (the ones recognized by **OpenSIPS** which should be all at this moment), if not, the compact form has to be specified explicitly. It is recommended to use dedicated specifiers for headers (e.g., %ua for user agent header), if they are available -- they are faster.
 
-`$(hdr_name[N])` - returns the name of the N-th header. The first header name is obtained for N=0, the second for N=1, a.s.o. To print the last header name use -1, the second last -2 a.s.o. No white spaces are allowed inside the specifier (before `}`, before or after `{`, [, ] symbols). When N='*', all header names are printed.
+`$(hdr_name[N])` - returns the name of the N-th header. The first header name is obtained for N=0, the second for N=1, and so on. To print the last header name use -1, the second-to-last -2 and so on. No white spaces are allowed inside the specifier (before `}`, before or after `{`, [, ] symbols). When N='*', all header names are printed.
 
 `$(hdrcnt(name))` -- returns number of headers of type given by 'name'. Uses same rules for specifying header names as `$hdr(name)` above. Many headers (e.g., Via, Path, Record-Route) may appear more than once in the message. This variable returns the number of headers of a given type. 
 
 Note that some headers (e.g., Path) may be joined together with commas and appear as a single header line. This variable counts the number of header lines, not header values. 
 
 For message fragment below, `$hdrcnt(Path)` will have value 2 and `$(hdr(Path)[0])` will have value **`<a.com>`**:
-```text
+```opensips
 
     Path: <a.com>
     Path: <b.com>
@@ -990,7 +953,7 @@ For message fragment below, `$hdrcnt(Path)` will have value 2 and `$(hdr(Path)[0
 ```
 
 For message fragment below, `$hdrcnt(Path)` will have value 1 and `$(hdr(Path)[0])` will have value **`<a.com>`,`<b.com>`**:
-```text
+```opensips
 
     Path: <a.com>,<b.com>
 
@@ -1036,7 +999,7 @@ Note that both examples above are semantically equivalent but the variables take
 `$xlog_level` - allows to set /reset the xlog() logging level on per-process bases. Shortly said, you can read the verbosity level for the xlog() calls or you can temporary change the level per process bases.
 
 Example:
-```text
+```opensips
 
 xlog("current verbosity is $xlog_level \n");
 $xlog_level = L_DBG; # force local xlogging limit to DBG
@@ -1071,7 +1034,7 @@ Colors could be:
 
 A few examples of usage.
 
-```text
+```opensips
 
 ...
 route {

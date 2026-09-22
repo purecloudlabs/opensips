@@ -788,7 +788,8 @@ static void cgr_dlg_onwrite(struct dlg_cell *dlg, int type,
 			/* tag */
 			memcpy(p, &s->tag.len, sizeof(unsigned));
 			p += sizeof(unsigned);
-			memcpy(p, s->tag.s, s->tag.len);
+			if (s->tag.len)
+				memcpy(p, s->tag.s, s->tag.len);
 			p += s->tag.len;
 
 			/* acc */
@@ -1066,14 +1067,14 @@ static void cgr_tmcb_func(struct cell* t, int type, struct tmcb_params *ps)
 				BRANCH_BM_RST_ALL( si->branch_mask );
 			}
 		}
-		goto unref;
+		return;
 	}
 
 	/* we start a session only for successful calls */
 	dlg = cgr_dlgb.get_dlg();
 	if (!dlg) {
 		LM_ERR("cannot find dialog!\n");
-		goto unref;
+		return;
 	}
 	time(&ctx->answer_time);
 	list_for_each(l, ctx->sessions) {
@@ -1098,7 +1099,7 @@ static void cgr_tmcb_func(struct cell* t, int type, struct tmcb_params *ps)
 		si->flags |= CGRF_ENGAGED;
 	}
 
-	/* should have reffed engaged and unref tm, so we simply exit :D */
+	/* the tm ref is released by the callback release hook */
 	return;
 error:
 	/* TODO: should we close all the started sessions now? */
@@ -1107,8 +1108,6 @@ error:
 	if (run_dlg_api(&cgr_dlgb, terminate_dlg, NULL, dlg->h_entry, dlg->h_id, &terminate_str) >= 0)
 		return;
 	LM_ERR("cannot terminate the dialog!\n");
-unref:
-	cgr_ref_acc_ctx(ctx, -1, "tm");
 }
 
 static void cgr_cdr_cb(struct cell* t, int type, struct tmcb_params *ps)
@@ -1132,6 +1131,8 @@ static void cgr_cdr_cb(struct cell* t, int type, struct tmcb_params *ps)
 			continue;
 		cgr_cdr(ps->req, ctx, s, &dlg->callid);
 	}
+	if (cgr_restore_acc_ctx(dlg, NULL) < 0)
+		LM_ERR("cannot reset context %p in dialog %p\n", ctx, dlg);
 	cgr_ref_acc_ctx(ctx, -1, "engaged");
 }
 
@@ -1198,18 +1199,26 @@ void cgr_loaded_callback(struct dlg_cell *dlg, int type,
 			continue;
 
 		CGR_CTX_COPY(&tmp1.len, sizeof(unsigned), "tag.len");
-		if (!(tmp1.s = pkg_malloc(tmp1.len))) {
-			LM_ERR("cannot allocate account in ctx=%p len=%d!\n", ctx, tmp1.len);
-			goto internal_error;
+		if (tmp1.len) {
+			if (!(tmp1.s = pkg_malloc(tmp1.len))) {
+				LM_ERR("cannot allocate account in ctx=%p len=%d!\n", ctx, tmp1.len);
+				goto internal_error;
+			}
+			CGR_CTX_COPY(tmp1.s, tmp1.len, "tag.s");
+		} else {
+			tmp1.s = NULL;
 		}
-		CGR_CTX_COPY(tmp1.s, tmp1.len, "tag.s");
 
 		s = cgr_new_sess(&tmp1);
-		pkg_free(tmp1.s);
 		if (!s) {
-			LM_ERR("cannot allocate new session for tag %.*s\n", tmp1.len, tmp1.s);
+			LM_ERR("cannot allocate new session for tag %.*s\n",
+				tmp1.len, tmp1.s ? tmp1.s : "");
+			if (tmp1.s)
+				pkg_free(tmp1.s);
 			goto internal_error;
 		}
+		if (tmp1.s)
+			pkg_free(tmp1.s);
 		list_add(&s->list, ctx->sessions);
 
 		CGR_CTX_COPY(&tmp1.len, sizeof(unsigned), "acc.len");
@@ -1430,8 +1439,11 @@ static void cgr_dlg_callback(struct dlg_cell *dlg, int type,
 			}
 		}
 	}
-	if (!registered)
+	if (!registered) {
+		if (cgr_restore_acc_ctx(dlg, NULL) < 0)
+			LM_ERR("cannot reset context %p in dialog %p\n", ctx, dlg);
 		cgr_ref_acc_ctx(ctx, -1, "dialog");
+	}
 }
 
 int cgr_acc_terminate(json_object *param, json_object **ret)

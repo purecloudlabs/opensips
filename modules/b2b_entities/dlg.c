@@ -65,6 +65,18 @@ struct b2b_callback *b2b_trig_cbs, *b2b_recv_cbs;
 
 static str storage_cap = str_init("b2b-storage-bin");
 
+static void b2b_free_record(b2b_dlg_t *dlg, b2b_table htable);
+
+/* called with the entity hash lock held */
+static void b2b_dlg_unref(b2b_dlg_t *dlg, b2b_table htable,
+		unsigned int hash_index)
+{
+	if (--dlg->ref || !dlg->deleted)
+		return;
+
+	b2b_delete_record(dlg, htable, hash_index);
+}
+
 dlg_leg_t* b2b_add_leg(b2b_dlg_t* dlg, struct sip_msg* msg, str* to_tag);
 
 static int b2b_get_leg_index(b2b_dlg_t *dlg, const str *to_tag)
@@ -875,6 +887,7 @@ int b2b_prescript_f(struct sip_msg *msg, void *uparam)
 	int ua_ev_type = -1;
 	dlg_leg_t *leg = NULL;
 	int leg_idx = -1;
+	int dlg_ref = 0;
 
 	storage.buffer.s = NULL;
 
@@ -1271,8 +1284,10 @@ logic_notify:
 		}
 
 		if (table == server_htable) {
-			b2b_key = to_tag;
-			b2b_get_server_entity_key(&b2b_key);
+			if (method_value != METHOD_CANCEL) {
+				b2b_key = to_tag;
+				b2b_get_server_entity_key(&b2b_key);
+			}
 		}
 	}
 
@@ -1510,6 +1525,10 @@ run_cb:
 	dlg_state = dlg->state;
 
 	ua_flags = dlg->ua_flags;
+	if (!(ua_flags & UA_FL_IS_UA_ENTITY) && b2b_cback) {
+		dlg->ref++;
+		dlg_ref = 1;
+	}
 
 	B2BE_LOCK_RELEASE(table, hash_index);
 
@@ -1545,6 +1564,12 @@ run_cb:
 	}
 
 	B2BE_LOCK_GET(table, hash_index);
+	if (dlg_ref && dlg->deleted) {
+		current_dlg = 0;
+		b2b_dlg_unref(dlg, table, hash_index);
+		B2BE_LOCK_RELEASE(table, hash_index);
+		goto scb_drop_msg;
+	}
 
 	if(dlg_state>B2B_CONFIRMED)
 	{
@@ -1557,6 +1582,9 @@ run_cb:
 		if(!aux_dlg)
 		{
 			LM_DBG("Record not found anymore\n");
+			current_dlg = 0;
+			if (dlg_ref)
+				b2b_dlg_unref(dlg, table, hash_index);
 			B2BE_LOCK_RELEASE(table, hash_index);
 			goto scb_drop_msg;
 		}
@@ -1567,14 +1595,22 @@ run_cb:
 			b2b_ev = B2B_EVENT_ACK;
 
 			if (b2b_run_cb(dlg, hash_index, etype, B2BCB_TRIGGER_EVENT, b2b_ev,
-				&storage, serialize_backend) != 0)
+				&storage, serialize_backend) != 0) {
+				current_dlg = 0;
+				if (dlg_ref)
+					b2b_dlg_unref(dlg, table, hash_index);
 				goto done;
+			}
 		} else if (dlg_state == B2B_TERMINATED) {
 			b2b_ev = B2B_EVENT_DELETE;
 
 			if (b2b_run_cb(dlg, hash_index, etype, B2BCB_TRIGGER_EVENT, b2b_ev,
-				&storage, serialize_backend) != 0)
+				&storage, serialize_backend) != 0) {
+				current_dlg = 0;
+				if (dlg_ref)
+					b2b_dlg_unref(dlg, table, hash_index);
 				goto done;
+			}
 		}
 	}
 
@@ -1584,6 +1620,8 @@ run_cb:
 		if(b2be_db_update(dlg, etype) < 0)
 			LM_ERR("Failed to update in database\n");
 	}
+	if (dlg_ref)
+		b2b_dlg_unref(dlg, table, hash_index);
 
 	B2BE_LOCK_RELEASE(table, hash_index);
 
@@ -1891,6 +1929,7 @@ int _b2b_send_reply(b2b_dlg_t* dlg, b2b_rpl_data_t* rpl_data)
 	int b2b_ev = -1;
 	char indexed_to_tag_buf[B2B_MAX_KEY_SIZE + 1 + INT2STR_MAX_LEN];
 	dlg_leg_t *leg = NULL;
+	int contact_hdr_params_len;
 
 	if(et == B2B_SERVER)
 	{
@@ -2123,9 +2162,10 @@ int _b2b_send_reply(b2b_dlg_t* dlg, b2b_rpl_data_t* rpl_data)
 	if (b2b_ev != -1 && storage.buffer.s)
 		bin_free_packet(&storage);
 
+	contact_hdr_params_len = rpl_data->contact_hdr_params ?
+		rpl_data->contact_hdr_params->len : 0;
 	if((extra_headers?extra_headers->len:0) + 14 + local_contact.len
-			+ 20 + CRLF_LEN > BUF_LEN +
-			(rpl_data->contact_hdr_params?rpl_data->contact_hdr_params->len:0))
+			+ contact_hdr_params_len + 20 + CRLF_LEN > BUF_LEN)
 	{
 		LM_ERR("Buffer overflow!\n");
 		goto error;
@@ -2198,8 +2238,10 @@ int b2b_send_reply(b2b_rpl_data_t* rpl_data)
 
 void b2b_delete_record(b2b_dlg_t* dlg, b2b_table htable, unsigned int hash_index)
 {
-	str reply_text = str_init("Request Timeout");
-	struct to_body *pto;
+	if (dlg->ref) {
+		dlg->deleted = 1;
+		return;
+	}
 
 	if(dlg->prev == NULL)
 	{
@@ -2212,6 +2254,14 @@ void b2b_delete_record(b2b_dlg_t* dlg, b2b_table htable, unsigned int hash_index
 
 	if(dlg->next)
 		dlg->next->prev = dlg->prev;
+
+	b2b_free_record(dlg, htable);
+}
+
+static void b2b_free_record(b2b_dlg_t *dlg, b2b_table htable)
+{
+	str reply_text = str_init("Request Timeout");
+	struct to_body *pto;
 
 	if(htable == server_htable && dlg->tag[CALLEE_LEG].s)
 		shm_free(dlg->tag[CALLEE_LEG].s);
@@ -2303,6 +2353,10 @@ void b2b_entity_delete(enum b2b_entity_type et, str* b2b_key,
 	if(dlg== NULL)
 	{
 		LM_ERR("No dialog found\n");
+		B2BE_LOCK_RELEASE(table, hash_index);
+		return;
+	}
+	if (dlg->deleted) {
 		B2BE_LOCK_RELEASE(table, hash_index);
 		return;
 	}
@@ -3921,7 +3975,7 @@ dummy_reply:
 				}
 				else
 				{
-					b2b_dlginfo_t dlginfo;
+					b2b_dlginfo_t *dlginfo;
 					b2b_add_dlginfo_t add_infof= dlg->add_dlginfo;
 					int confirmed_leg_id = b2b_get_leg_index(dlg, &to_tag);
 
@@ -3936,9 +3990,22 @@ dummy_reply:
 					if (confirmed_leg_id >= 0)
 						leg->id = confirmed_leg_id;
 					dlg->tag[CALLEE_LEG] = leg->tag;
-					dlginfo.fromtag = to_tag;
-					dlginfo.callid = dlg->callid;
-					dlginfo.totag = dlg->tag[CALLER_LEG];
+
+					/* Deep-copy dialog info while holding the hash lock.
+					 * The previous code did shallow copies of dlg->callid
+					 * and dlg->tag[CALLER_LEG] (pointers into shm) and
+					 * used them after releasing the lock — a TOCTOU race
+					 * where another thread could modify the shm strings
+					 * between size calculation and memcpy, causing a
+					 * heap buffer overflow. */
+					dlginfo = b2b_new_dlginfo(&dlg->callid,
+						&to_tag, &dlg->tag[CALLER_LEG]);
+					if(dlginfo == NULL)
+					{
+						LM_ERR("Failed to create dlginfo\n");
+						goto error;
+					}
+
 					dlg->state = B2B_CONFIRMED;
 
 					current_dlg = dlg;
@@ -3954,11 +4021,13 @@ dummy_reply:
 					B2BE_LOCK_RELEASE(htable, hash_index);
 
 					if(add_infof && add_infof(logic_key.s?&logic_key:0, b2b_key,
-							etype,&dlginfo, b2b_param)< 0)
+							etype, dlginfo, b2b_param)< 0)
 					{
 						LM_ERR("Failed to add dialoginfo\n");
+						shm_free(dlginfo);
 						goto error1;
 					}
+					shm_free(dlginfo);
 
 					goto done1;
 				}
@@ -4162,9 +4231,11 @@ int b2breq_complete_ehdr(str* extra_headers, str *client_headers,
 	static char buf[BUF_LEN];
 	static struct sip_msg foo_msg;
 	str str_empty = str_init("");
+	int ct_hdr_params_len;
 
+	ct_hdr_params_len = ct_hdr_params ? ct_hdr_params->len : 0;
 	if(((extra_headers?extra_headers->len:0) + 14 + local_contact->len +
-		(client_headers?client_headers->len:0))> BUF_LEN)
+		ct_hdr_params_len + (client_headers?client_headers->len:0))> BUF_LEN)
 	{
 		LM_ERR("Buffer too small\n");
 		return -1;

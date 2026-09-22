@@ -1,3 +1,1685 @@
+=========================== Release 4.0.2 ==============================
+
+2026-09-08  Liviu Chircu  <liviu@opensips.org>
+        * [c9b24db828] :
+
+        Module docs: Fix duplicate-link constructions
+
+        (cherry picked from commit 08e7f1c37affee8560d24db4efde764b864a670b)
+
+
+2026-09-08  Liviu Chircu  <liviu@opensips.org>
+        * [839853aa60] :
+
+        Module docs: Improve various link labels
+
+        - Add missing "_" in various labels
+        - Functions now include "()" suffix
+        - Parameters, pseudo-variables, events, statistics, transformations,
+            and MI commands use exact exported spelling.
+
+        (cherry picked from commit 566e6d6ae220330cb4f7b94ac633e89774820a2d)
+
+
+2026-09-07  Norm Brandinger  <n.brandinger@gmail.com>
+        * [1c43dd50ee] :
+
+        stir_shaken: strip RFC 4904 user parameters from telephone numbers (#3904)
+
+        get_orig_tn_from_msg()/get_dest_tn_from_msg() take the originating and
+        destination telephone numbers straight from parse_uri()'s .user field. When a
+        From/To/P-Asserted-Identity URI carries RFC 4904 parameters in the userinfo
+        part, e.g.
+
+            sip:+33123456789;tgrp=grp1;trunk-context=example.com@host
+
+        parse_uri() folds the whole userinfo into .user (the still_at_user backtrack in
+        parser/parse_uri.c) and leaves .user_param empty, so the parameters stay glued
+        to the number, the E.164 check in check_passport_phonenum() fails, and
+        stir_shaken_verify() errors out unless orig_tn/dest_tn are pre-cleaned from
+        script.
+
+        Add trim_user_params() in parser/parse_uri.c (declared in parse_uri.h) so it
+        can be reused from other modules/parts, and call it from both TN extraction
+        sites. It trims the userinfo str in place at the first ';' via the length-based
+        q_memchr() core util, so it is binary-safe and a no-op for params-free userinfo
+        (e.g. tel: URIs, where parse_uri() already splits the params off into
+        .host/params). No change for URIs without user parameters.
+
+        Unit tests (parser/test/test_parser.c, test_trim_user_params) pin the contract:
+        RFC 4904 params stripped, param-less userinfo untouched, cut at the first of
+        several ';', leading/bare ';' -> empty, empty/NULL-safe, idempotency, in-place
+        (.s unchanged), and that backslashes, special characters and an embedded NUL
+        are preserved up to the first ';'. An end-to-end case composes the real
+        parse_uri() with trim_user_params() to pin the fold-into-.user premise.
+        make test module=core: 1..2564, all ok.
+
+        Based on the patch proposed by @StellaTeam in #3904.
+
+        Closes #3904
+
+        (cherry picked from commit e6686119de2bbe1e672943437978618efdf2ebd4)
+
+
+2026-09-07  Bogdan Andrei IANCU  <bogdan@opensips.org>
+        * [4143afd2fb] :
+
+        Merge pull request #4113 from kvwake/fix/tm-on_reply-shm-double-free
+
+        tm: fix shm double-free of script-route refs on shared transactions
+        (cherry picked from commit ee8abced1292bddfcfd155d74033e3af863dc2bd)
+
+
+2026-09-07  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [dc573ad742] :
+
+        [parser] fix negative len computation of a body part when...
+
+        ... a multipart body part contains headers and a header/body separator but no actual body content
+        Reported by @sandrogauci from EnbleSecurity
+        Completing bd831dad17
+
+        (cherry picked from commit 6c6731966795aadb9e610f677de7d972353069a4)
+
+
+2026-09-07  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [b68c13842d] :
+
+        fix potential heap/buffer overflow in parsing multi-parts body
+
+        https://github.com/OpenSIPS/opensips/security/advisories/GHSA-hx7p-6j27-gjpv
+        Discovered by Anthropic and manually confirmed by Paweł Płatek of Trail of Bits.
+
+        (cherry picked from commit bd831dad1742aca8471c5a5c709286a79db8fb97)
+
+
+2026-09-07  Razvan Crainea  <razvan@opensips.org>
+        * [3282dc3cf4] :
+
+        b2b_entities: include request Contact params in bounds check
+
+        Account for Contact header parameter bytes when checking the fixed request extra-header buffer in b2breq_complete_ehdr().
+
+        Fixes GHSA-vq5g-56jm-839g
+
+        Reported-by: TristanInSec
+        (cherry picked from commit cb0dcbb9042b5635da9437a2cddb258b966e5e56)
+
+
+2026-09-07  Razvan Crainea  <razvan@opensips.org>
+        * [6296f33df1] :
+
+        b2b_entities: fix reply Contact params bounds check
+
+        Fixes GHSA-5fj6-58f4-75r3
+
+        Reported-by: TristanInSec
+        (cherry picked from commit bfc4360989605f9048cc2a6789b74e2b8c22d945)
+
+
+2026-09-07  Razvan Crainea  <razvan@opensips.org>
+        * [728ed6fc51] :
+
+        xmpp: reject overlong SIP-to-XMPP URIs early
+
+        Check the converted SIP-to-XMPP URI length before formatting it
+
+        Fixes GHSA-hwv5-237j-jq7m
+
+        Reported-by: TristanInSec
+        (cherry picked from commit d3620b9ba28867459d3ea9f74094355ce56145c8)
+
+
+2026-09-07  Razvan Crainea  <razvan@opensips.org>
+        * [352def5438] :
+
+        sip_i: validate parsed ISUP parameter lengths
+
+        Fixes GHSA-qc7q-vrx3-3j4h
+
+        Reported-by: TristanInSec
+        (cherry picked from commit 635ce1737eb27b12a4a4f12a1f0a1b6a4ee2f92d)
+
+
+2026-09-07  Razvan Crainea  <razvan@opensips.org>
+        * [a8ad43e032] :
+
+        proto_msrp: reject invalid To-Path header order
+
+        Require To-Path and From-Path to be the first MSRP headers in that
+        order, and guard the forwarding path against negative header span copies
+        before moving To-Path URLs into From-Path.
+
+        Fixes GHSA-qj7m-hgmv-pfrv
+
+        Reported-by: SecBuddyF KeenLab Tencent (CodeBuddy Security) <tinkerzf@gmail.com>
+        (cherry picked from commit adc1e4e5681ed8f1024ffb4b4cabaab6c2714d73)
+
+
+2026-09-07  Razvan Crainea  <razvan@opensips.org>
+        * [739ceb11a0] :
+
+        domainpolicy: keep DURI buffer length in sync
+
+        Fixes GHSA-4vg3-hjjc-xv58
+
+        Reported-by: SecBuddyF KeenLab Tencent (CodeBuddy Security) <tinkerzf@gmail.com>
+        (cherry picked from commit 2d842e2e60e774cc9c2ab3c5dff7a6b63898948c)
+
+
+2026-09-07  Razvan Crainea  <razvan@opensips.org>
+        * [92c254efe7] :
+
+        xmpp: prevent unauthenticated message URI overflow
+
+        Require the component handshake or server dialback validation before accepting inbound XMPP message stanzas.
+
+        Fixes GHSA-5gm5-wj62-p234
+
+        Reported-by: SecBuddyF KeenLab Tencent (CodeBuddy Security) <tinkerzf@gmail.com>
+        (cherry picked from commit ec24165bc25fa462e08cdb33ee8071f58e166d36)
+
+
+2026-09-07  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [4bd1f73a36] :
+
+        [sipmsgops] add note for has_body_part() behavior
+
+        Related #3900
+        Thanks to @securepii-dev
+
+        (cherry picked from commit 5a7f3a63fe39de0f58f373d9b42aa218498a2f17)
+
+
+2026-09-07  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [6b12459dfa] :
+
+        [presence_xml] fix bogus dependency to xcap module
+
+        Even if force_active is ON (so no xcap rules are needed), the module still required binding to the xcap module.
+        Now, the dependency to xcap module is conditioned by the setting of the `force_active` and `pidf_manipulation` modparams
+
+        (cherry picked from commit 371fe181c4068ca3a6f1ca6c688d83e39920f0f1)
+
+
+2026-09-04  Bogdan Andrei IANCU  <bogdan@opensips.org>
+        * [aa84e2b1c9] :
+
+        Merge pull request #4241 from denys-i-didww/docs/parameter-names-not-exported
+
+        docs: correct parameter names that the modules do not export [skip ci]
+        (cherry picked from commit 6055df383680693ddf3409849658821e1185524d)
+
+
+2026-09-04  Liviu Chircu  <liviu@opensips.org>
+        * [917eda33ef] :
+
+        stir_shaken: Avoid duplicate cleanup on Identity parse errors
+
+        Make get_parsed_identity() the sole owner of the parsed_identity
+        structure and its members, including when parsing fails.  This preserves
+        the unsupported-ppt cleanup added in 80d48a9e4 while keeping all
+        rejected Identity headers on a single cleanup path.
+
+        Credits to Nick Altmann for reporting the issue and suggesting a fix!
+
+        (cherry picked from commit 0fb49d8ec486b63f02b56d2ef8d2edcdd7edbcb5)
+
+
+2026-09-04  Bogdan Andrei IANCU  <bogdan@opensips.org>
+        * [e0ede80fd8] :
+
+        Merge pull request #4239 from denys-i-didww/docs/uac-rr-dependency-is-not-conditional
+
+        uac: the RR dependency is not conditional on restore_mode
+        (cherry picked from commit 753818ad943db6568fbd4681fc6354e03bcb7672)
+
+
+2026-09-03  Bogdan Andrei IANCU  <bogdan@opensips.org>
+        * [fea8f139c0] :
+
+        Merge pull request #4121 from Lt-Flash/fix/log-level-before-fork
+
+        core: do not crash setting the log level before the process table exists
+        (cherry picked from commit 33f6bdf2e2214f7162be8d01ec7372fe52219515)
+
+
+2026-09-03  Bogdan Andrei IANCU  <bogdan@opensips.org>
+        * [cb914f213c] :
+
+        Merge pull request #4235 from denys-i-didww/docs/fix-compression-parameter-name
+
+        compression: fix the documented parameter name and example
+        (cherry picked from commit 55f63f9927091281ee5cfc3b3cbd381664a6b52f)
+
+
+2026-09-03  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [084a5a86b6] :
+
+        remove duble declaration of external var
+
+        (better alternative to 379b4b68db5bde975fbc19aa1b9c8fdaeac983f7)
+        Related to 92363ab7de5885f0f50fa8002d1d5208cd182673
+
+        (cherry picked from commit f5f31387b27729e96beb63758cf99a4bb7643c9a)
+
+
+2026-09-03  Bogdan Andrei IANCU  <bogdan@opensips.org>
+        * [2d30904eea] :
+
+        Merge pull request #4221 from Lt-Flash/fix/io-wait-check-io-data
+
+        io_wait: run the fd-map consistency check only with EXTRA_DEBUG
+
+        (cherry picked from commit 92363ab7de5885f0f50fa8002d1d5208cd182673)
+
+
+2026-09-03  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [394be9e32f] :
+
+        fix critical log in tracing when the xlog level in out of range
+
+        The convention is to have ALERT for whatever lower than ALERT and DBG for whatever above DBG.
+        Closes #4236
+        Reported by @lardht
+
+        (cherry picked from commit ba0eded8682e056c872755e7f2209192d1ede311)
+
+
+2026-09-03  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [28495a105e] :
+
+        [tm] fix mem leak (lumps) upon async and sync jumps
+
+        If you do a 2 level async() op, where the first is actually handled in async mode while the second is in sync mode, the memory of added lumps will leak.
+
+        Fixes #3914
+        Credits for the report goes to @vadimd333
+
+        (cherry picked from commit d5d1760ff135dbfcd6f48c15a91d1fd6bdc2c858)
+
+
+2026-09-01  Razvan Crainea  <razvan@opensips.org>
+        * [aff1540e1a] :
+
+        proto_hep: free decompressed HEPv3 payloads
+
+        When compressed_payload is enabled, unpack_hepv3() replaces
+        payload_chunk.data with pkg memory returned by decompression, but the
+        receive path never releases it.
+
+        Track ownership of decompressed payload buffers and release them when
+        the HEP context is freed. Also release owned payloads if a later payload
+        chunk or sipcapture mutation replaces or deletes the payload.
+
+        References: GHSA-3w47-rhcp-gpw5
+
+        Reported-by: Bin Luo(@1121984919) from University of Electronic Science and Technology of China (UESTC)
+        (cherry picked from commit aeae55374428b72069286a75f194eaf11692c0f9)
+
+
+2026-09-01  Razvan Crainea  <razvan@opensips.org>
+        * [5ba06bf2e7] :
+
+        identity: validate Identity header copy length
+
+        References: GHSA-f7wm-6cwv-4q46
+
+        Reported-by: Bin Luo (@1121984919) from University of Electronic Science and Technology of China (UESTC)
+        (cherry picked from commit c599b4d1ed4e3e12486f634a85035b453bf5166b)
+
+
+2026-09-01  Razvan Crainea  <razvan@opensips.org>
+        * [0fc94bfa69] :
+
+        net: prevent duplicate TCP read jobs - completion
+
+
+2026-09-01  Razvan Crainea  <razvan@opensips.org>
+        * [a94a500d53] :
+
+        net: prevent duplicate TCP read jobs
+
+        Closes #4232
+
+        Many thanks to @Lt-Flash for the detailed report, root cause analysis
+        and proposed fix.
+
+        (cherry picked from commit d63497ba5cdd87ae6dbe2247ecf463861946511b)
+
+
+2026-08-31  Razvan Crainea  <razvan@opensips.org>
+        * [75341438c4] :
+
+        cgrates: fix empty session tag persistence
+
+        Many thanks to @kimaiden1984-boop for the report.
+
+        Closes #4131
+
+        (cherry picked from commit 416680f97a032c029c0b00df5fb0b9aed5e103c2)
+
+
+2026-08-27  Razvan Crainea  <razvan@opensips.org>
+        * [6d9c295411] :
+
+        rtpproxy: prevent DTMF tag OOB read
+
+        Reject oversized Call-ID values before using them to build the DTMF tag.
+
+        Fixes GHSA-qv9x-v8jq-434w
+
+        Reported-by: Nikola Kojic (@nikolakojic-rasit on GitHub)
+        (cherry picked from commit 61ae3165203824c59c4bd6724502d31018d6d46f)
+
+
+2026-08-26  Razvan Crainea  <razvan@opensips.org>
+        * [ab5249a13c] :
+
+        event_rabbitmq: force close broken publish streams
+
+        Avoid graceful AMQP close writes after publish errors.
+
+        Many thanks to @jarvisathome for the report.
+
+        Closes #4224
+
+        (cherry picked from commit 9d0f95edd36cb5c02bc104daba5bc564288e2c2f)
+
+
+2026-08-26  Razvan Crainea  <razvan@opensips.org>
+        * [72393a43a0] :
+
+        event_rabbitmq: fix persistent event publishing
+
+        Initialize props structure to avoid using dangling info.
+
+        Many thanks to @jarvisathome for the report.
+
+        Closes #4223
+
+        (cherry picked from commit f92a4329a82dd603771c2876b0318137bd1fb593)
+
+
+2026-08-26  Razvan Crainea  <razvan@opensips.org>
+        * [b9a1844490] :
+
+        packaging/rpm: fix EL10 mysql module dependency
+
+        Many thanks to @rwilkinson87 for the report.
+
+        Closes #4225
+
+        (cherry picked from commit 68e5725c916a873b078f531f435d49ea94a694b8)
+
+
+2026-08-24  Razvan Crainea  <razvan@opensips.org>
+        * [cef86c4c8b] :
+
+        sngtc: validate SDP connection IP length
+
+        Reject SDP connection address tokens that cannot fit in the IPv4 conversion buffer before copying them for inet_pton(). This keeps transcoding session setup from writing past the stack buffer while parsing untrusted SDP.
+
+        Addresses GHSA-6pjc-3x9r-mp8h.
+
+        Reported by zx (Jace, @manus-use).
+
+        (cherry picked from commit 87ec59696a6f606f468093f472d9b77762cda800)
+
+
+2026-08-20  Răzvan Crainea  <razvan@opensips.org>
+        * [5887278570] :
+
+        Merge pull request #4219 from dariusstefan/master
+
+        ci: do not publish documentation on tag pushes
+        (cherry picked from commit 8f4f1e1b4015a52f88953e6c16758f800bd0e9fb)
+
+
+2026-08-19  Razvan Crainea  <razvan@opensips.org>
+        * [f63fd4c341] :
+
+        ci: trigger package builds on tags [skip ci]
+
+        (cherry picked from commit 4bbf566a26f9aa33053def460e3157b5228e2c50)
+
+
+=========================== Release 4.0.1 ==============================
+
+2026-08-19  Răzvan Crainea  <razvan@opensips.org>
+        * [1ddabc36cc] :
+
+        Merge pull request #4218 from gmaruzz/fix/tcp-dispatch-msg-null-msg-check
+
+        net_tcp: reject NULL message buffer with non-zero length in tcp_dispatch_msg()
+
+        (cherry picked from commit 4e8972dda429b7029f411a0e48a0d04226e36a18)
+
+
+2026-08-18  Razvan Crainea  <razvan@opensips.org>
+        * [79d681671a] :
+
+        msg_translator: handle empty multipart bodies
+
+        Use a derived zero-length body range when a received body part has no body pointer, keeping multipart reassembly from doing pointer arithmetic on NULL.
+
+        Security advisory: ANT-2026-CKSJ0NQF
+
+        Security advisory: GHSA-wrjf-686w-4mvp
+
+        Thanks to Claude and David Korczynski from Ada Logics for the report.
+
+        (cherry picked from commit 8c5c7ba7be79349d72877c59cf5a26e97a747c2c)
+
+
+2026-08-18  Yury Kirsanov  <yury@kfi.net.au>
+        * [f16b485af8] :
+
+        modules/mathops: keep the feature-test macros defined for musl libc
+
+        Both mathops sources define _XOPEN_SOURCE/_GNU_SOURCE for <math.h>, then
+        undefine them again before including the OpenSIPS headers - the same
+        pattern lib/url.c had.
+
+        musl re-evaluates the feature-test macros in every system header rather
+        than only on the first one, and its features.h turns on the permissive
+        default set only when no source macro is defined at all.  Once the block
+        above has defined them, undefining them leaves the translation unit with
+        none of them set, so <time.h> stops declaring ctime_r() and dprint.h no
+        longer compiles:
+
+          Compiling mathops.c
+          ../../parser/../dprint.h:204:9: error: implicit declaration of function
+              'ctime_r'; did you mean 'ctime'?
+
+        Since gcc 14 an implicit declaration is an error, so this is a hard build
+        failure of the module on Alpine.  Keep the macros defined for the rest of
+        each file, as lib/url.c now does.
+
+        (cherry picked from commit 5abccf465faebaa76405f983d6b54c2d75d8892b)
+
+
+2026-08-18  Yury Kirsanov  <yury@kfi.net.au>
+        * [84ac3d97c7] :
+
+        lib/url.c: keep _GNU_SOURCE defined for musl libc builds
+
+        url.c defined _GNU_SOURCE only around <stdio.h>/<string.h> and then
+        undefined it again before including ut.h. On musl libc the feature-test
+        macros are re-evaluated by every system header, so once _GNU_SOURCE is
+        removed the later <time.h> (pulled in through ut.h and dprint.h) no
+        longer exposes clock_gettime(), CLOCK_REALTIME or ctime_r(). The core
+        then fails to compile on Alpine/musl with gcc 15:
+
+            lib/../mem/../dprint.h:204: implicit declaration of 'ctime_r'
+            lib/../ut.h:1401: implicit declaration of 'clock_gettime'
+            lib/../ut.h:1401: 'CLOCK_REALTIME' undeclared
+
+        glibc is unaffected: it latches internal __USE_* macros at the first
+        header inclusion, which the later #undef does not clear.
+
+        Keep _GNU_SOURCE defined for the whole translation unit, matching how
+        other core files (io_wait.h, transformations.c) enable it.
+
+        (cherry picked from commit 36b28c72bb17d1b11babfabac664d85338b26ef8)
+
+
+2026-08-18  Razvan Crainea  <razvan@opensips.org>
+        * [f43752ea5d] :
+
+        siprec: fix dialog callback ref ownership
+
+        Set SIPREC_DLG_CBS when the dialog termination callback takes ownership of the session ref.
+
+        Thanks to @kimaiden1984-boop for the report.
+
+        Closes #4132
+
+        (cherry picked from commit 53fa21afe140283aafc1df5277f7dcd1e898b2ee)
+
+
+2026-08-17  Razvan Crainea  <razvan@opensips.org>
+        * [e7950dd884] :
+
+        pua: reject overlong publish ETags
+
+        Reject too long SIP-ETag values before storing them from PUBLISH replies
+
+        Security advisory: GHSA-5w5j-xrr5-wr49
+
+        Thanks to zx (Jace) @manus-use on GitHub for the report.
+
+        (cherry picked from commit e12c990d2587e92814fafecb53dc54d7865ef8c5)
+
+
+2026-08-17  Razvan Crainea  <razvan@opensips.org>
+        * [72e9c4325e] :
+
+        mediaproxy: bound SDP connection line insertion
+
+        Avoiding unsafe strncat() appends and check whether buffer fits.
+
+        Security advisory: GHSA-ggff-j9pg-p572
+
+        Thanks to zx (Jace) @manus-use on GitHub for the report.
+
+        (cherry picked from commit 0893129568e27d306163f8318617a14f61aeef8b)
+
+
+2026-08-17  Razvan Crainea  <razvan@opensips.org>
+        * [d7db34cc38] :
+
+        enum: reject overlong ISN R-URI users
+
+        Reject R-URI user values that cannot fit isn_query()'s buffer.
+
+        Security advisory: GHSA-x5hj-r293-vpw4
+
+        Thanks to zx (Jace) @manus-use on GitHub for the report.
+
+        (cherry picked from commit abd0bff062f5a19465bb52d400c3743be9fc6411)
+
+
+2026-08-17  Razvan Crainea  <razvan@opensips.org>
+        * [eea545e97d] :
+
+        xcap: reject overlong SIP URI normalization input
+
+        Reject invalid or oversized XCAP-provided SIP URIs before unescaping.
+
+        Security advisory: GHSA-prfg-gmxf-8v59
+
+        Thanks to zx (Jace) @manus-use on GitHub for the report.
+
+        (cherry picked from commit c06d9812e8954b541e180cad13f9844604401a15)
+
+
+2026-08-13  Liviu Chircu  <liviu@opensips.org>
+        * [9792b48843] :
+
+        stir_shaken: Fix PKG memleak on non ppt=shaken
+
+        Fixes #4215
+
+        (cherry picked from commit 80d48a9e457ef1898c96ee83a1914c9c61aefd80)
+
+
+2026-08-13  Bogdan Andrei IANCU  <bogdan@opensips.org>
+        * [d5cc4a3ccc] :
+
+        Merge pull request #4213 from dariusstefan/4.0
+
+        docs: unify the DB module README titles
+
+2026-08-13  Stefan Darius  <darius.stefan@opensips.org>
+        * [0e1751bde2] :
+
+        docs: unify the DB module README titles
+
+
+2026-08-13  Razvan Crainea  <razvan@opensips.org>
+        * [698eb6e1f0] :
+
+        config: close database connection after table check
+
+        Thanks to @ewadii for reporting this issue.
+
+        Closes #4172
+
+        (cherry picked from commit 1d5c9cfc8edbda3c0ff388d48ad8cd138f6aeb4b)
+
+
+2026-08-13  Razvan Crainea  <razvan@opensips.org>
+        * [4e662fa87f] :
+
+        dialog: match legs by transaction branch
+
+        When one outgoing branch receives multiple distinct To-tags, dialog
+        creates multiple legs for that branch. A subsequent failover branch
+        could then collide with an existing leg index and trigger the wrongfully
+        increasing callee_leg warning reported in #3954.
+
+        (cherry picked from commit 2b30715cf7310797f2df193761fce134232206de)
+
+
+2026-08-13  Răzvan Crainea  <razvan@opensips.org>
+        * [25b965ba86] :
+
+        Merge pull request #4190 from dariusstefan/4.0
+
+        docs: fix code block titles
+
+2026-08-12  Stefan Darius  <darius.stefan@opensips.org>
+        * [38ee69a9b5] :
+
+        docs: fix code block titles
+
+
+2026-08-12  Răzvan Crainea  <razvan@opensips.org>
+        * [eda563752a] :
+
+        Merge pull request #4171 from dariusstefan/master
+
+        ci: apply the source paths filter to PRs too
+        (cherry picked from commit 3f76bcc005b2c3bacb25ce9ddbd3c14faad440bc)
+
+
+2026-08-11  Răzvan Crainea  <razvan@opensips.org>
+        * [8b0ea982c8] :
+
+        Merge pull request #4159 from dariusstefan/4.0
+
+        docs: fix markdown formatting for tls_method parameter [skip ci]
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [e84d837267] :
+
+        docs: fix markdown formatting for tls_method parameter [skip ci]
+
+
+2026-08-11  Răzvan Crainea  <razvan@opensips.org>
+        * [6ab39e0674] :
+
+        Merge pull request #4156 from dariusstefan/4.0
+
+        docs: make markdown anchors and links GitHub-compatible [skip ci]
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [66290a1e6d] :
+
+        aaa_diameter: event_route is a script route, not a module [skip ci]
+
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [712c45eea9] :
+
+        docs: fix module index entries for removed and relocated modules [skip ci]
+
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [a87ca8b9b5] :
+
+        docs: drop the stale $branch cross-reference [skip ci]
+
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [6a1a7fe51f] :
+
+        docs: point module cross-references at their README [skip ci]
+
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [7e482fc5eb] :
+
+        usrloc: drop references to the removed db_mode parameter [skip ci]
+
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [d92c2230a3] :
+
+        rtpengine: add a heading for the failover section [skip ci]
+
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [a9650fc009] :
+
+        qrouting: fix links to the drouting, dialog and tm docs [skip ci]
+
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [7e72a27331] :
+
+        docs: unlink the defunct ViDe H.350 Cookbook reference [skip ci]
+
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [c058004f9f] :
+
+        docs: restore bibliography references as external URLs [skip ci]
+
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [293a1e3220] :
+
+        docs: point cross-module links at README.md [skip ci]
+
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [389ce8b696] :
+
+        docs: convert doc-site anchors to GitHub heading slugs [skip ci]
+
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [78fe73a6c2] :
+
+        docs: escape parens the docbook conversion turned into links [skip ci]
+
+
+2026-08-11  Stefan Darius  <darius.stefan@opensips.org>
+        * [b965154f86] :
+
+        docs: drop the Function Index page [skip ci]
+
+
+2026-08-11  Liviu Chircu  <liviu@opensips.org>
+        * [26cc1a6df8] :
+
+        `tcp_workers` docs: Adjust text to new behavior
+
+        (cherry picked from commit 176f704b2c99f4390db309fe9bc5d16afe452e40)
+
+
+2026-08-10  Bogdan Andrei IANCU  <bogdan@opensips.org>
+        * [56aee13846] :
+
+        Merge pull request #4133 from dariusstefan/4.0
+
+        Replace docs.opensips.org URLs with repo relative paths [skip ci]
+
+2026-08-10  Stefan Darius  <darius.stefan@opensips.org>
+        * [6b6f3e9be2] :
+
+        docs: update links to DB schema documentation for consistency
+
+        Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+
+
+2026-08-10  Stefan Darius  <darius.stefan@opensips.org>
+        * [61ea43bd9b] :
+
+        Replace docs.opensips.org URLs with repo relative paths
+
+        Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+
+
+2026-08-10  Razvan Crainea  <razvan@opensips.org>
+        * [0050444fd9] :
+
+        b2b_logic: fix lock leak and self-deadlock
+
+        Thanks to Andrii Pogrebennyk from NG-Voice for spotting and fixing this issue.
+
+        (cherry picked from commit bef684e7d66cbd83d3b11d0aafdb19e3124c220c)
+
+
+2026-08-08  Razvan Crainea  <razvan@opensips.org>
+        * [097ad3c2b2] :
+
+        httpd: fix const qualifier warning
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [34fef08b52] :
+
+        ci: install unit test dependencies in build container
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [4e526a1e83] :
+
+        build: install OpenTelemetry dependencies on Ubuntu 26.04
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [08e7890f38] :
+
+        ci: build images only on master
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [090af81e9a] :
+
+        build: include ccache in CI dependencies
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [8d67fbc576] :
+
+        msrp_relay: initialize optional auth body
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [e1cbea1360] :
+
+        build: skip unavailable freeDiameter on Ubuntu 18.04
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [251089e0ca] :
+
+        http2d: fix bundled nghttp2 build
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [0278dc3628] :
+
+        aaa_diameter: fix pointer conversion on 32-bit targets
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [20ebf8d0a1] :
+
+        Revert "ci: allow selecting Ubuntu version [skip ci]"
+
+        This reverts commit e2453a4b59d2ad5cf0ad2ff39e907d7b9ccc6c8b.
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [8796b30acc] :
+
+        build: enable OpenTelemetry checks on Ubuntu 26.04
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [043b0b5e61] :
+
+        build: add aaa_diameter and http2d in build checks
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [5d4083efbc] :
+
+        ci: allow selecting Ubuntu version [skip ci]
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [5467c5f90c] :
+
+        rabbitmq_consumer: support modern RabbitMQ headers
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [b62009d508] :
+
+        fix compiler warnings in ESL and sqlops
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [b66d169291] :
+
+        event_rabbitmq: support legacy and modern headers
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [e7b626d264] :
+
+        auth_web3: fix curl callback signature
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [5910d492c1] :
+
+        ci: include generic LLVM tools in CI images
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [9c192e5f8a] :
+
+        ci: test older compilers on Ubuntu 26.04
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [5bbc7f4136] :
+
+        ci: add Ubuntu 26.04 image and avoid libc++ conflicts
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [e931c34cdd] :
+
+        ci: use lowercase GHCR image name
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [74c6a8f3bf] :
+
+        ci: speed up builds with prebuilt Ubuntu images
+
+
+2026-08-07  Razvan Crainea  <razvan@opensips.org>
+        * [45d7692d96] :
+
+        ci: make the apt-get update more resilient
+
+
+2026-08-05  Razvan Crainea  <razvan@opensips.org>
+        * [7fe14143eb] :
+
+        ci: Filter builds by source inputs
+
+        (cherry picked from commit d2e9ffc8a5684cb1d72c4893240f404d9fbafce2)
+
+
+2026-08-05  Razvan Crainea  <razvan@opensips.org>
+        * [8f35727ecf] :
+
+        ci: Aggregate module publications [skip ci]
+
+        (cherry picked from commit 8ff6586cda7ab14e20d9a411ce4c038dd0589015)
+
+
+2026-08-05  Razvan Crainea  <razvan@opensips.org>
+        * [7064ad0ae2] :
+
+        ci: reorder publishing components [skip ci]
+
+        (cherry picked from commit 325e6f298d7d897ed76772edb171a635acb821fe)
+
+
+2026-08-05  Razvan Crainea  <razvan@opensips.org>
+        * [d956587f20] :
+
+        ci: Refine module publication dispatch [skip ci]
+
+        (cherry picked from commit 756619e507c408a3a625607f004406a6ff452e61)
+
+
+2026-08-05  Razvan Crainea  <razvan@opensips.org>
+        * [b717e4f649] :
+
+        ci: Publish module samples per module [skip ci]
+
+        (cherry picked from commit 5071279486a59af0b0843effcda5d86594638cc7)
+
+
+2026-08-05  Razvan Crainea  <razvan@opensips.org>
+        * [993a0c57d3] :
+
+        ci: Show changed documentation components [skip ci]
+
+        (cherry picked from commit 429686b2d482fc431cdd82f1f2bb4e3a3dcacd0b)
+
+
+2026-08-05  Razvan Crainea  <razvan@opensips.org>
+        * [82387bd587] :
+
+        ci: add documentation publication workflow [skip ci]
+
+        (cherry picked from commit db2be63de72b346d7c2676eaa176a4892cecd544)
+
+
+2026-08-05  Razvan Crainea  <razvan@opensips.org>
+        * [fd4b58d9e4] :
+
+        ci: show publish matrix after finding changed paths [skip ci]
+
+        (cherry picked from commit 24f7564d5ede1d6941c30fd9d1cdafbafb7d281b)
+
+
+2026-08-05  Razvan Crainea  <razvan@opensips.org>
+        * [f0afdd2554] :
+
+        ci: make apt repository access resilient
+
+        (cherry picked from commit ac436e4b02609c23e03fd9c6e320cf4e34885131)
+
+
+2026-08-05  Razvan Crainea  <razvan@opensips.org>
+        * [2e0a476d4d] :
+
+        ci: publish changed documentation files to opensips.org [skip ci]
+
+        (cherry picked from commit c05b57672f2ea4c7f48c80bbe8a3f04a68515c33)
+
+
+2026-08-04  Razvan Crainea  <razvan@opensips.org>
+        * [cb640e5e88] :
+
+        tcp: ensure unique connection id
+
+        Many thanks to Bence Szigeti from Genesys for reporting and fixing this!
+
+        (cherry picked from commit e9b001cf9d37e78bbcc4ec1c0ed6ea04390d6878)
+
+
+2026-08-03  Razvan Crainea  <razvan@opensips.org>
+        * [66d1e57eef] :
+
+        packaging: use mariadb for redhat >= 10
+
+        Many thanks to Nick Altmann for spotting this
+
+        (cherry picked from commit 4bd55a2afe815371918fbedf37369ebfc29de33c)
+
+
+2026-07-31  Razvan Crainea  <razvan@opensips.org>
+        * [13f1f7223c] :
+
+        dialog: store reply SDP as current offer
+
+        Do not use the reply status code as a request method when deciding
+        whether SDP is provisional. This prevents re-INVITE pings from sending
+        stale SDP after sequential offer/answer updates.
+
+        Thanks to rwilkinson87 for reporting issue! Close #4123
+
+        (cherry picked from commit ac1bdc97bb9e750587dfedc4e355c76c59170cf6)
+
+
+2026-07-31  Norm Brandinger  <n.brandinger@gmail.com>
+        * [92e0f82ff4] :
+
+        sockets_mgm: fix race in receive_fd causing infinite loop on reload (#3820)
+
+        During sockets_reload, all processes receive an IPC RPC to run
+        rpc_socket_reload_proc(). Non-dynamic (worker) processes close their
+        copy of each dynamic socket and then call receive_fd() on the shared
+        sock_mgm_unix[0] socketpair to get a fresh fd from the mgm process.
+
+        Because sock_mgm_unix[0] is shared across all workers and SOCK_STREAM
+        delivers bytes in order (not per-message), concurrent receive_fd()
+        calls race: worker A can consume the fd response intended for worker B.
+        When this happens, worker B receives worker A's fd response, which
+        references a socket already in worker B's listener list.  The
+        sock_listadd() macro then corrupts the linked list into a circular
+        loop (si->next == si), causing push_sock2list() to spin at 100% CPU
+        indefinitely.
+
+        Add a sock_mgm_reload_lock that serializes the entire
+        send-IPC-to-mgm + receive-fd sequence for worker processes.  Dynamic
+        (mgm) processes are excluded from this lock because they create
+        sockets directly via sock_mgm_add_listener() and never call
+        receive_fd(); including them would deadlock since the worker holding
+        the lock blocks on receive_fd() waiting for the mgm to process
+        rpc_sockets_send().
+
+        Fixes: OpenSIPS/opensips#3789
+        (cherry picked from commit 9f2990ca1c64ac8dbd5bde2365e4cab12d9c0cad)
+
+
+2026-07-29  gmaruzz  <gmaruzz@users.noreply.github.com>
+        * [b9669fd2dd] :
+
+        net: fix connection reference leak in tcp_async_write_job() (#4125)
+
+        When a write job is already queued for the connection, the
+        F_CONN_WRITE_QUEUED branch of tcp_async_write_job() returns success
+        without releasing the caller's reference. All three call sites treat a
+        successful return as a transfer of ownership:
+
+         * tcp_conn_release() (net_tcp_proc.c) returns without tcpconn_put() on
+           success, releasing the reference itself only on failure;
+         * the writer reactor path takes an explicit tcpconn_ref() right before
+           calling tcp_queue_write_job() and puts it back only if that fails;
+         * the follow-up re-queue in the job completion handler likewise puts
+           only on failure.
+
+        The queued job releases exactly one reference when it completes, so the
+        second reference is never matched and leaks. One reference is lost per
+        send that overlaps an in-flight write job for the same connection.
+
+        The consequence is not just memory: with a stray reference held,
+        tcpconn_destroy() cannot free the connection, because the reaper only
+        collects at refcnt 0. The connection stays in S_CONN_BAD with
+        lifetime 0, holding its shm, its fd and a tcp_max_connections slot for
+        the lifetime of the process.
+
+        We observed the accumulation and the climbing refcounts directly, but
+        did not run a box to exhaustion, so the endpoint is what the code
+        implies rather than something measured: once enough of these pile up
+        the proxy reaches tcp_max_connections (default 2048) and refuses every
+        new TCP, TLS, WS and WSS connection, with the usual 1024 fd soft limit
+        likely binding first.
+
+        Reproduced and diagnosed on a live 4.0 edge proxy with a gdb walk of
+        the connection table: unreachable connections at refcnt 18, 12, 8, 8
+        and 2, and a clusterer BIN connection climbing from 3 to 92 references
+        under a burst of SIP pushes. The leak is transport generic - it also
+        affects healthy long-lived connections, not only failing ones.
+
+        Introduced in 8a9f450df2 ("net: always send messages from main
+        thread"), so 4.0 and master are affected and 3.x is not.
+
+        Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+        (cherry picked from commit 5972c802c89e8d0f1a1989eec34637919d9abb6f)
+
+
+2026-07-29  Razvan Crainea  <razvan@opensips.org>
+        * [be5a50a600] :
+
+        docs: remove legacy generated module docs [skip ci]
+
+        (cherry picked from commit 85f6ba2ff55b9781387a75b218cce66d99346d17)
+
+
+2026-07-28  Razvan Crainea  <razvan@opensips.org>
+        * [416c74dd76] :
+
+        readme: fix links for certain modules [skip ci]
+
+        Backported from commit 59241f0286e2a9c813863f2c5019eafea7e53621.
+
+
+2026-07-28  Razvan Crainea  <razvan@opensips.org>
+        * [1c8c9a423b] :
+
+        docs: fix links to new tutorials structure [skip ci]
+
+        Backported from commit 50442e9dd37041e02e7bdd92776dbf0b4de50886.
+
+
+2026-07-27  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [d85193900e] :
+
+        translate doc URLs to the new format [skip ci]
+
+        (cherry picked from commit 660a368ae9993fd15d376ce304a0428ea54d2044)
+
+
+2026-07-26  OpenSIPS  <github@opensips.org>
+        * [cb32a3b4db] :
+
+        Rebuild documentation
+
+
+2026-07-24  Liviu Chircu  <liviu@opensips.org>
+        * [92c52904bd] :
+
+        Improve Core Function documentation [no ci]
+
+        - updated core function names and examples to match OpenSIPS 4.0
+        - synchronized all functions with core_cmds.c
+
+
+2026-07-23  Razvan Crainea  <razvan@opensips.org>
+        * [4855d86e43] :
+
+        tm: fix anycast replication return code
+
+        Many thanks to @baevga for reporting it.
+
+        Close: #4117
+        (cherry picked from commit 3a78e5a4bc4c44eeb1f7579a3f9e3eff69d040fb)
+
+
+2026-07-22  Razvan Crainea  <razvan@opensips.org>
+        * [2a4949cb27] :
+
+        cgrates: fix unreffing in case of error and concurrent BYE
+
+        Close #3898
+
+        (cherry picked from commit 79c664c282cde881546129ad1f10b2c8a3dc2968)
+
+
+2026-07-21  Razvan Crainea  <razvan@opensips.org>
+        * [53f58106ab] :
+
+        gflags: simplify the MI commands
+
+        (cherry picked from commit 8e023cdbfe9cf26c137f761bca3c741c39e7611d)
+
+
+2026-07-21  Razvan Crainea  <razvan@opensips.org>
+        * [a301bbf2e0] :
+
+        mi: fix docs and drop proto_ from module's groups
+
+        (cherry picked from commit d4e82cfd45574f0f66851fa866a49a29ca7fee34)
+
+
+2026-07-21  Razvan Crainea  <razvan@opensips.org>
+        * [b9f88a2bf7] :
+
+        tls_mgm: unify TLS verify mode selection
+
+        (cherry picked from commit 3ed3b93187fc577a339d68c85c704e04f4118274)
+
+
+2026-07-21  Ivan Poddubny  <ivan.poddubny@gmail.com>
+        * [7a7a0571b9] :
+
+        tls_mgm: fix require_cert and verify_cert enforcement for virtual domains
+
+        Multiple virtual TLS domains can be defined on a single socket via
+        match_sip_domain (SNI), each with distinct require_cert and verify_cert
+        settings. However, these domain-specific verification rules were
+        never applied to the connection during the TLS handshake, leaving only
+        the socket's default settings enforced.
+
+        This commit adds SSL_set_verify to the SNI callbacks for both OpenSSL
+        and WolfSSL to ensure the correct domain-specific rules are applied.
+
+        (cherry picked from commit 5526637f38b855b51d3627e30618c9458a1d0ce9)
+
+
+2026-07-21  Razvan Crainea  <razvan@opensips.org>
+        * [a043cf5580] :
+
+        regex: fix compile error for pcre3
+
+        Many thanks to Mike Johnston (@LCEbay) for reporting it!
+
+        Close: #4069
+        (cherry picked from commit d1ddd1051b6d0c5d33817a912866c9b046a8af4b)
+
+
+2026-07-21  Razvan Crainea  <razvan@opensips.org>
+        * [b8b7fa5e8b] :
+
+        b2b_entities: add dlg ref conuting
+
+        this ensures that the dialog does not disapear while signaling
+        operations are being performed.
+
+        Many thanks to Nuno Almeida from Five9 for reporting this issue and
+        his extensively testing to confirm the fix.
+
+        (cherry picked from commit 9f9b26bdcdc8d779bfa70333924e8ef61107ce92)
+
+
+2026-07-19  OpenSIPS  <github@opensips.org>
+        * [0316acfbcd] :
+
+        Rebuild documentation
+
+
+2026-07-16  Bogdan Andrei IANCU  <bogdan@opensips.org>
+        * [4572a11a93] :
+
+        Merge pull request #4110 from NormB/fix/cfgutils-async-sleep-docs
+
+        cfgutils: fix async sleep()/usleep() doc examples
+        (cherry picked from commit 2c8760d59202bcfa0e7b6d2c273bc70f3a811929)
+
+
+2026-07-15  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [c74c1d02e2] :
+
+        [modules] cosmetic on the title for better randering
+
+        (cherry picked from commit 72c4924b164974fc9dfee22b3c6a15cad428500b)
+
+
+2026-07-15  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [26ee471a3e] :
+
+        [pua_reginfo] docs corrected
+
+        (cherry picked from commit 77ea351b83b4b2b42781b6739177b5fa291c05b0)
+
+
+2026-07-14  Razvan Crainea  <razvan@opensips.org>
+        * [cc9ba55fb0] :
+
+        tm: add context for replicated CANCEL handling
+
+        Many thanks to Lt-Flash for the detailed report.
+
+        Closes #4068
+
+        (cherry picked from commit 9c5d3c4ade3ebfb4f873dc3fb66503b71dbee6ed)
+
+
+2026-07-14  Christian V.  <78396136+Christian255@users.noreply.github.com>
+        * [8017a01b24] :
+
+        Update dlg.c (#4109)
+
+        Fix issues as described in https://github.com/OpenSIPS/opensips/issues/4108
+
+2026-07-13  Liviu Chircu  <liviu@opensips.org>
+        * [5639b3ab43] :
+
+        Merge pull request #4076 from dariusstefan/4.0
+
+        docs: clean up module README formatting [skip ci]
+
+2026-07-13  Stefan Darius  <darius.stefan@opensips.org>
+        * [dd49f325f1] :
+
+        docs: update modules READMEs [skip ci]
+
+        - various formatting fixes
+        - move samples.md under samples directory
+
+
+2026-07-13  Stefan Darius  <darius.stefan@opensips.org>
+        * [2bc39eca76] :
+
+        modules: strip useless leading tab indentation from READMEs [skip ci]
+
+
+2026-07-13  Stefan Darius  <darius.stefan@opensips.org>
+        * [73aa570fd1] :
+
+        drouting: fix formatting of MI command parameter lists in README [skip ci]
+
+        Reflow the mangled DocBook-converted parameter lists into proper nested
+        Markdown bullets for the reload, gw_status, carrier_status, reload_status,
+        check and enable_probing MI commands, and fix a "depnding" -> "depending"
+        typo.
+
+        Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+
+2026-07-12  OpenSIPS  <github@opensips.org>
+        * [7439de012b] :
+
+        Rebuild documentation
+
+
+2026-07-08  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [e7af94e448] :
+
+        [mi_datagram] fix leak in system memory..
+
+        ..when triggering ASYNC MI functions
+        Credits go to @nikbyte
+        Closes #4046
+
+        (cherry picked from commit 9f6a73ebbfa43e22f863c35f0499f13ad5206c3a)
+
+
+2026-07-08  Stefan Darius  <darius.stefan@opensips.org>
+        * [057e6974d7] :
+
+        docs: use correct tags for code blocks highlighting [skip ci] (#4048)
+
+        * docs: use opensips code highlighting [skip ci]
+
+        * docs: reindent ps command JSON example in Interface-CoreMI [skip ci]
+
+        * docs: fix indentation in some MI commands examples [skip ci]
+
+2026-07-08  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [1ed490eefa] :
+
+        [uuid] fix docs - uuid() takes version as number, not string
+
+        Reported by #ccppprogrammer
+        Related to #4000
+
+        (cherry picked from commit ac3e21f675ea1cbddb6c2d1f3186d31f8fbec16e)
+
+
+2026-07-07  Stefan Darius  <darius.stefan@opensips.org>
+        * [ef75c94bcf] :
+
+        docs: use opensips code highlighting [skip ci] (#4026)
+
+2026-07-07  Razvan Crainea  <razvan@opensips.org>
+        * [bbb8e38b68] :
+
+        rtpproxy: remove bogus warning when notification is not used
+
+        (cherry picked from commit bd0a60d886254f2997382dbb002caa22b522a5f6)
+
+
+2026-07-07  Razvan Crainea  <razvan@opensips.org>
+        * [88009791c3] :
+
+        b2b_sdp_demux: fix cross BYE concurrency
+
+        Many thanks to Nuno Almeida from Five9 for reporting this issue and also
+        providing the patch to fix it.
+
+        (cherry picked from commit cebd4e1ccd0d46bac793f6aa359a653cf850bbf2)
+
+
+2026-07-06  Razvan Crainea  <razvan@opensips.org>
+        * [1e256e5bd5] :
+
+        Makefile.conf: remove comments
+
+        The comments introduced in 07326af4 prevented the `menuconfig` tool from
+        parsing properly the Makefile.conf.template file.
+
+        Many thanks to @FlyingDutchfrog for reporting this! Close #4001
+
+
+2026-07-06  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [bf45a295f6] :
+
+        [uuid] fix compiling for UUID v7 on old systems
+
+        Closes #4000
+        Reported by @ccppprogrammer
+
+        (cherry picked from commit cd29c90990b55a79a60fec33e68d3790ac50c3ee)
+
+
+2026-07-05  OpenSIPS  <github@opensips.org>
+        * [c209015a6d] :
+
+        Rebuild documentation
+
+
+2026-06-30  Liviu Chircu  <liviu@opensips.org>
+        * [17a867e056] :
+
+        Improve Core Parameter documentation [no ci]
+
+
+2026-06-30  Bogdan Andrei IANCU  <bogdan@opensips.org>
+        * [c6dcb452f7] :
+
+        Merge pull request #3983 from kvwake/tls_mgm-sni-case-insensitive
+
+        tls_mgm: match SNI / SIP domain filters case-insensitively
+
+        (cherry picked from commit 614b92cff5dcd8c4f4ad909d6629ec3a5fbe3e5f)
+
+
+2026-06-30  Liviu Chircu  <liviu@opensips.org>
+        * [9d791d6c40] :
+
+        Merge pull request #3987 from dariusstefan/docs/net-proto-readme-4-0
+
+        docs: add README.md for proto_udp and proto_tcp [skip ci]
+
+2026-06-30  Stefan Darius  <darius.stefan@opensips.org>
+        * [a85055f747] :
+
+        docs: add README.md for proto_udp and proto_tcp [skip ci]
+
+        The proto_udp and proto_tcp transport modules live under net/ rather than
+        modules/, so unlike every other module they shipped no generated Markdown
+        README.md. Generate it from their DocBook docs (same format as the modules/*
+        READMEs) so the modules render on the OpenSIPS documentation site.
+
+        Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+
+2026-06-26  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [7bf5689c06] :
+
+        [auth_db] improve docs with ha1/ha1b recalculation [skip ci]
+
+
+2026-06-26  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [0c87b34a9f] :
+
+        [docs] update async documentation for onreply support [skip ci]
+
+
+2026-06-26  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [f9ecc05812] :
+
+        [docs] update async documentation as AVPOPS was removed [skip ci]
+
+
+2026-06-26  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [8c8749d949] :
+
+        [docs] update/improve async documentation [skip ci]
+
+
+2026-06-26  Razvan Crainea  <razvan@opensips.org>
+        * [fa501f9ddc] :
+
+        rtp_relay: properly populate leg tag on parallel forking
+
+        Many thanks to @sukitha on GitHub for reporting this in #3902 and also
+        trying several patches to troubleshoot, as well as to @NormB for testing
+        out the final patch
+
+        (cherry picked from commit daf8ebef2a8afd9571f11fc63d421e712c92f16c)
+
+
+2026-06-25  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [ceac6ca27e] :
+
+        [docs] fix typos in core var docs [skip ci]
+
+
+2026-06-25  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [09de38f1a4] :
+
+        [docs] add missing variable names to core var headings [skip ci]
+
+
+2026-06-25  Liviu Chircu  <liviu@opensips.org>
+        * [6a9d4d3068] :
+
+        tm: Fix context for PN timeout 408
+
+        Commit 5dbbd997f7 added a PN wait timeout path which sends a local 408
+        when the EBR subscription expires, but called relay_reply() without the
+        normal TM reply context.
+
+        Install a temporary global context, set the current transaction and branch
+        index while generating the fake 408, then restore them afterwards. This
+        prevents dialog reply callbacks from crashing on PN timeout.
+
+        (cherry picked from commit 8832a4461dab35ac56e2c4b81c0fcb6edcf93690)
+
+
+2026-06-25  Liviu Chircu  <liviu@opensips.org>
+        * [5eea8e27c9] :
+
+        Merge pull request #3958 from dariusstefan/fix/coreevents-nested-alert-4.0
+
+        docs/evi: fix doubled (nested) GitHub alert in Core Events (4.0)
+
+2026-06-25  Stefan Darius  <darius.stefan.02@gmail.com>
+        * [3326f9f9c2] :
+
+        docs/evi: fix doubled (nested) GitHub alert in Core Events [skip ci]
+
+        The E_CORE_PKG_THRESHOLD and E_CORE_SHM_THRESHOLD notes wrapped a
+        [!NOTE] alert inside an empty [!IMPORTANT] alert. GitHub does not
+        render nested alerts, so the inner marker showed up as literal
+        "[!NOTE]" text inside a quote. Collapse each to a single [!NOTE].
+
+
+2026-06-25  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [ed97c91633] :
+
+        [docs] remove obsolete vars related to msg branches [skip ci]
+
+
+2026-06-25  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [1344a51cf1] :
+
+        [docs] removing AVPOPS [skip ci]
+
+
+2026-06-25  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [a22981eb79] :
+
+        [docs] updating to AVP with names [skip ci]
+
+
+2026-06-25  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [26ce259aa1] :
+
+        [docs] updating to names for routes [skip ci]
+
+
+2026-06-25  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [f70248cf38] :
+
+        [docs] generic update/improvement/completion for the Var docs [skip ci]
+
+
+2026-06-25  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [cc201e97c9] :
+
+        [docs] fix AVP naming for post 1.6 versons [skip ci]
+
+
+2026-06-25  Razvan Crainea  <razvan@opensips.org>
+        * [09292c9130] :
+
+        docs/evi: index core events by name [skip ci]
+
+        (cherry picked from commit 4cd72cacbf24457fd416f10b93bf76a4461390ae)
+
+
+2026-06-25  Razvan Crainea  <razvan@opensips.org>
+        * [b318221c04] :
+
+        b2b_entities: fix possible invalid dlg access
+
+        Many thanks to Nuno Almeida from Five9 for finding and providing the fix
+
+        (cherry picked from commit 2a7c67358bcda139f11d9ac133652900cbaf3c26)
+
+
+2026-06-25  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [51e9c82d98] :
+
+        [docs] fix post 3.0v links/anchors [skip ci]
+
+        (cherry picked from commit 4d75e51639a61919846781b96732b85f6e4f5f6c)
+
+
+2026-06-24  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [d2c909001f] :
+
+        [docs] fix post 3.0v syntax in example [skip ci]
+
+        (cherry picked from commit 52ec2dbe8497a2431eacdcf2d5d414e678abc65d)
+
+
+2026-06-24  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [8808ae6422] :
+
+        [docs] add more links in post 3.6v documentation [skip ci]
+
+        (cherry picked from commit f7a4cd1fe74dfd2c58d88a21beb7578f9a3f878a)
+
+
+2026-06-24  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [28f334c19a] :
+
+        [docs] add more links in post 3.0v documentation [skip ci]
+
+        (cherry picked from commit 609fb4cef2fe123e7c4f7295bb612896f5cd2dab)
+
+
+2026-06-24  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [c3e61ce353] :
+
+        [docs] fix post 3.0v documentation [skip ci]
+
+        (cherry picked from commit 377707a9b7fe6aec06d5873de979971dcd4ad64d)
+
+
+2026-06-24  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [da1c188d02] :
+
+        [docs] improve post 1.9v documentation [skip ci]
+
+        (cherry picked from commit 0b88dcd0f2238fd39d2946bb77311d75a2ae2667)
+
+
+2026-06-24  Bogdan-Andrei Iancu  <bogdan@opensips.org>
+        * [78c4706038] :
+
+        [docs] improve the flag's documentation [skip ci]
+
+        (cherry picked from commit 66b18c9aeb543d499e33aea0969c4c178dbb6e3a)
+
+
+2026-06-24  Razvan Crainea  <razvan@opensips.org>
+        * [07326af4f6] :
+
+        config: add standalone M4 examples
+
+
 =========================== Release 4.0.0 ==============================
 
 2026-06-23  Razvan Crainea  <razvan@opensips.org>

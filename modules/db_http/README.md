@@ -10,31 +10,31 @@ description: "This module provides access to a database that is implemented as a
 
 
 This module provides access to a database that is implemented
-	as a HTTP server. It may be used in special cases where traversing
-	firewalls is a problem, or where data encryption is required.
+as a HTTP server. It may be used in special cases where traversing
+firewalls is a problem, or where data encryption is required.
 
 
 In order to use this module you must have a server that can communicate
-	via HTTP or HTTPS with this module that follows exactly the format 
-	decribed in the specifications section.
+via HTTP or HTTPS with this module that follows exactly the format 
+decribed in the specifications section.
 
 
 The module can provide SSL, authentication, and all the functionalities
-	of an opensips db as long as the server supports them ( except result_fetch).
+of an opensips db as long as the server supports them ( except result_fetch).
 
 
 There is a slight difference between the url of db_http and
-	the urls of the other db modules. The url doesn't have to contain
-	the database name. Instead, everything that is after the
-	address is considered to be a path to the db resource, it may be
-	missing.
+the urls of the other db modules. The url doesn't have to contain
+the database name. Instead, everything that is after the
+address is considered to be a path to the db resource, it may be
+missing.
 
 
 Even if using HTTPS the url must begin with "http://" , and the
-	SSL parameter for the module must be set to 1.
+SSL parameter for the module must be set to 1.
 
 
-```c title="Setting db_url for a module"
+```opensips title="Setting db_url for a module"
 ...
 modparam("presence", "db_url","http://user:pass@localhost:13100")
 or
@@ -68,13 +68,13 @@ Whether or not to use SSL.
 
 
 If value is 1 the module will use https otherwise
-		it will use http.
+it will use http.
 
 
 *Default value is " 0 ".*
 
 
-```c title="Set SSL parameter"
+```opensips title="Set SSL parameter"
 ...
 modparam("db_http", "SSL",1)
 ...
@@ -90,7 +90,7 @@ Whether or not the server supports raw queries.
 *Default value is "0".*
 
 
-```c title="Set cap_raw_query parameter"
+```opensips title="Set cap_raw_query parameter"
 ...
 modparam("db_http", "cap_raw_query", 1)
 ...
@@ -106,7 +106,7 @@ Whether or not the server supports replace capabilities.
 *Default value is "0".*
 
 
-```c title="Set cap_replace parameter"
+```opensips title="Set cap_replace parameter"
 ...
 modparam("db_http", "cap_replace", 1)
 ...
@@ -122,7 +122,7 @@ Whether or not the server supports insert_update capabilities.
 *Default value is "0".*
 
 
-```c title="Set cap_insert_update parameter"
+```opensips title="Set cap_insert_update parameter"
 ...
 modparam("db_http", "cap_insert_update", 1)
 ...
@@ -138,7 +138,7 @@ Whether or not the server supports last_inserted_id capabilities.
 *Default value is "0".*
 
 
-```c title="Set cap_last_inserted_id parameter"
+```opensips title="Set cap_last_inserted_id parameter"
 ...
 modparam("db_http", "cap_last_inserted_id", 1)
 ...
@@ -149,13 +149,13 @@ modparam("db_http", "cap_last_inserted_id", 1)
 
 
 Character to be used to delimit fields in the reply.Only
-		one char may be set.
+one char may be set.
 
 
 *Default value is ";"*
 
 
-```c title="Set field_delimiter parameter"
+```opensips title="Set field_delimiter parameter"
 ...
 modparam("db_http", "field_delimiter",";")
 ...
@@ -166,13 +166,13 @@ modparam("db_http", "field_delimiter",";")
 
 
 Character to be used to delimit rows in the reply.Only
-		one char may be set.
+one char may be set.
 
 
 *Default value is "\n"*
 
 
-```c title="Set row_delimiter parameter"
+```opensips title="Set row_delimiter parameter"
 ...
 modparam("db_http", "row_delimiter","\n")
 ...
@@ -183,13 +183,13 @@ modparam("db_http", "row_delimiter","\n")
 
 
 Character to be used to quote  fields that require quoting
-		in the reply.Only one char may be set.
+in the reply.Only one char may be set.
 
 
 *Default value is "|"*
 
 
-```c title="Set quote_delimiter parameter"
+```opensips title="Set quote_delimiter parameter"
 ...
 modparam("db_http", "quote_delimiter","|")
 ...
@@ -200,14 +200,14 @@ modparam("db_http", "quote_delimiter","|")
 
 
 The delimiter used to separate multiple fields of a single
-		variable (see [http variables](#variables)).
-		Only one char may be set.
+variable (see [http variables](#variables)).
+Only one char may be set.
 
 
 *Default value is ","*
 
 
-```c title="Set value_delimiter parameter"
+```opensips title="Set value_delimiter parameter"
 ...
 modparam("db_http", "value_delimiter",";")
 ...
@@ -223,7 +223,7 @@ The maximum number of milliseconds that the HTTP ops are allowed to last
 *Default value is "30000 ( 30 seconds )"*
 
 
-```c title="Set timeout parameter"
+```opensips title="Set timeout parameter"
 ...
 modparam("db_http", "timeout",5000)
 ...
@@ -234,14 +234,14 @@ modparam("db_http", "timeout",5000)
 
 
 Disables automatic 'Expect: 100-continue' behavior in libcurl for requests over 1024 bytes in size.
-		This can help reduce latency by saving a network round-trip for large records.
-		For more information on this behavior please seee rfc2616 section 8.2.3.
+This can help reduce latency by saving a network round-trip for large records.
+For more information on this behavior please seee rfc2616 section 8.2.3.
 
 
 *Default value is "0 (off)"*
 
 
-```c title="Set disable_expect parameter"
+```opensips title="Set disable_expect parameter"
 ...
 modparam("db_http", "disable_expect",1)
 ...
@@ -261,13 +261,13 @@ The server must accept queries as HTTP queries.
 
 
 The queries are of 2 types : GET and POST.Both
-		set variables that must be interpreted by the server.
-		All values are URL-encoded.
+set variables that must be interpreted by the server.
+All values are URL-encoded.
 
 
 There are several types of queries and the server can tell
-		them apart by the query_type variable. Each type of query uses
-		specific variables simillar to those in the opensips db_api.
+them apart by the query_type variable. Each type of query uses
+specific variables simillar to those in the opensips db_api.
 
 
 ```c title="Example query."
@@ -281,47 +281,47 @@ GET /presentity/?c=username,domain,event,expires HTTP/1.1
 
 
 A description of all the variables. Each variable can have
-		either a single value or a comma-separated list of values. Each
-		variable has a special meaning and can be used only with
-		certain queries.
+either a single value or a comma-separated list of values. Each
+variable has a special meaning and can be used only with
+certain queries.
 
 
 The table on which operations will take place will be encoded
-		in the url as the end of the url ( www.some.com/users will point
-		to the users table).
+in the url as the end of the url ( www.some.com/users will point
+to the users table).
 
 
 - k=
 Describes the keys (columns) that will 
-				be used for comparison.Can have multiple values.
+be used for comparison.Can have multiple values.
 - op=
 Describes the operators that will 
-				be used for comparison.Can have multiple values.
+be used for comparison.Can have multiple values.
 - v=
 Describes the values that columns will be 
-				compaired against. Can have multiple values.
+compaired against. Can have multiple values.
 - c=
 Describes the columns that will be selected
-				from the result.Can have multiple values.
+from the result.Can have multiple values.
 - o=
 The column that the result will be ordered by.
-				Has a single value.
+Has a single value.
 - uk=
 The keys(columns) that will be updated.
-				Can have multiple values.
+Can have multiple values.
 - uv=
 The new values that will be put in the columns.
-				Can have multiple values.
+Can have multiple values.
 - q=
 Describes a raw query. Will only be used if
-				the server supports raw queries. Has a single
-				value.
+the server supports raw queries. Has a single
+value.
 - query_type=
 Describes the type of the current query.
-				Can have a single value as described in the
-				Query Types section.Has a single value.
-				Will be present in all queries except the
-				"SELECT" (normal query).
+Can have a single value as described in the
+Query Types section.Has a single value.
+Will be present in all queries except the
+"SELECT" (normal query).
 
 
 ```c title="Example query with variables."
@@ -341,18 +341,18 @@ k=id&v=100&query_type=insert
 
 
 The types of the queries are described by the
-		query_type variable. The value of the variable
-		will be set to the exact name of the query.
+query_type variable. The value of the variable
+will be set to the exact name of the query.
 
 
 Queries for "SELECT" use GET and the rest use POST
-		(insert, update, delete, replace, insert_update).
+(insert, update, delete, replace, insert_update).
 
 
 - normal query
 Uses the k, op, v, c and o variables.
-				This will not set the query_type variable and
-				will use GET.
+This will not set the query_type variable and
+will use GET.
 - delete
 Uses the k, op and v variables.
 - insert
@@ -361,16 +361,16 @@ Uses the k and v variables.
 Uses the k,op,v,uk and uv  variables.
 - replace
 Uses the k and v  variables. This is an optional
-				type of query. If the module is not configured to use it
-				it will not.
+type of query. If the module is not configured to use it
+it will not.
 - insert_update
 Uses the k and v  variables. This is an optional
-				type of query. If the module is not configured to use it
-				it will not.
+type of query. If the module is not configured to use it
+it will not.
 - custom
 Uses the q  variable. This is an optional
-				type of query. If the module is not configured to use it
-				it will not.
+type of query. If the module is not configured to use it
+it will not.
 
 
 ```c title="More query examples."
@@ -392,7 +392,7 @@ k=id&op=%3D&v=100&uk=id&uv=101&query_type=update
 
 
 NULL values in queries are represented as a string of length 1
-		containing a single character with value '\0'.
+containing a single character with value '\0'.
 
 
 ```c title="NULL query example."
@@ -408,34 +408,34 @@ k=id&op=%3D&v=%00&query_type=delete
 
 
 If the query is ok (even if the answer is empty)
-			the server must reply with a 200 OK HTTP reply with
-			a body containing the types and values of the columns.
+the server must reply with a 200 OK HTTP reply with
+a body containing the types and values of the columns.
 
 
 The server must reply with a delimiter separated list of
-		values and columns.
+values and columns.
 
 
 Each element in the list must be seperated from the
-			one before it by a field delimiter that must be the same 
-			as the one set as a parameter from the script for the module.
-			The last element of each line must not be followed by
-			a field delimiter, but by a	row delimiter.
+one before it by a field delimiter that must be the same 
+as the one set as a parameter from the script for the module.
+The last element of each line must not be followed by
+a field delimiter, but by a	row delimiter.
 
 
 The first line of the reply must contain a list of the types
-		of values of each column. The types can be any from the list:
-		integer, string, str, blob, date.
+of values of each column. The types can be any from the list:
+integer, string, str, blob, date.
 
 
 Each following line contains the values of each row from the result.
 
 
 If the query produced an error the server must reply with a
-		HTTP 500 reply,	or with a corresponding error code (404, 401).
+HTTP 500 reply,	or with a corresponding error code (404, 401).
 
 
-```c title="Example Reply."
+```
 ...
 int;string;blob
 6;something=something;1000
@@ -448,20 +448,20 @@ int;string;blob
 
 
 Because the values may contain delimiters inside,
-		the server must perform quoting when necessary (there is no
-		problem if it does it even when it is not necessary).
+the server must perform quoting when necessary (there is no
+problem if it does it even when it is not necessary).
 
 
 A quote delimiter must be defined and must be the same as
-		the one set from the script ( by default it is "|" ).
+the one set from the script ( by default it is "|" ).
 
 
 If a value contains a field ,  row  or a quote delimiter
-		it must be placed under quotes. A quote delimiter inside a value
-		must be preceeded by another quote delimiter.
+it must be placed under quotes. A quote delimiter inside a value
+must be preceeded by another quote delimiter.
 
 
-```c title="Quoting Example."
+```
 ...
 int;string;blob
 6;|ana;maria|;1000
@@ -475,24 +475,24 @@ int;string;blob
 
 
 This is an optional feature and may be enabled if one wants
-		to use it.
+to use it.
 
 
 In order to use this feature the server must place the id
-		of the last insert in the 200 reply for each insert query.
+of the last insert in the 200 reply for each insert query.
 
 
 #### Authentication and SSL
 
 
 If the server supports authentication and SSL, the module
-		can be enabled to use SSL. Authentication will always be used
-		if needed.
+can be enabled to use SSL. Authentication will always be used
+if needed.
 
 
 The module will try to use the most secure type of
-		authentication that is provided by the server from:
-		Basic, Digest,GSSNEGOTIATE and NTLM.
+authentication that is provided by the server from:
+Basic, Digest, GSSNEGOTIATE and NTLM.
 <!-- CONTRIBUTORS -->
 
 ### License

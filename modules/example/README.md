@@ -1,6 +1,6 @@
 ---
 title: "Example Module"
-description: "This module serves as an example of how to write a module in OpenSIPS. Its primary goal is to simplify the development of new modules for newcomers, providing a clear and accessible starting point."
+description: "This module serves as an example of how to write a module in OpenSIPS."
 ---
 
 ## Admin Guide
@@ -10,8 +10,8 @@ description: "This module serves as an example of how to write a module in OpenS
 
 
 This module serves as an example of how to write a module in OpenSIPS.
-		Its primary goal is to simplify the development of new modules for
-		newcomers, providing a clear and accessible starting point.
+Its primary goal is to simplify the development of new modules for
+newcomers, providing a clear and accessible starting point.
 
 
 ### Dependencies
@@ -30,7 +30,7 @@ The following  modules must be loaded before this module:
 
 
 The following libraries or applications must be installed before running
-		OpenSIPS with this module loaded:
+OpenSIPS with this module loaded:
 
 
 - *None*.
@@ -42,14 +42,14 @@ The following libraries or applications must be installed before running
 #### default_str (string)
 
 
-The default parameter used when the [example str](#func_example_str)
-			function is called without any parameter.
+The default parameter used when the [example_str()](#example_strstring)
+function is called without any parameter.
 
 
 *Default value is "" (empty sring).*
 
 
-```c title="Set 'default_str' parameter"
+```opensips title="Set 'default_str' parameter"
 ...
 modparam("example", "default_str", "TEST")
 ...
@@ -59,14 +59,14 @@ modparam("example", "default_str", "TEST")
 #### default_int (integer)
 
 
-The default parameter used when the [example int](#func_example_int)
-			function is called without any parameter.
+The default parameter used when the [example_int()](#example_intint)
+function is called without any parameter.
 
 
 *Default value is "0".*
 
 
-```c title="Set 'default_int' parameter"
+```opensips title="Set 'default_int' parameter"
 ...
 modparam("example", "default_int", -1)
 ...
@@ -85,7 +85,7 @@ Function that simply prints a message to log, saying that it has been called.
 This function can be used from any route.
 
 
-```c title="example usage"
+```opensips title="example usage"
 ...
 example();
 ...
@@ -96,8 +96,8 @@ example();
 
 
 Function that simply prints a message to log, saying that it has been called.
-			If a parameter is passed, it is printed in the log, otherwise the value of
-			[default str](#param_default_str) parameter is used.
+If a parameter is passed, it is printed in the log, otherwise the value of
+[default_str](#default_str-string) parameter is used.
 
 
 Meaning of the parameters is as follows:
@@ -109,7 +109,7 @@ Meaning of the parameters is as follows:
 This function can be used from any route.
 
 
-```c title="example_str() usage"
+```opensips title="example_str() usage"
 ...
 example_str("test");
 ...
@@ -120,8 +120,8 @@ example_str("test");
 
 
 Function that simply prints a message to log, saying that it has been called.
-			If a parameter is passed, it is printed in the log, otherwise the value of
-			[default int](#param_default_int) parameter is used.
+If a parameter is passed, it is printed in the log, otherwise the value of
+[default_int](#default_int-integer) parameter is used.
 
 
 Meaning of the parameters is as follows:
@@ -133,7 +133,7 @@ Meaning of the parameters is as follows:
 This function can be used from any route.
 
 
-```c title="example_int() usage"
+```opensips title="example_int() usage"
 ...
 example_int(10);
 ...
