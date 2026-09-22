@@ -22,7 +22,7 @@ RUN --mount=type=bind,source=scripts/build,target=scripts/build \
  eval `./scripts/build/get-arch-buildargs.rtp.io platformopts` && \
  apt-get install -y libsrtp2-dev ${LINKER}
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
- apt-get install -y gpp python-is-python3 python3-pip
+ apt-get install -y gpp python-is-python3 python3-pip gcc
 RUN --mount=type=bind,source=dist/voiptests/requirements.txt,target=requirements.txt \
  --mount=type=cache,target=/root/.cache/pip,sharing=locked \
  python -m pip install --break-system-packages -U -r requirements.txt

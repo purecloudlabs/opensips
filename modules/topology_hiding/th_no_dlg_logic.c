@@ -24,6 +24,7 @@
 #include "../../parser/parse_rr.h"
 #include "../../parser/parse_uri.h"
 #include "../../forward.h"
+#include "../../socket_info.h"
 #include "../dialog/dlg_hash.h"
 #include "../tm/tm_load.h"
 #include "../rr/loose.h"
@@ -377,7 +378,8 @@ int topo_hiding_match_no_dlg(struct sip_msg *msg) {
 
 	request_uri = &msg->parsed_uri;
 
-	if (msg->route == NULL && check_self(&request_uri->host, request_uri->port_no ? request_uri->port_no : SIP_PORT, 0)) {
+	if (msg->route == NULL && (find_si_matching_subnet(&request_uri->host, 0) != 0 ||
+		check_self(&request_uri->host, request_uri->port_no ? request_uri->port_no : SIP_PORT, 0))) {
 		/* topology_hiding_match with thinfo and request domain is us
 		 * needs to have a thinfo to continue otherwise we cannot match */
 		for (i = 0; i < request_uri->u_params_no; i++) {

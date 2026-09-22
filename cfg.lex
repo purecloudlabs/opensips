@@ -319,6 +319,7 @@ QUOTES		\"
 TICK		\'
 SLASH		"/"
 AS			{EAT_ABLE}("as"|"AS"){EAT_ABLE}
+SUBNET_MASK {EAT_ABLE}("subnet_mask"|"SUBNET_MASK"){EAT_ABLE}
 USE_WORKERS	{EAT_ABLE}("use_workers"|"USE_WORKERS"){EAT_ABLE}
 SOCK_TOS	{EAT_ABLE}("tos"|"TOS"){EAT_ABLE}
 MARK {EAT_ABLE}("mark"|"MARK"){EAT_ABLE}
@@ -608,6 +609,7 @@ SPACE		[ ]
 
 <INITIAL>{COMMA}		{ count(); return COMMA; }
 <INITIAL>{SEMICOLON}	{ count(); return SEMICOLON; }
+<INITIAL>{SUBNET_MASK}  { count(); return SUBNET_MASK; }
 <INITIAL>{USE_WORKERS}  { count(); return USE_WORKERS; }
 <INITIAL>{SOCK_TOS}	{ count(); return SOCK_TOS; }
 <INITIAL>{MARK} { count(); return MARK; }
