@@ -1,6 +1,6 @@
 ---
 title: "opentelemetry Module"
-description: "The *opentelemetry* module provides OpenTelemetry tracing for OpenSIPS route execution. It creates a root span per processed SIP message and a child span for each route entry."
+description: "The *opentelemetry* module provides OpenTelemetry tracing for OpenSIPS route execution."
 ---
 
 ## Admin Guide
@@ -10,29 +10,29 @@ description: "The *opentelemetry* module provides OpenTelemetry tracing for Open
 
 
 The *opentelemetry* module provides OpenTelemetry
-	tracing for OpenSIPS route execution. It creates a root span per
-	processed SIP message and a child span for each route entry.
+tracing for OpenSIPS route execution. It creates a root span per
+processed SIP message and a child span for each route entry.
 
 
 The root SIP message span follows a local semantic convention inspired
-		by the OpenTelemetry HTTP span conventions: it uses a method-plus-target
-		span name, server/client/internal span kinds based on the OpenSIPS route
-		type, and generic network, client, server and URL attributes wherever
-		they fit the SIP model.
+by the OpenTelemetry HTTP span conventions: it uses a method-plus-target
+span name, server/client/internal span kinds based on the OpenSIPS route
+type, and generic network, client, server and URL attributes wherever
+they fit the SIP model.
 
 
 Spans include common SIP attributes (request method, Call-ID, CSeq,
-		response status) and connection metadata. While a span is active,
-		OpenSIPS logs can be attached as OpenTelemetry events for easier
-		correlation.
+response status) and connection metadata. While a span is active,
+OpenSIPS logs can be attached as OpenTelemetry events for easier
+correlation.
 
 
 Trace data is exported via the OTLP/HTTP exporter from the
-		OpenTelemetry C++ SDK.
+OpenTelemetry C++ SDK.
 
 
 The local SIP span convention emitted by this module is documented in
-		`modules/opentelemetry/semantic-convention/sip-spans.md`.
+`modules/opentelemetry/semantic-convention/sip-spans.md`.
 
 
 ### Dependencies
@@ -51,11 +51,11 @@ The following modules must be loaded before this module:
 
 
 The following libraries or applications must be installed before
-		running OpenSIPS with this module loaded:
+running OpenSIPS with this module loaded:
 
 
 - *OpenTelemetry C++ SDK* (opentelemetry-cpp),
-				with the OTLP/HTTP exporter enabled.
+with the OTLP/HTTP exporter enabled.
 
 
 ### Exported Parameters
@@ -65,18 +65,18 @@ The following libraries or applications must be installed before
 
 
 Enables or disables OpenTelemetry tracing at startup. It can also be
-		changed at runtime using the `opentelemetry:enable`
-		MI command.
+changed at runtime using the `opentelemetry:enable`
+MI command.
 
 
 The module is built only when the OpenTelemetry C++ SDK is available
-			at build time.
+at build time.
 
 
 *Default value is "0 (disabled)".*
 
 
-```c title="Set enable parameter"
+```opensips title="Set enable parameter"
 ...
 modparam("opentelemetry", "enable", 1)
 ...
@@ -87,13 +87,13 @@ modparam("opentelemetry", "enable", 1)
 
 
 If enabled, the module will also profile/trace the OpenSIPS processes,
-		not only the script.
+not only the script.
 
 
 *Default value is "0 (disabled)".*
 
 
-```c title="Set proc_profiling parameter"
+```opensips title="Set proc_profiling parameter"
 ...
 modparam("opentelemetry", "proc_profiling", 1)
 ...
@@ -104,13 +104,13 @@ modparam("opentelemetry", "proc_profiling", 1)
 
 
 Log level threshold used by the OpenTelemetry log consumer when
-		attaching log events to the active span.
+attaching log events to the active span.
 
 
 *Default value is "L_DBG".*
 
 
-```c title="Set log_level parameter"
+```opensips title="Set log_level parameter"
 ...
 modparam("opentelemetry", "log_level", 3)
 ...
@@ -121,13 +121,13 @@ modparam("opentelemetry", "log_level", 3)
 
 
 Selects the OpenTelemetry span processor. When enabled, the module uses
-		the batch span processor; otherwise it uses the simple span processor.
+the batch span processor; otherwise it uses the simple span processor.
 
 
 *Default value is "1 (enabled)".*
 
 
-```c title="Set use_batch parameter"
+```opensips title="Set use_batch parameter"
 ...
 modparam("opentelemetry", "use_batch", 0)
 ...
@@ -143,7 +143,7 @@ Sets the OpenTelemetry "service.name" resource attribute.
 *Default value is "opensips".*
 
 
-```c title="Set service_name parameter"
+```opensips title="Set service_name parameter"
 ...
 modparam("opentelemetry", "service_name", "edge-proxy")
 ...
@@ -154,13 +154,13 @@ modparam("opentelemetry", "service_name", "edge-proxy")
 
 
 Overrides the OTLP/HTTP exporter endpoint. If empty, the OpenTelemetry
-		SDK default is used.
+SDK default is used.
 
 
 *Default value is "empty".*
 
 
-```c title="Set exporter_endpoint parameter"
+```opensips title="Set exporter_endpoint parameter"
 ...
 modparam("opentelemetry", "exporter_endpoint", "http://127.0.0.1:4318/v1/traces")
 ...
@@ -186,18 +186,18 @@ Parameters:
 
 
 - *opentelemetry:enable* - set to "1" to enable
-				tracing or "0" to disable it.
+tracing or "0" to disable it.
 
 
 MI FIFO Command Format:
 
 
-```c
-		## enable tracing
-		opensips-cli -x mi opentelemetry:enable enable=1
-		## disable tracing
-		opensips-cli -x mi opentelemetry:enable enable=0
-		
+```bash
+## enable tracing
+opensips-cli -x mi opentelemetry:enable enable=1
+## disable tracing
+opensips-cli -x mi opentelemetry:enable enable=0
+
 ```
 <!-- CONTRIBUTORS -->
 

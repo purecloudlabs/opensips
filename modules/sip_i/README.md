@@ -1,6 +1,6 @@
 ---
 title: "SIP-I Module"
-description: "This module offers the possibility of processing ISDN User Part(ISUP) messages encapsulated in SIP. The available operations are: reading and modifying parameters from an ISUP message, removing or adding new optional parameters, adding an ISUP part to a SIP message body. This is done explicitly v..."
+description: "This module offers the possibility of processing ISDN User Part(ISUP) messages encapsulated in SIP."
 ---
 
 ## Admin Guide
@@ -34,7 +34,7 @@ The following modules must be loaded before this module:
 
 
 The following libraries or applications must be installed before running
-		OpenSIPS with this module loaded:
+OpenSIPS with this module loaded:
 
 
 - *None*.
@@ -52,7 +52,7 @@ The character to be used as separator in the subname of the *$isup_param* and *$
 *Default value is "|".*
 
 
-```c title="Set param_subfield_separator parameter"
+```opensips title="Set param_subfield_separator parameter"
 ...
 modparam("sip_i", "param_subfield_separator", ":")
 ...
@@ -68,7 +68,7 @@ The string to be used for the Content-Type header field of the ISUP MIME body wh
 *Default value is "application/ISUP;version=itu-t92+".*
 
 
-```c title="Set isup_mime_str parameter"
+```opensips title="Set isup_mime_str parameter"
 ...
 modparam("sip_i", "isup_mime_str", "application/ISUP;base=itu-t92+;version=itu-t")
 ...
@@ -79,14 +79,14 @@ modparam("sip_i", "isup_mime_str", "application/ISUP;base=itu-t92+;version=itu-t
 
 
 The default set of headers (fully defined, including the header
-		termination) to be pushed into the ISUP part together 
-		with the *Content-Type* header.
+termination) to be pushed into the ISUP part together 
+with the *Content-Type* header.
 
 
 *Default value is "Content-Disposition:signal;handling=optional\r\n".*
 
 
-```c title="Set default_part_headers parameter"
+```opensips title="Set default_part_headers parameter"
 ...
 modparam("sip_i", "default_part_headers", "Content-Disposition:signal;handling=required\r\n")
 ...
@@ -97,17 +97,17 @@ modparam("sip_i", "default_part_headers", "Content-Disposition:signal;handling=r
 
 
 Country Code that the first part of the number from
-			P-Asserted-Identity is tested against when trying to map the
-			Calling Party Number ISUP parameter from SIP by default. If there
-			is a match, the value assigned to the Nature of Address Indicator
-			subfield is *3*(national), otherwise it is
-			*4*(international).
+P-Asserted-Identity is tested against when trying to map the
+Calling Party Number ISUP parameter from SIP by default. If there
+is a match, the value assigned to the Nature of Address Indicator
+subfield is *3*(national), otherwise it is
+*4*(international).
 
 
 *Default value is "+1".*
 
 
-```c title="Set country_code parameter"
+```opensips title="Set country_code parameter"
 ...
 modparam("sip_i", "country_code", "+4")
 ...
@@ -175,7 +175,7 @@ The abbreviations that can be given as *isup_msg_type* for each ISUP message typ
 This function can be used from REQUEST_ROUTE,FAILURE_ROUTE,ONREPLY_ROUTE,LOCAL_ROUTE.
 
 
-```c title="add_isup_part usage"
+```opensips title="add_isup_part usage"
 ...
 if ($rs == "183") {
 	# Encapsulate a CPG
@@ -219,10 +219,10 @@ Addressing at entire parameter level as a hex string and at byte level are suppo
 String aliases are not available for all parameters or parameter subfields. Also, not all the possible values of a parameter or parameter subfield have a string alias defined.
 
 
-For more information on supported subfields and aliases check [subfields aliases](#isup_parameter_subfields_and_string_aliases).
+For more information on supported subfields and aliases check [subfields aliases](#isup-parameter-subfields-and-string-aliases).
 
 
-```c title="isup_param usage"
+```opensips title="isup_param usage"
 ...
 	$isup_param(Called Party Number | Nature of address indicator) = 3;
 	...
@@ -258,7 +258,7 @@ The format of the subname for `$isup_param_str` is the following:
 - *subfield_name* - name of the subfield of the ISUP parameter as it appears in ITU-T Rec. Q.763
 
 
-```c title="isup_param_str usage"
+```opensips title="isup_param_str usage"
 ...
 	# may print: "NOA is: national"  
 	xlog("NOA is: $isup_param_str(Called Party Number|Nature of address indicator)");
@@ -279,7 +279,7 @@ The format of the subname for `$isup_param_str` is the following:
 Read-only variable, returns the ISUP message type as string.
 
 
-```c title="isup_msg_type usage"
+```opensips title="isup_msg_type usage"
 ...
 	# may print: "ISUP msg is: IAM"
 	xlog("ISUP msg is: $isup_msg_type");
@@ -307,7 +307,7 @@ The parameters for the transformation are:
 - *subfield_name* - optional, name of the subfield of the ISUP parameter as it appears in ITU-T Rec. Q.763
 
 
-```c title="isup.param usage"
+```opensips title="isup.param usage"
 ...
 	# for this example, we take the ISUP body from the received SIP-I message
 	$var(isup_body) = $(rb[1]);
@@ -341,7 +341,7 @@ The parameters for the transformation are:
 - *subfield_name* - optional, name of the subfield of the ISUP parameter as it appears in ITU-T Rec. Q.763
 
 
-```c title="isup.param.str usage"
+```opensips title="isup.param.str usage"
 ...
 	# for this example, we take the ISUP body from the received SIP-I message
 	$var(isup_body) = $(rb[1]);

@@ -13,15 +13,15 @@ This module provides an HTTP transport layer for OpenSIPS.
 
 
 Implementation of httpd module's http server is based on
-		libmicrohttpd library.
+libmicrohttpd library.
 
 
 ### Overview
 
 
 TLS for the http server is enabled by setting  the `tls_cert_file`
-			and `tls_key_file` parameters. If this is enabled, support for plain
-			http is disabled.
+and `tls_key_file` parameters. If this is enabled, support for plain
+http is disabled.
 
 
 ### Dependencies
@@ -40,26 +40,26 @@ The following modules must be loaded before this module:
 
 
 The following libraries or applications must be installed before 
-		running OpenSIPS with this module loaded:
+running OpenSIPS with this module loaded:
 
 
 - *libmicrohttpd*, with EPOLL support. This
-					typically means a version newer than **0.9.50**.
+typically means a version newer than **0.9.50**.
 
 
 **WARNING!**  Please be aware about an
-			EPOLL support regression in the *libmicrohttpd*
-			library and packaging which affects the OpenSIPS httpd module, which
-			was fixed according to the below timeline.  The effect of the
-			regression is that the HTTP reply body is *sometimes*
-			never written by the library, causing the client (e.g. opensips-cli)
-			to hang indefinitely waiting for it:
+EPOLL support regression in the *libmicrohttpd*
+library and packaging which affects the OpenSIPS httpd module, which
+was fixed according to the below timeline.  The effect of the
+regression is that the HTTP reply body is *sometimes*
+never written by the library, causing the client (e.g. opensips-cli)
+to hang indefinitely waiting for it:
 
 
 - versions **0.9.51** - **0.9.52**
-				have been tested and work correctly
+have been tested and work correctly
 - regression introduced in **0.9.53** (Apr 2017),
-				lasting until **0.9.71** (May 2020)
+lasting until **0.9.71** (May 2020)
 - regression is fixed since **0.9.72** (Dec 2020)
 
 
@@ -70,14 +70,14 @@ The following libraries or applications must be installed before
 
 
 The IP address used by the HTTP server to listen for incoming 
-		requests.
+requests.
 
 
 *The default value is "127.0.0.1"* (binds to loopback only).
-		Use "*" to bind to all IPv6 and IPv4 interfaces.
+Use "*" to bind to all IPv6 and IPv4 interfaces.
 
 
-```c title="Set ip parameter"
+```opensips title="Set ip parameter"
 ...
 modparam("httpd", "ip", "127.0.0.1")
 ...
@@ -88,14 +88,14 @@ modparam("httpd", "ip", "127.0.0.1")
 
 
 The port number used by the HTTP server to listen for incoming 
-		requests.
+requests.
 
 
 *The default value is 8888.*
-		Ports lower than 1024 are not accepted.
+Ports lower than 1024 are not accepted.
 
 
-```c title="Set port parameter"
+```opensips title="Set port parameter"
 ...
 modparam("httpd", "port", 8000)
 ...
@@ -106,19 +106,20 @@ modparam("httpd", "port", 8000)
 
 
 Auto-close TCP connections which are idle for more than the designated
-		timeout, in seconds.  Set to zero to never close any connections.
+timeout, in seconds.  Set to zero to never close any connections.
 
 
-Note: the connection auto-close routine only seems to be executed
-		in an "on-demand" fashion, during an HTTPD network event (e.g. on a new
-		connection), which although not ideal, it should be good enough in
-		practical terms.
+> [!NOTE]
+> The connection auto-close routine only seems to be executed
+> in an "on-demand" fashion, during an HTTPD network event (e.g. on a new
+> connection), which although not ideal, it should be good enough in
+> practical terms.
 
 
 *The default timeout is 30 seconds.*
 
 
-```c title="Set conn_timeout parameter"
+```opensips title="Set conn_timeout parameter"
 ...
 modparam("httpd", "conn_timeout", 10)
 ...
@@ -129,17 +130,17 @@ modparam("httpd", "conn_timeout", 10)
 
 
 It specifies the maximum length (in bytes) of the buffer
-		used to write in the html response.
+used to write in the html response.
 
 
 If the size of the buffer is set to zero, it will be automatically
-		set to a quarter of the size of the pkg memory.
+set to a quarter of the size of the pkg memory.
 
 
 *The default value is 0.*
 
 
-```c title="Set buf_size parameter"
+```opensips title="Set buf_size parameter"
 ...
 modparam("httpd", "buf_size", 524288)
 ...
@@ -150,14 +151,14 @@ modparam("httpd", "buf_size", 524288)
 
 
 It specifies the length (in bytes) of the POST HTTP requests
-		processing buffer.  For large POST request, the default value
-		might require to be increased.
+processing buffer.  For large POST request, the default value
+might require to be increased.
 
 
 *The default value is 1024. The minumal value is 256.*
 
 
-```c title="Set post_buf_size parameter"
+```opensips title="Set post_buf_size parameter"
 ...
 modparam("httpd", "post_buf_size", 4096)
 ...
@@ -168,13 +169,13 @@ modparam("httpd", "post_buf_size", 4096)
 
 
 It specifies the maximum length (in bytes) of the received HTTP requests.  
-		For receiving large POST request, the default value might require to be increased.
+For receiving large POST request, the default value might require to be increased.
 
 
 *The default value is 1024.*
 
 
-```c title="Set receive_buf_size parameter"
+```opensips title="Set receive_buf_size parameter"
 ...
 modparam("httpd", "receive_buf_size", 4096)
 ...
@@ -190,7 +191,7 @@ Public certificate file for httpd. It will be used as server-side certificate fo
 *The default value is ""*
 
 
-```c title="Set tls_cert_file parameter"
+```opensips title="Set tls_cert_file parameter"
 ...
 modparam("httpd", "tls_cert_file", "/etc/opensips/tls/server.pem")
 ...
@@ -206,7 +207,7 @@ Private key of the above certificate. I must be kept in a safe place with tight 
 *The default value is ""*
 
 
-```c title="Set tls_key_file parameter"
+```opensips title="Set tls_key_file parameter"
 ...
 modparam("httpd", "tls_key_file", "/etc/opensips/tls/server.key")
 ...
@@ -217,8 +218,8 @@ modparam("httpd", "tls_key_file", "/etc/opensips/tls/server.key")
 
 
 You can specify the list of algorithms for authentication and encryption that you allow.
-		To obtain a list of ciphers
-		and then choose, use the gnutls-cli application:
+To obtain a list of ciphers
+and then choose, use the gnutls-cli application:
 
 
 - gnutls-cli -l
@@ -231,7 +232,7 @@ You can specify the list of algorithms for authentication and encryption that yo
 *The default value is  "SECURE256:+SECURE192:-VERS-ALL:+VERS-TLS1.2"*
 
 
-```c title="Set tls_key_file parameter"
+```opensips title="Set tls_key_file parameter"
 ...
 modparam("httpd", "tls_ciphers", "SECURE256:+SECURE192:-VERS-ALL:+VERS-TLS1.2")
 ...
@@ -242,15 +243,15 @@ modparam("httpd", "tls_ciphers", "SECURE256:+SECURE192:-VERS-ALL:+VERS-TLS1.2")
 
 
 The realm string to be used for HTTP Basic Authentication
-		challenges.  Only takes effect when both
-		`auth_username` and
-		`auth_password` are set.
+challenges.  Only takes effect when both
+`auth_username` and
+`auth_password` are set.
 
 
 *The default value is "OpenSIPS MI".*
 
 
-```c title="Set auth_realm parameter"
+```opensips title="Set auth_realm parameter"
 ...
 modparam("httpd", "auth_realm", "OpenSIPS Management")
 ...
@@ -261,15 +262,15 @@ modparam("httpd", "auth_realm", "OpenSIPS Management")
 
 
 The username for HTTP Basic Authentication.  When set together
-		with `auth_password`, all HTTP requests must
-		present valid credentials.  Requests without credentials or
-		with incorrect credentials receive a 401 Unauthorized response.
+with `auth_password`, all HTTP requests must
+present valid credentials.  Requests without credentials or
+with incorrect credentials receive a 401 Unauthorized response.
 
 
 *The default value is "" (authentication disabled).*
 
 
-```c title="Set auth_username parameter"
+```opensips title="Set auth_username parameter"
 ...
 modparam("httpd", "auth_username", "admin")
 ...
@@ -280,21 +281,21 @@ modparam("httpd", "auth_username", "admin")
 
 
 The password for HTTP Basic Authentication.  Must be set
-		together with `auth_username`.
+together with `auth_username`.
 
 
 > [!WARNING]
 > When using HTTP Basic Authentication, it is strongly
-		recommended to also enable TLS via
-		`tls_cert_file` and
-		`tls_key_file` to prevent credentials
-		from being transmitted in plaintext.
+recommended to also enable TLS via
+`tls_cert_file` and
+`tls_key_file` to prevent credentials
+from being transmitted in plaintext.
 
 
 *The default value is "" (authentication disabled).*
 
 
-```c title="Set auth_password parameter"
+```opensips title="Set auth_password parameter"
 ...
 modparam("httpd", "auth_password", "secretpass")
 ...
@@ -311,8 +312,8 @@ Replaces obsolete MI command: *httpd_list_root_path*.
 
 
 Lists all the registered http root paths into the httpd module.
-		When a request comes in, if the root parth is in the list,
-		the request will be sent to the module that register it.
+When a request comes in, if the root parth is in the list,
+the request will be sent to the module that register it.
 
 
 Name: *httpd:list_root_path*
@@ -324,7 +325,7 @@ Parameters: none
 MI FIFO Command Format:
 
 
-```c
+```bash
 opensips-cli -x mi httpd:list_root_path
 		
 ```
@@ -340,22 +341,22 @@ No function exported to be used from configuration file.
 
 
 Due to the fact that OpenSIPS is a multiprocess application,
-		the microhttpd library is used in "external select" mode.
-		This ensures that the library is not running in
-		multithread mode and the library is entirely controled
-		by OpenSIPS.  Due to this particular mode of operations,
-		for now, the entire http response is built in a pre-allocated
-		buffer (see buf_size parameter).
+the microhttpd library is used in "external select" mode.
+This ensures that the library is not running in
+multithread mode and the library is entirely controled
+by OpenSIPS.  Due to this particular mode of operations,
+for now, the entire http response is built in a pre-allocated
+buffer (see buf_size parameter).
 
 
 Future realeases of this module will address this issue.
 
 
 Running the http daemon as non root on ports below 1024 is
-		forbidden by default in linux (kernel>=2.6.24).
-		To allow the port binding, one can use
-		*setcap* to give
-		extra privilleges to opensips binary:
+forbidden by default in linux (kernel>=2.6.24).
+To allow the port binding, one can use
+*setcap* to give
+extra privilleges to opensips binary:
 
 
 ```c

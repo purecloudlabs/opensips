@@ -13,7 +13,7 @@ In order to notify an external application about OpenSIPS internal events, the *
 * exports generic functions to raise an event (regardless the transport protocol used)
 * communicates with different transport protocols to send the events
 
-More detailed information about **OpenSIPS Event Interface** can be found in the [Event Interface Tutorial](https://docs.opensips.org/tutorials-eventinterface).
+More detailed information about **OpenSIPS Event Interface** can be found in the [Event Interface Tutorial](https://docs.opensips.org/tutorials/eventinterface/).
 
 ---
 
@@ -22,7 +22,7 @@ More detailed information about **OpenSIPS Event Interface** can be found in the
 There are several types of events that can be exported by OpenSIPS:
 * **Core events** - internal events that trigger changes of OpenSIPS core/global behavior. A full list of exported core events can be found [here](Interface-CoreEvents.md).
 * **Modules events** - events triggered by each module, when loaded. Each module can export zero, one or more events. Details can be found in the [documentation page](Modules.md) of each module.
-* **Custom events** - triggered from script using the [raise_event()](Script-CoreFunctions.md#raise_event) command.
+* **Custom events** - triggered from script using the [raise_event()](Script-CoreFunctions.md#raise_eventevent-attrs-vals) command.
 
 ---
 
@@ -46,15 +46,15 @@ An external application can subscribe to any exported event and can be notified 
 
 ## Events Subscription
 
-You can subscribe for an event either at startup (using the [subscribe_event()](Script-CoreFunctions.md#subscribe_event) command in the script) or during runtime, using the [evi:subscribe](Interface-CoreMI.md#evi_subscribe) MI command.
+You can subscribe for an event either at startup (using the [subscribe_event()](Script-CoreFunctions.md#subscribe_eventstring-string--int) command in the script) or during runtime, using the [evi:subscribe](Interface-CoreMI.md#evisubscribe) MI command.
 
 ---
 
 ## Examples
 
-In order to configure a RabbbitMQ server to be notified when a custom event is triggered, first you have to subscribe it to the event, using the [subscribe_event()](Script-CoreFunctions.md#subscribe_event) command:
+In order to configure a RabbbitMQ server to be notified when a custom event is triggered, first you have to subscribe it to the event, using the [subscribe_event()](Script-CoreFunctions.md#subscribe_eventstring-string--int) command:
 
-```c
+```opensips
 
     startup_route {
         subscribe_event("E_SCRIPT_CUSTOM_EVENT", "rabbitmq:127.0.0.1/opensips");
@@ -62,9 +62,9 @@ In order to configure a RabbbitMQ server to be notified when a custom event is t
 
 ```
 
-Then, in order to trigger the event from the script, call the [raise_event()](Script-CoreFunctions.md#raise_event) command when needed:
+Then, in order to trigger the event from the script, call the [raise_event()](Script-CoreFunctions.md#raise_eventevent-attrs-vals) command when needed:
 
-```text
+```opensips
 
    ....
    raise_event("E_SCRIPT_CUSTOM_EVENT");     # raises an event without any parameters

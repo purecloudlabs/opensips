@@ -4,9 +4,25 @@ name: rtp.io
 
 # Controls when the action will run.
 on:
-  # Triggers the workflow on all push or pull request events
+  # Triggers the workflow on push or pull request events touching source
   push:
+    paths:
+      - '**/Makefile*'
+      - '**/*.c'
+      - '**/*.cpp'
+      - '**/*.h'
+      - 'cfg.y'
+      - 'cfg.lex'
+      - 'scripts/**'
   pull_request:
+    paths:
+      - '**/Makefile*'
+      - '**/*.c'
+      - '**/*.cpp'
+      - '**/*.h'
+      - 'cfg.y'
+      - 'cfg.lex'
+      - 'scripts/**'
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -39,8 +55,9 @@ jobs:
 
     - name: Install git
       run: |
-        apt-get update
-        apt-get install -y git lsb-release gnupg2 wget
+        APT_OPTS='-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::Pipeline-Depth=0'
+        apt-get ${APT_OPTS} update
+        apt-get ${APT_OPTS} install -y git lsb-release gnupg2 wget
 
     - uses: actions/checkout@v5
       with:
@@ -79,7 +96,8 @@ jobs:
 
     - name: Build rtp.io module
       run: |
-        apt-get install -y libsrtp2-dev
+        APT_OPTS='-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::Pipeline-Depth=0'
+        apt-get ${APT_OPTS} install -y libsrtp2-dev
         ONE_MODULE=rtp.io LDFLAGS=-flto CFLAGS=-flto sh -x scripts/build/do_build.sh
 
     - name: Set up Python ${{ env.PYTHON_VERSION }}
@@ -106,7 +124,8 @@ jobs:
         ./configure
         cd ../../dist/voiptests
         python -m pip install -r requirements.txt
-        DEBIAN_FRONTEND=noninteractive apt-get install -y gpp
+        APT_OPTS='-o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::http::Pipeline-Depth=0'
+        DEBIAN_FRONTEND=noninteractive apt-get ${APT_OPTS} install -y gpp
         sh -x ./test_run.sh
 
     - name: Pass Environment

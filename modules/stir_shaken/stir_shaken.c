@@ -891,6 +891,7 @@ static int get_orig_tn_from_msg(struct sip_msg *msg, str *orig_tn)
 	}
 
 	*orig_tn = parsed_uri.user;
+	trim_user_params(orig_tn);
 
 	return 0;
 }
@@ -922,6 +923,7 @@ static int get_dest_tn_from_msg(struct sip_msg *msg, str *dest_tn)
 	}
 
 	*dest_tn = parsed_uri.user;
+	trim_user_params(dest_tn);
 
 	return 0;
 }
@@ -1626,16 +1628,6 @@ invalid_hdr:
 error:
 	if (params)
 		free_params(params);
-	if (parsed->dec_header.s)
-		pkg_free(parsed->dec_header.s);
-	if (parsed->dec_payload.s)
-		pkg_free(parsed->dec_payload.s);
-	if (parsed->dec_signature.s)
-		pkg_free(parsed->dec_signature.s);
-	if (parsed->header)
-		cJSON_Delete(parsed->header);
-	if (parsed->payload)
-		cJSON_Delete(parsed->payload);
 	return rc;
 }
 
@@ -2003,7 +1995,7 @@ static int get_parsed_identity(struct sip_msg *msg,
 				(*parsed)->ppt_hdr_param.len, (*parsed)->ppt_hdr_param.s);
 			rc = -2; /* consider we did not find a proper Identity header */
 		}
-		pkg_free(*parsed);
+		parsed_ctx_free(*parsed);
 		*parsed = NULL;
 		/* let's check other Identity hdr, if present */
 		identity_hdr = get_next_header_by_static_name ( identity_hdr,

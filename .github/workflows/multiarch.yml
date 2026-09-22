@@ -4,9 +4,25 @@ name: Multi-Architecture Build
 
 # Controls when the action will run. 
 on:
-  # Triggers the workflow on all push or pull request events
+  # Triggers the workflow on push or pull request events touching source
   push:
+    paths:
+      - '**/Makefile*'
+      - '**/*.c'
+      - '**/*.cpp'
+      - '**/*.h'
+      - 'cfg.y'
+      - 'cfg.lex'
+      - 'scripts/**'
   pull_request:
+    paths:
+      - '**/Makefile*'
+      - '**/*.c'
+      - '**/*.cpp'
+      - '**/*.h'
+      - 'cfg.y'
+      - 'cfg.lex'
+      - 'scripts/**'
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -18,7 +34,7 @@ jobs:
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:${{ matrix.os }}
+      image: ghcr.io/opensips/ubuntu-ci:${{ matrix.os }}
       options: >-
         -v sources:/__w/${{ github.event.repository.name }}/${{ github.event.repository.name }}
     env:
@@ -32,11 +48,6 @@ jobs:
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      - name: Install git
-        run: |
-          apt-get update
-          apt-get install -y git lsb-release gnupg2 wget
-
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v5
         with:

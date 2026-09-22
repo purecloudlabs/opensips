@@ -7,7 +7,7 @@ description: "OpenSIPS 3.0+ releases offer script writers full support for pipin
 
 OpenSIPS 3.0+ releases offer script writers full support for piping the *opensips.cfg* file (including any other files imported by it) to a generic preprocessing command.  This may be useful in scenarios where *opensips.cfg* must be parameterized (e.g. listening interfaces, ports, DB connectors, etc.) and deployed to multiple servers, in an automated fashion.  The system administrator may achieve this using the "-p `<cmdline>`" (preprocessor) option.  For example:
 
-```text
+```bash
 
 opensips -f opensips.cfg -p /bin/cat
 
@@ -29,7 +29,7 @@ Below are some examples of using more advanced templating languages on top of op
 
 [GNU m4](https://www.gnu.org/software/m4/) is a simplistic preprocessor with a mild learning curve, equipped with textual substitution, if statements and file includes among the most notable features.  Here is an example integration with *opensips.cfg*:
 
-```c
+```opensips
 
 listen = udp:PRIVATE_IP:5060
 loadmodule "proto_udp.so"
@@ -52,7 +52,7 @@ divert(0)dnl
 
 ... and we start OpenSIPS using the below command, which will pipe *opensips.cfg.m4* to ''m4**s standard input, and then read the resulting file from its standard output:**
 
-```text
+```bash
 
 opensips -f opensips.cfg.m4 -p "m4 env.m4 -"
 
@@ -68,7 +68,7 @@ First, install the **jinja2** Python module with: **"pip install jinja2"**.  Nex
 
   
 
-```c
+```opensips
 
 listen = udp:{{ private_ip }}:5060
 loadmodule "proto_udp.so"
@@ -78,7 +78,7 @@ loadmodule "proto_udp.so"
 
   
 
-```text
+```python
 
 import sys
 import json
@@ -94,7 +94,7 @@ with open('env.json') as f:
 
   
 
-```text
+```json
 
 {
     "private_ip": "127.0.0.1"
@@ -107,7 +107,7 @@ with open('env.json') as f:
 
 ... and we start OpenSIPS using:
 
-```text
+```bash
 
 opensips -f opensips.cfg.j2 -p "python opensips-preproc.py"
 
@@ -123,7 +123,7 @@ First, install the ERB package (for Debian/Ubuntu: **"apt install ruby-ejs"**). 
 
   
 
-```c
+```opensips
 
 listen = udp:<%= private_ip %>:5060
 loadmodule "proto_udp.so"
@@ -133,7 +133,7 @@ loadmodule "proto_udp.so"
 
   
 
-```text
+```rb
 
 #!/usr/bin/env ruby
 require 'erb'
@@ -147,7 +147,7 @@ $stdout.write template.result($erb_context)
 
   
 
-```text
+```rb
 
 $erb_context = binding
 private_ip   = '127.0.0.1'
@@ -159,7 +159,7 @@ private_ip   = '127.0.0.1'
 
 ... and OpenSIPS is now started using:
 
-```text
+```bash
 
 opensips -f opensips.cfg.erb -p "ruby opensips-preproc.rb"
 
@@ -182,7 +182,7 @@ m4 env.m4 - | tee >(grep -v __OSSPP_ >/tmp/opensips.cfg)
 
 ... and now we start OpenSIPS using:
 
-```text
+```bash
 
 opensips -f opensips.cfg.m4 -p ~/src/preprocessor.sh
 

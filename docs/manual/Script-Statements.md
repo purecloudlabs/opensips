@@ -11,7 +11,7 @@ IF-ELSE statement
 
 Prototype:
 
-```text
+```opensips
 
     if (expr) {
        actions;
@@ -40,7 +40,7 @@ The logical operators that can be used in the logical expressions:
 
 Example of usage:
 
-```text
+```opensips
 
     if ( is_method("INVITE") && $rp==5060 )
     {
@@ -58,7 +58,7 @@ SWITCH statement - it can be used to test the value of a pseudo-variable.
 IMPORTANT NOTE: 'break' can be used only to mark the end of a 'case' branch (as it is in shell scripts). If you are trying to use 'break' outside a 'case' block the script will return error -- you must use 'return' there.
 
 Example of usage:
-```c
+```opensips
 
     route {
         route(my_logic);
@@ -119,7 +119,7 @@ Example of usage:
 while statement
 
 Example of usage:
-```text
+```opensips
 
     $var(i) = 0;
     $var(cli) = NULL;
@@ -139,7 +139,7 @@ Example of usage:
 for each statement - easy iteration over indexed variables or pseudo-variables
 
 Example of usage:
-```text
+```opensips
 
     $avp(arr) = 0;
     $avp(arr) = 1;

@@ -1,6 +1,6 @@
 ---
-title: "pua_reginfo Module"
-description: "This module publishes information about \"reg\"-events according to to RFC 3680. This can be used distribute the registration-info status to the subscribed watchers."
+title: "PUA reginfo Module"
+description: "This module publishes information about \"reg\"-events according to to RFC 3680."
 ---
 
 ## Admin Guide
@@ -10,35 +10,35 @@ description: "This module publishes information about \"reg\"-events according t
 
 
 This module publishes information about "reg"-events according to
-              to RFC 3680. This can be used distribute the registration-info
-              status to the subscribed watchers.
+to RFC 3680. This can be used distribute the registration-info
+status to the subscribed watchers.
 
 
 This module "PUBLISH"es information when a new user registers
-              at this server (e.g. when "save()" is called) to users, which have
-              subscribed for the reg-info for this user.
+at this server (e.g. when "save()" is called) to users, which have
+subscribed for the reg-info for this user.
 
 
 This module can "SUBSCRIBE" for information at another server, so it
-              will receive "NOTIFY"-requests, when the information about a user
-              changes.
+will receive "NOTIFY"-requests, when the information about a user
+changes.
 
 
 And finally, it can process received "NOTIFY" requests and it will 
-              update the local registry accordingly.
+update the local registry accordingly.
 
 
 Use cases for this might be:
 
 
 - Keeping different Servers in Sync regarding
-		the location database
+the location database
 - Get notified, when a user registers: A presence-server,
-		which handles offline message storage for an account, would get
-		notified, when the user comes online.
+which handles offline message storage for an account, would get
+notified, when the user comes online.
 - A client could subscribe to its own registration-status,
-		so he would get notified as soon as his account gets administratively
-		unregistered.
+so he would get notified as soon as his account gets administratively
+unregistered.
 - ...
 
 
@@ -68,15 +68,15 @@ None.
 
 
 The default domain for the registered users to be used when
-		constructing the uri for the registrar callback.
+constructing the uri for the registrar callback.
 
 
 *Default value is "NULL".*
 
 
-```c title="Set default_domain parameter"
+```opensips title="Set default_domain parameter"
 ...
-modparam("pua_reginfo", "default_domain", "kamailio.org")
+modparam("pua_reginfo", "default_domain", "opensips.org")
 ...
 ```
 
@@ -90,7 +90,7 @@ Whether or not to generate PUBLISH requests.
 *Default value is "1" (enabled).*
 
 
-```c title="Set publish_reginfo parameter"
+```opensips title="Set publish_reginfo parameter"
 ...
 modparam("pua_reginfo", "publish_reginfo", 0)
 ...
@@ -106,9 +106,9 @@ The outbound_proxy uri to be used when sending Subscribe and Publish requests.
 *Default value is "NULL".*
 
 
-```c title="Set outbound_proxy parameter"
+```opensips title="Set outbound_proxy parameter"
 ...
-modparam("pua_reginfo", "outbound_proxy", "sip:proxy@kamailio.org")
+modparam("pua_reginfo", "outbound_proxy", "sip:proxy@opensips.org")
 ...
 ```
 
@@ -119,7 +119,7 @@ modparam("pua_reginfo", "outbound_proxy", "sip:proxy@kamailio.org")
 The IP address of the server.
 
 
-```c title="Set server_address parameter"
+```opensips title="Set server_address parameter"
 ...
 modparam("pua_reginfo", "server_address", "sip:reginfo@160.34.23.12")
 ...
@@ -135,7 +135,7 @@ The domain for for querying the usrloc-database.
 *Default value is "NULL" (not set).*
 
 
-```c title="Set ul_domain parameter"
+```opensips title="Set ul_domain parameter"
 ...
 modparam("pua_reginfo", "ul_domain", "location")
 ...
@@ -146,13 +146,13 @@ modparam("pua_reginfo", "ul_domain", "location")
 
 
 The Key, which may be used for retrieving multiple public identies
-		for a user.
+for a user.
 
 
 *Default value is "NULL" (not set).*
 
 
-```c title="Set ul_identities_key parameter"
+```opensips title="Set ul_identities_key parameter"
 ...
 modparam("pua_reginfo", "ul_identities_key", "identities")
 ...
@@ -164,7 +164,6 @@ onreply_route[register_reply] {
 }
 
 ...
-		
 ```
 
 
@@ -175,34 +174,33 @@ onreply_route[register_reply] {
 
 
 This function processes received "NOTIFY"-requests and updates
-				the local registry accordingly.
+the local registry accordingly.
 
 
 This method does not create any SIP-Response, this has to be done
-				by the script-writer.
+by the script-writer.
 
 
 The parameter has to correspond to user location table (domain)
-				where to store the record.
+where to store the record.
 
 
 Return codes:
 
 
 - *2* - contacts successfully updated,
-				but no more contacts online now.
+but no more contacts online now.
 *1* - contacts successfully updated and at
-				at least one contact still registered.
+at least one contact still registered.
 *-1* - Invalid NOTIFY or other error (see log-file)
 
 
-```c title="reginfo_handle_notify usage"
+```opensips title="reginfo_handle_notify usage"
 ...
 if(is_method("NOTIFY")) 
 	if (reginfo_handle_notify("location"))
 		send_reply("202", "Accepted");
 ...
-				
 ```
 
 
@@ -210,18 +208,18 @@ if(is_method("NOTIFY"))
 
 
 This function will subscribe for reginfo-information at the given
-				server URI.
+server URI.
 
 
 Meaning of the parameters is as follows:
 
 
 - *uri* - SIP-URI of the server, where to subscribe,
-				may contain pseudo-variables.
+may contain pseudo-variables.
 *expires* - Expiration date for this subscription, in seconds (default 3600)
 
 
-```c title="reginfo_subscribe usage"
+```opensips title="reginfo_subscribe usage"
 ...
 route {
 	t_on_reply("1");
@@ -232,8 +230,7 @@ reply_route[1] {
 	if (t_check_status("200")) 
 		reginfo_subscribe("$ru");		
 }
-...
-				
+...		
 ```
 
 
@@ -241,14 +238,14 @@ reply_route[1] {
 
 
 Explicitly update the presence status, e.g., when new information
-				is learned. This may trigger a new NOTIFY towards subscribed
-				entities; at least it will update the internal information for
-				subsequent subscribe and notifies.
+is learned. This may trigger a new NOTIFY towards subscribed
+entities; at least it will update the internal information for
+subsequent subscribe and notifies.
 
 
 This is done implicitly, when a registration is updated. However,
-				when a registration was just updated with additional information like
-				identities, this is not triggered automatically.
+when a registration was just updated with additional information like
+identities, this is not triggered automatically.
 
 
 Meaning of the parameters is as follows:
@@ -257,7 +254,7 @@ Meaning of the parameters is as follows:
 - *aor* - The AOR to be updated.
 
 
-```c title="reginfo_subscribe usage"
+```opensips title="reginfo_subscribe usage"
 ...
 modparam("pua_reginfo", "ul_domain", "location")
 modparam("pua_reginfo", "ul_identities_key", "identities")
@@ -270,7 +267,6 @@ onreply_route[register_reply] {
 }
 
 ...
-				
 ```
 <!-- CONTRIBUTORS -->
 
