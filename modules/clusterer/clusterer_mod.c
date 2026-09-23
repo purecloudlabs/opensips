@@ -49,6 +49,7 @@ int sync_timeout = DEFAULT_SYNC_TIMEOUT;
 int current_id = -1;
 int db_mode = 1;
 int clusterer_enable_rerouting = 1;
+int rst_ping_jitter = 0;
 
 str clusterer_db_url = {NULL, 0};
 
@@ -167,6 +168,7 @@ static const param_export_t params[] = {
 	{"sync_packet_size",	INT_PARAM,	&sync_packet_size	},
 	{"dispatch_jobs",		INT_PARAM,	&dispatch_jobs		},
 	{"enable_rerouting",		INT_PARAM,	&clusterer_enable_rerouting	},
+	{"rst_ping_jitter",		INT_PARAM,	&rst_ping_jitter	},
 	{0, 0, 0}
 };
 
