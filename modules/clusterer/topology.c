@@ -761,7 +761,7 @@ int delete_neighbour(node_info_t *from_node, node_info_t *to_delete_n)
 	return 0;
 }
 
-static int add_neighbour(node_info_t *to_node, node_info_t *new_n)
+int add_neighbour(node_info_t *to_node, node_info_t *new_n)
 {
 	struct neighbour *neigh;
 

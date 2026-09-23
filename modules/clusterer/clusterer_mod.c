@@ -50,6 +50,7 @@ int current_id = -1;
 int db_mode = 1;
 int clusterer_enable_rerouting = 1;
 int rst_ping_jitter = 0;
+int preserve_links_on_reload = 0;
 
 str clusterer_db_url = {NULL, 0};
 
@@ -169,6 +170,7 @@ static const param_export_t params[] = {
 	{"dispatch_jobs",		INT_PARAM,	&dispatch_jobs		},
 	{"enable_rerouting",		INT_PARAM,	&clusterer_enable_rerouting	},
 	{"rst_ping_jitter",		INT_PARAM,	&rst_ping_jitter	},
+	{"preserve_links_on_reload",	INT_PARAM,	&preserve_links_on_reload	},
 	{0, 0, 0}
 };
 
@@ -590,6 +592,8 @@ mi_response_t *clusterer_reload(const mi_params_t *params,
 
 		return init_mi_error(500, "Failed to reload", 16);
 	}
+	if (preserve_links_on_reload)
+		preserve_up_links(new_info);
 	old_info = *cluster_list;
 	*cluster_list = new_info;
 	lock_stop_write(cl_list_lock);
