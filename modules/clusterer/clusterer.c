@@ -2000,6 +2000,51 @@ int preserve_reg_caps(cluster_info_t *new_info)
 	return 0;
 }
 
+void preserve_up_links(cluster_info_t *new_info)
+{
+	cluster_info_t *cl, *new_cl;
+	node_info_t *node, *new_node;
+
+	for (cl = *cluster_list; cl; cl = cl->next) {
+		for (new_cl = new_info; new_cl && new_cl->cluster_id != cl->cluster_id;
+			new_cl = new_cl->next) ;
+		if (!new_cl)
+			continue;
+
+		for (node = cl->node_list; node; node = node->next) {
+			if (node == cl->current_node)
+				continue;
+
+			lock_get(node->lock);
+			if (node->link_state != LS_UP) {
+				lock_release(node->lock);
+				continue;
+			}
+
+			new_node = get_node_by_id(new_cl, node->node_id);
+			if (!new_node || str_strcmp(&new_node->url, &node->url)) {
+				lock_release(node->lock);
+				continue;
+			}
+
+			new_node->link_state = LS_UP;
+			new_node->last_ping = node->last_ping;
+			new_node->last_sent = node->last_sent;
+			new_node->last_pong = node->last_pong;
+			new_node->last_recv = node->last_recv;
+			new_node->ls_seq_no = node->ls_seq_no;
+			new_node->top_seq_no = node->top_seq_no;
+			new_node->cap_seq_no = node->cap_seq_no;
+			new_node->ls_timestamp = node->ls_timestamp;
+			new_node->top_timestamp = node->top_timestamp;
+			new_node->cap_timestamp = node->cap_timestamp;
+			lock_release(node->lock);
+
+			add_neighbour(new_cl->current_node, new_node);
+		}
+	}
+}
+
 void remove_node(struct cluster_info *cl, struct node_info *node)
 {
 	node_info_t *it;

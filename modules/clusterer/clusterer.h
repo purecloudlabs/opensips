@@ -210,6 +210,7 @@ int cl_register_cap(str *cap, cl_packet_cb_f packet_cb, cl_event_cb_f event_cb,
 struct local_cap *dup_caps(struct local_cap *caps);
 
 int preserve_reg_caps(struct cluster_info *new_info);
+void preserve_up_links(struct cluster_info *new_info);
 
 int mi_cap_set_state(int cluster_id, str *capability, int status);
 int get_capability_status(struct cluster_info *cluster, str *capability);
