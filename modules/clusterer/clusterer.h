@@ -167,6 +167,9 @@ extern str node_st_sr_ident;
 extern str cap_sr_details_str[];
 
 extern int dispatch_jobs;
+extern int reload_on_unknown_source;
+
+int reload_clusterer_on_unknown(void);
 
 void sync_check_timer(utime_t ticks, void *param);
 
