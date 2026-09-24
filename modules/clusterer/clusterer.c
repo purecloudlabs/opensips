@@ -1345,6 +1345,28 @@ void bin_rcv_cl_packets(bin_packet_t *packet, int packet_type,
 
 	node = get_node_by_id(cl, source_id);
 
+	if (!node && db_mode && reload_on_unknown_source) {
+		lock_stop_read(cl_list_lock);
+		reload_clusterer_on_unknown();
+		lock_start_read(cl_list_lock);
+
+		cl = get_cluster_by_id(cl_id);
+		if (!cl) {
+			LM_WARN("Received message from unknown cluster id [%d]\n", cl_id);
+			goto exit;
+		}
+
+		lock_get(cl->current_node->lock);
+		if (!(cl->current_node->flags & NODE_STATE_ENABLED)) {
+			lock_release(cl->current_node->lock);
+			LM_INFO("Current node disabled, ignoring received clusterer bin packet\n");
+			goto exit;
+		}
+		lock_release(cl->current_node->lock);
+
+		node = get_node_by_id(cl, source_id);
+	}
+
 	if (!node) {
 		LM_INFO("Received message with unknown source id [%d]\n", source_id);
 		if (!db_mode)
