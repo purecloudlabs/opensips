@@ -528,7 +528,8 @@ static int wss_read_req(struct tcp_connection* con, int* bytes_read)
 	}
 
 	/* we need to fix the SSL connection before doing anything */
-	if (tls_mgm_api.tls_fix_read_conn(con, con->fd, 0, t_dst, 1) < 0) {
+	size = tls_mgm_api.tls_fix_read_conn(con, con->fd, 0, t_dst, 1);
+	if (size < 0) {
 		LM_ERR("cannot fix read connection\n");
 		if ( (d=con->proto_data) && d->dest && d->tprot ) {
 			if ( d->message ) {
@@ -542,13 +543,18 @@ static int wss_read_req(struct tcp_connection* con, int* bytes_read)
 		}
 		goto error;
 	}
+	if (size == 0) {
+		LM_DBG("SSL accept/connect still pending!\n");
+		goto done;
+	}
 
 	d=con->proto_data;
 
 	if (WS_STATE(con) != WS_CON_HANDSHAKE_DONE) {
 		size = ws_server_handshake(con);
 		if (size < 0) {
-			LM_ERR("cannot complete WebSocket handshake\n");
+			LM_ERR("cannot complete WebSocket handshake from %s:%d\n",
+					ip_addr2a(&con->rcv.src_ip), con->rcv.src_port);
 			goto error;
 		}
 

@@ -45,6 +45,7 @@
 #include "../../mem/shm_mem.h"
 #include "../../mem/mem.h"
 #include "../../msg_translator.h"
+#include "../../parser/parse_body.h"
 #include "../../profiling.h"
 #include "../b2b_entities/b2be_load.h"
 #include "../presence/hash.h"
@@ -1608,11 +1609,13 @@ int _b2b_pass_request(struct sip_msg *msg, b2bl_tuple_t *tuple,
 	str method;
 	int request_id;
 	b2bl_entity_id_t *peer;
+	b2bl_entity_id_t *it, *leg_owner = NULL;
 	b2bl_entity_id_t** entity_head = NULL;
 	b2b_req_data_t req_data;
 	b2b_rpl_data_t rpl_data;
 	int do_unlock = 0;
 	int maxfwd;
+	int up_leg_idx = -1, idx;
 	str *ct_hdrs;
 
 	if (!tuple) {
@@ -1672,8 +1675,50 @@ int _b2b_pass_request(struct sip_msg *msg, b2bl_tuple_t *tuple,
 		break;
 	}
 
+	/* PRACK and UPDATE received on the upstream side belong to one specific
+	 * early dialog, named by the leg index in the to-tag, and must be relayed
+	 * only to the peer that early dialog was built from. Relaying them to
+	 * every peer makes each of them answer, and those replies then race for a
+	 * single upstream transaction, so all but one get dropped.
+	 *
+	 * Deliberately limited to these two methods. Every other in-dialog
+	 * request keeps the historical fan-out: a BYE in particular still has to
+	 * reach every peer, because b2b_mark_todel() only arms the tuple's 30s
+	 * lifetime and does not terminate the remaining entities itself.
+	 *
+	 * If no peer claims the index we also keep the old behaviour and pass the
+	 * request to all of them. */
+	if ((method.len == PRACK_LEN &&
+		!strncasecmp(method.s, PRACK, PRACK_LEN)) ||
+		(method.len == UPDATE_LEN &&
+		!strncasecmp(method.s, UPDATE, UPDATE_LEN))) {
+		for (it = peer; it && it->key.s; it = it->next) {
+			idx = get_passed_upstream_leg_idx(msg, tuple, it);
+			if (idx <= 0)
+				continue;
+			up_leg_idx = idx;
+			if (it->type == B2B_CLIENT && b2b_api.has_leg_idx &&
+				b2b_api.has_leg_idx(it->type, &it->key, idx) > 0) {
+				leg_owner = it;
+				break;
+			}
+		}
+		if (leg_owner)
+			LM_DBG("upstream leg [%d] owned by peer [%.*s]\n",
+				up_leg_idx, leg_owner->key.len, leg_owner->key.s);
+		else if (up_leg_idx > 0)
+			LM_DBG("no peer owns upstream leg [%d] - relaying to all\n",
+				up_leg_idx);
+	}
+
 	while (peer && peer->key.s)
 	{
+		if (leg_owner && peer != leg_owner) {
+			LM_DBG("Skip peer [%.*s], request belongs to upstream leg [%d]\n",
+				peer->key.len, peer->key.s, up_leg_idx);
+			peer = peer->next;
+			continue;
+		}
 		LM_DBG("Send request [%.*s] to peer [%.*s]\n",
 			method.len, method.s, peer->key.len, peer->key.s);
 		memset(&req_data, 0, sizeof(b2b_req_data_t));
@@ -1684,9 +1729,11 @@ int _b2b_pass_request(struct sip_msg *msg, b2bl_tuple_t *tuple,
 		req_data.body =cur_route_ctx.body->len?cur_route_ctx.body:NULL;
 		req_data.contact_hdr_params = ct_hdrs;
 		if (peer->type == B2B_CLIENT &&
-				method.len == PRACK_LEN &&
-				!strncasecmp(method.s, PRACK, PRACK_LEN))
-			req_data.leg_idx = get_passed_upstream_leg_idx(msg, tuple, peer);
+			(peer == leg_owner ||
+			(method.len == PRACK_LEN &&
+			!strncasecmp(method.s, PRACK, PRACK_LEN))))
+			req_data.leg_idx = leg_owner ? up_leg_idx :
+				get_passed_upstream_leg_idx(msg, tuple, peer);
 		/* Decrement Max-Forwards value */
 		if ((maxfwd = b2b_msg_get_maxfwd(msg)) > (int)0)
 			req_data.maxfwd = maxfwd;
@@ -2154,6 +2201,40 @@ int b2b_handle_reply(struct sip_msg *msg, unsigned int flags)
 		LM_ERR("The 'b2b_handle_reply' function can only be used from the "
 			"b2b_logic dedicated reply routes\n");
 		return -1;
+	}
+
+	if (msg->body_lumps || msg->add_rm || should_update_sip_body(msg)) {
+		if (b2b_api.apply_lumps(msg) < 0) {
+			LM_ERR("Failed to apply lumps\n");
+			return -1;
+		}
+		if (!msg->body_lumps && !msg->add_rm && !should_update_sip_body(msg)) {
+			/* Message was rebuilt; apply_lumps only calls parse_msg which
+			 * does not parse all headers. Parse them fully before rebuilding
+			 * the body and extra headers. */
+			if (parse_headers(msg, HDR_EOH_F, 0) < 0) {
+				LM_ERR("Failed to parse headers after applying lumps\n");
+				return -1;
+			}
+			/* Refresh body in-place from the rebuilt buffer. */
+			cur_route_ctx.body->s = NULL;
+			cur_route_ctx.body->len = 0;
+			if (msg->content_length && get_body(msg, cur_route_ctx.body) != 0) {
+				LM_ERR("Failed to re-read body after applying lumps\n");
+				return -1;
+			}
+			/* Rebuild extra_headers so that Content-Type from the new body
+			 * is forwarded. _b2b_send_reply does not add Content-Type
+			 * automatically for replies. */
+			if (cur_route_ctx.extra_headers->s)
+				pkg_free(cur_route_ctx.extra_headers->s);
+			cur_route_ctx.extra_headers->s = NULL;
+			cur_route_ctx.extra_headers->len = 0;
+			if (b2b_extra_headers(msg, NULL, NULL, cur_route_ctx.extra_headers) < 0) {
+				LM_ERR("Failed to rebuild extra headers after applying lumps\n");
+				return -1;
+			}
+		}
 	}
 
 	return _b2b_handle_reply(msg, NULL, NULL, NULL, flags) ? -1 : 1;
