@@ -433,6 +433,14 @@ int _wolfssl_tls_async_connect(struct tcp_connection *con, int fd,
 				goto failure;
 			case SSL_ERROR_WANT_READ:
 			case SSL_ERROR_WANT_WRITE:
+#if !(defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT))
+				/* wait only for the condition wolfSSL_connect() actually
+				 * asked for - see the identical comment in
+				 * openssl_tls_async_connect() (modules/tls_openssl) for
+				 * why polling for both is a busy loop, not a wait. */
+				pf.events = (err == SSL_ERROR_WANT_READ) ? POLLIN : POLLOUT;
+#endif
+
 				/* we need to retry, if time has not passed yet */
 again:
 				if (gettimeofday(&now, NULL)) {

@@ -679,7 +679,15 @@ static int tls_read_req(struct tcp_connection* con, int* bytes_read)
 	}
 
 	/* do this trick in order to trace whether if it's an error or not */
-	ret=tls_mgm_api.tls_fix_read_conn(con, con->fd, tls_handshake_tout, t_dst, 1);
+	/* Use the short per-attempt window here, not the full
+	 * tls_handshake_tout: this call runs synchronously on whichever TCP
+	 * worker picks up this reactor event, so a long timeout here would
+	 * hold that worker captive for the whole window instead of yielding
+	 * it back for other connections between attempts. con->hs_deadline
+	 * (armed from tls_handshake_tout) still bounds the total handshake
+	 * duration across however many such short attempts this takes. */
+	ret=tls_mgm_api.tls_fix_read_conn(con, con->fd,
+		tls_async_handshake_connect_timeout, t_dst, 1);
 
 	/* if there is pending tracing data on an accepted connection, flush it
 	 * As this is a read op, we look only for accepted conns, not to conflict
@@ -783,7 +791,11 @@ static int tls_async_write(struct tcp_connection* con, int fd)
 	int err;
 	struct tcp_async_chunk *chunk;
 
-	err = tls_mgm_api.tls_fix_read_conn(con, fd, tls_handshake_tout, t_dst, 0);
+	/* short per-attempt window, same reasoning as tls_read_req() above:
+	 * con->hs_deadline bounds the overall handshake, this only bounds
+	 * how long this one reactor callback may hold its worker captive. */
+	err = tls_mgm_api.tls_fix_read_conn(con, fd,
+		tls_async_handshake_connect_timeout, t_dst, 0);
 	if (err < 0) {
 		LM_ERR("failed to do pre-tls handshake!\n");
 		return -1;

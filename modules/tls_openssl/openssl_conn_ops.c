@@ -740,6 +740,20 @@ int openssl_tls_async_connect(struct tcp_connection *con, int fd,
 				lock_release(tls_global_lock);
 				#endif
 
+#if !(defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT))
+				/* wait only for the condition SSL_connect() actually asked
+				 * for. Once the TCP connect has completed, the socket is
+				 * almost always immediately writable, so also polling for
+				 * POLLOUT on a WANT_READ (or vice versa) makes poll()
+				 * return right away regardless of whether the condition
+				 * we're actually waiting on is met - turning this retry
+				 * into a busy loop instead of an actual wait. Mirrors the
+				 * same SSL_get_error()-conditioned POLLIN/POLLOUT choice
+				 * openssl_tls_connect() already makes for the synchronous
+				 * path, above. */
+				pf.events = (err == SSL_ERROR_WANT_READ) ? POLLIN : POLLOUT;
+#endif
+
 				/* we need to retry, if time has not passed yet */
 again:
 				if (gettimeofday(&now, NULL)) {
