@@ -206,7 +206,7 @@ struct rtpe_ctx {
 
 
 struct ng_flags_parse {
-	int via, to, packetize, transport, directional;
+	int via, to, packetize, transport, directional, no_from_tag;
 	bencode_item_t *dict, *flags, *direction, *replace, *rtcp_mux;
 	str call_id, from_tag, to_tag, received_from;
 	str viabranch;
@@ -2362,6 +2362,8 @@ static int parse_flags(struct ng_flags_parse *ng_flags, struct sip_msg *msg,
 						goto error;
 					BCHECK(bencode_dictionary_add_integer(ng_flags->dict, "repacketize", ng_flags->packetize));
 					continue;
+				} else if (str_eq(&key, "no-from-tag")) {
+					ng_flags->no_from_tag = 1;
 				} else if (str_eq(&key, "directional")) {
 					ng_flags->directional = 1;
 					bitem = bencode_str(bencode_item_buffer(ng_flags->flags), &key);
@@ -2821,14 +2823,14 @@ static int rtpe_function_call_prepare(bencode_buffer_t *bencbuf, struct sip_msg 
 			op == OP_BLOCK_MEDIA || op == OP_UNBLOCK_MEDIA ||
 			op == OP_BLOCK_DTMF || op == OP_UNBLOCK_DTMF ||
 			op == OP_START_FORWARD || op == OP_STOP_FORWARD) {
-		if (ng_flags->directional && !from_tag_exist)
+		if (ng_flags->directional && !from_tag_exist && !ng_flags->no_from_tag)
 			bencode_dictionary_add_str(ng_flags->dict, "from-tag", &ng_flags->from_tag);
 	} else if (ng_flags->directional
 		|| (msg && ((msg->first_line.type == SIP_REQUEST && op != OP_ANSWER)
 		|| (msg->first_line.type == SIP_REPLY && op == OP_DELETE)
 		|| (msg->first_line.type == SIP_REPLY && op == OP_ANSWER))))
 	{
-		if (!from_tag_exist && op != OP_DELETE)
+		if (!from_tag_exist && !ng_flags->no_from_tag)
 			bencode_dictionary_add_str(ng_flags->dict, "from-tag", &ng_flags->from_tag);
 		if (op != OP_START_MEDIA && op != OP_STOP_MEDIA) {
 			/* no need of to-tag if we are just playing media */
@@ -2841,7 +2843,7 @@ static int rtpe_function_call_prepare(bencode_buffer_t *bencbuf, struct sip_msg 
 			*err = "No to-tag present";
 			goto error;
 		}
-		if (!from_tag_exist)
+		if (!from_tag_exist && !ng_flags->no_from_tag)
 			bencode_dictionary_add_str(ng_flags->dict, "from-tag", &ng_flags->to_tag);
 		if (!to_tag_exist && !extra_dict)
 			bencode_dictionary_add_str(ng_flags->dict, "to-tag", &ng_flags->from_tag);
@@ -3498,7 +3500,10 @@ enum async_ret_code resume_async_send_rtpe_command(int fd, struct sip_msg *msg, 
 		do {
 			len = read(fd, buf, sizeof(buf) - 1);
 		} while (len == -1 && errno == EINTR);
-		close(fd);
+		/* no close(fd) here: every return path of this function sets
+		 * async_status = ASYNC_DONE_CLOSE_FD, so the async framework
+		 * (tm/async.c, async.c) closes the fd - closing it here too
+		 * would close it twice */
 		if (len <= 0) {
 			LM_ERR("can't read reply from a RTP Engine\n");
 			goto error;
@@ -3513,7 +3518,14 @@ enum async_ret_code resume_async_send_rtpe_command(int fd, struct sip_msg *msg, 
 		len = recv(fd, buf, sizeof(buf)-1, 0);
 		if (len <= 0) {
 			LM_ERR("can't read reply from a RTP Engine (%d, %d)\n", len, errno);
-			RTPE_IO_ERROR_CLOSE(param->node->idx);
+			/* no RTPE_IO_ERROR_CLOSE(param->node->idx) here: on its
+			 * EPIPE/EBADF branch the macro would close() the node's
+			 * array index as if it were an fd (for the first nodes of
+			 * a set that is one of the stdio descriptors) and then
+			 * set node->idx = -1, turning every later
+			 * rtpe_socks[node->idx] access into an out-of-bounds
+			 * array access; the framework closes the fd anyway via
+			 * ASYNC_DONE_CLOSE_FD */
 			goto error;
 		}
 		cookielen = strlen(param->cookie);
@@ -3583,8 +3595,20 @@ enum async_ret_code resume_async_send_rtpe_command(int fd, struct sip_msg *msg, 
 		/* if statistics are to be used, store stats in the ctx, if possible */
 		if ((ctx = rtpe_ctx_get())) {
 			if (ctx->stats) {
-				rtpe_stats_free(ctx->stats); /* release the buffer */
-				pkg_free(&(ctx->stats->buf));
+				/* release the buffer, but keep the struct for reuse:
+				 * buf is an embedded bencode_buffer_t inside
+				 * struct rtpe_stats (2nd member, after dict), so
+				 * &ctx->stats->buf is NOT the address returned by
+				 * pkg_malloc() - freeing it corrupts the pkg
+				 * allocator's free lists. Moreover ctx->stats
+				 * was not NULLed afterwards, so the code below
+				 * would write through a dangling pointer anyway.
+				 * rtpe_stats_free() above already releases the
+				 * json string and the buffer's inner pieces, and
+				 * the three fields get overwritten right below;
+				 * rtpe_ctx_free() eventually frees the struct
+				 * itself (with its base address). */
+				rtpe_stats_free(ctx->stats);
 			} else
 				ctx->stats = pkg_malloc(sizeof *ctx->stats);
 			if (ctx->stats) {
@@ -3760,6 +3784,12 @@ static int rtpe_function_call_async(struct sip_msg *msg, async_ctx *ctx, str *fl
 	char *err;
 
 	bencode_buffer_t *bencbuf = pkg_malloc(sizeof(bencode_buffer_t));
+	if (!bencbuf) {
+		/* nothing has been allocated yet, so simply bail out */
+		LM_ERR("no more pkg memory\n");
+		return -1;
+	}
+	memset(bencbuf, 0, sizeof(*bencbuf));
 	memset(&ng_flags, 0, sizeof(ng_flags));
 
 	/*** get & init basic stuff needed ***/
@@ -5122,6 +5152,7 @@ static int rtpengine_api_answer(struct rtp_relay_session *sess,
 static int rtpengine_api_delete(struct rtp_relay_session *sess, struct rtp_relay_server *server,
 			str *flags, str *extra)
 {
+	static str no_from_tag = str_init("no-from-tag");
 	struct sip_msg *msg;
 	struct rtpe_set* rset;
 	str *newflags;
@@ -5131,7 +5162,9 @@ static int rtpengine_api_delete(struct rtp_relay_session *sess, struct rtp_relay
 	rset = select_rtpe_set(server->set);
 	RTPE_STOP_READ();
 
-	newflags = rtpengine_get_call_flags(sess, NULL, NULL, NULL, flags, extra, NULL);
+	newflags = rtpengine_get_call_flags(sess, NULL, NULL, NULL, flags, extra,
+			(sess->flags & RTP_RELAY_SESS_DELETE_ALL_BRANCHES) ?
+			&no_from_tag : NULL);
 	if (!newflags)
 		return -1;
 	msg = (sess->msg?sess->msg:get_dummy_sip_msg());
