@@ -169,8 +169,11 @@ extern str clnk_dst_node_col;
 
 extern int current_id;
 extern int db_mode;
+extern int db_mode_dynamic_sync;
 extern rw_lock_t *cl_list_lock;
 extern cluster_info_t **cluster_list;
+
+#define CLUSTERER_DYNAMIC_TOPOLOGY (!db_mode || db_mode_dynamic_sync)
 
 int update_db_state(int cluster_id, int node_id, int state);
 int load_db_info(db_func_t *dr_dbf, db_con_t* db_hdl, cluster_info_t **cl_list);

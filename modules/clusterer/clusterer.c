@@ -1128,7 +1128,7 @@ static void handle_remove_node(bin_packet_t *packet, cluster_info_t *cl)
 	bin_pop_int(packet, &target_node);
 	LM_DBG("Received remove node command for node id: [%d]\n", target_node);
 
-	if (db_mode) {
+	if (!CLUSTERER_DYNAMIC_TOPOLOGY) {
 		LM_DBG("We are in DB mode, ignoring received remove node command\n");
 		return;
 	}
@@ -1187,7 +1187,7 @@ void bin_rcv_cl_extra_packets(bin_packet_t *packet, int packet_type,
 
 	gettimeofday(&now, NULL);
 
-	if (!db_mode && packet_type == CLUSTERER_REMOVE_NODE)
+	if (CLUSTERER_DYNAMIC_TOPOLOGY && packet_type == CLUSTERER_REMOVE_NODE)
 		lock_start_write(cl_list_lock);
 	else
 		lock_start_read(cl_list_lock);
@@ -1292,7 +1292,7 @@ void bin_rcv_cl_extra_packets(bin_packet_t *packet, int packet_type,
 	}
 
 exit:
-	if (!db_mode && packet_type == CLUSTERER_REMOVE_NODE)
+	if (CLUSTERER_DYNAMIC_TOPOLOGY && packet_type == CLUSTERER_REMOVE_NODE)
 		lock_stop_write(cl_list_lock);
 	else
 		lock_stop_read(cl_list_lock);
@@ -1323,7 +1323,7 @@ void bin_rcv_cl_packets(bin_packet_t *packet, int packet_type,
 		return;
 	}
 
-	if (!db_mode && (packet_type == CLUSTERER_NODE_DESCRIPTION ||
+	if (CLUSTERER_DYNAMIC_TOPOLOGY && (packet_type == CLUSTERER_NODE_DESCRIPTION ||
 		packet_type == CLUSTERER_FULL_TOP_UPDATE))
 		lock_start_write(cl_list_lock);
 	else
@@ -1345,7 +1345,7 @@ void bin_rcv_cl_packets(bin_packet_t *packet, int packet_type,
 
 	node = get_node_by_id(cl, source_id);
 
-	if (!node && db_mode && reload_on_unknown_source) {
+	if (!node && db_mode && !db_mode_dynamic_sync && reload_on_unknown_source) {
 		lock_stop_read(cl_list_lock);
 		reload_clusterer_on_unknown();
 		lock_start_read(cl_list_lock);
@@ -1369,7 +1369,7 @@ void bin_rcv_cl_packets(bin_packet_t *packet, int packet_type,
 
 	if (!node) {
 		LM_INFO("Received message with unknown source id [%d]\n", source_id);
-		if (!db_mode)
+		if (CLUSTERER_DYNAMIC_TOPOLOGY)
 			handle_internal_msg_unknown(packet, cl, packet_type, &ri->src_su,
 				ri->proto, source_id);
 	} else {
@@ -1396,7 +1396,7 @@ void bin_rcv_cl_packets(bin_packet_t *packet, int packet_type,
 	}
 
 exit:
-	if (!db_mode && (packet_type == CLUSTERER_NODE_DESCRIPTION ||
+	if (CLUSTERER_DYNAMIC_TOPOLOGY && (packet_type == CLUSTERER_NODE_DESCRIPTION ||
 		packet_type == CLUSTERER_FULL_TOP_UPDATE))
 		lock_stop_write(cl_list_lock);
 	else

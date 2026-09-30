@@ -48,6 +48,7 @@ int seed_fb_interval = DEFAULT_SEED_FB_INTERVAL;
 int sync_timeout = DEFAULT_SYNC_TIMEOUT;
 int current_id = -1;
 int db_mode = 1;
+int db_mode_dynamic_sync = 0;
 int clusterer_enable_rerouting = 1;
 int rst_ping_jitter = 0;
 int preserve_links_on_reload = 0;
@@ -162,6 +163,7 @@ static const param_export_t params[] = {
 	{"flags_col",			STR_PARAM,	&flags_col.s		},
 	{"description_col",		STR_PARAM,	&description_col.s	},
 	{"db_mode",				INT_PARAM,	&db_mode			},
+	{"db_mode_dynamic_sync",	INT_PARAM,	&db_mode_dynamic_sync		},
 	{"neighbor_node_info",	STR_PARAM|USE_FUNC_PARAM,
 		(void*)&provision_neighbor},
 	{"my_node_info",		STR_PARAM|USE_FUNC_PARAM,
@@ -402,6 +404,10 @@ static int mod_init(void)
 	if (current_id < 1) {
 		LM_CRIT("Invalid 'my_node_id' parameter\n");
 		return -1;
+	}
+	if (db_mode_dynamic_sync && !db_mode) {
+		LM_WARN("'db_mode_dynamic_sync' has no effect while 'db_mode' is 0\n");
+		db_mode_dynamic_sync = 0;
 	}
 	if (ping_interval <= 0) {
 		LM_WARN("Invalid ping_interval parameter, using default value\n");
@@ -1207,7 +1213,7 @@ static mi_response_t *cluster_remove_node(const mi_params_t *params,
 	node_info_t *node;
 	mi_response_t *resp;
 
-	if (db_mode)
+	if (!CLUSTERER_DYNAMIC_TOPOLOGY)
 		return init_mi_error(400, MI_SSTR("Running in DB mode"));
 
 	if (get_mi_int_param(params, "cluster_id", &cluster_id) < 0)
