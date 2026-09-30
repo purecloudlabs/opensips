@@ -2122,7 +2122,32 @@ do { \
 	(((_msg)->rcv.bind_address && (_msg)->rcv.bind_address->adv_sock_str.len)? \
 	 (_msg)->rcv.bind_address->adv_port:(_msg)->rcv.dst_port)
 
+/* ponytail: GCVCALLP-55 — inbound reply HEP "to" uses the UAC branch socket, not
+ * only msg->rcv.bind_address (wrong/missing adv on TCP client conns).
+ * Upgrade path: upstream tracer if they merge equivalent logic. */
+static void trace_set_inreply_local_endpoint(char *buff, struct socket_info *send_sock,
+		struct sip_msg *msg)
+{
+	unsigned short port;
+	struct ip_addr *ip;
 
+	if (send_sock && send_sock->sock_str.s) {
+		if (send_sock->adv_sock_str.len) {
+			ip = (struct ip_addr *)&send_sock->adv_address;
+			port = send_sock->adv_port;
+		} else {
+			ip = (struct ip_addr *)&send_sock->address;
+			port = send_sock->last_real_ports->local ?
+				send_sock->last_real_ports->local : send_sock->port_no;
+		}
+		set_sock_columns(db_vals[7], db_vals[8], db_vals[9], buff, ip, port,
+			send_sock->proto);
+		return;
+	}
+
+	set_sock_columns(db_vals[7], db_vals[8], db_vals[9], buff,
+		TRACE_GET_DST_IP(msg), TRACE_GET_DST_PORT(msg), msg->rcv.proto);
+}
 
 
 static int sip_trace(struct sip_msg *msg, trace_info_p info, int leg_flag)
@@ -2653,8 +2678,17 @@ static void trace_onreply_in(struct cell* t, int type, struct tmcb_params *ps,
 	set_sock_columns( db_vals[4], db_vals[5], db_vals[6], fromip_buff,
 		&msg->rcv.src_ip,  msg->rcv.src_port, msg->rcv.proto);
 
-	set_sock_columns( db_vals[7], db_vals[8], db_vals[9], toip_buff,
-		TRACE_GET_DST_IP(msg), TRACE_GET_DST_PORT(msg), msg->rcv.proto);
+	{
+		struct socket_info *send_sock = NULL;
+		int branch = tmb.get_branch_index ? tmb.get_branch_index() : -1;
+
+		if (msg->rcv.proto != PROTO_UDP && t->nr_of_outgoings > 0 &&
+				branch >= 0 && branch < t->nr_of_outgoings)
+			send_sock = (struct socket_info *)
+				t->uac[branch].request.dst.send_sock;
+
+		trace_set_inreply_local_endpoint(toip_buff, send_sock, msg);
+	}
 
 	db_vals[10].val.time_val = time(NULL);
 
