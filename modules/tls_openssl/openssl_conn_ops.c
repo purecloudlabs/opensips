@@ -28,6 +28,7 @@
 
 #include <poll.h>
 #include <errno.h>
+#include <limits.h>
 #include <unistd.h>
 #include <netinet/tcp.h>
 
@@ -636,13 +637,30 @@ static int openssl_tls_accept(struct tcp_connection *c, short *poll_events)
 	return -1;
 }
 
+/* Attempt to advance an async TLS handshake.
+ *
+ * @timeout is how long this *single* attempt may block, in ms:
+ *   - proto_tls_send() passes tls_async_handshake_timeout (a short
+ *     optimization window, after which the handshake is handed over to the
+ *     reactor)
+ *   - tls_async_write()/tls_read_req() pass tls_handshake_timeout, when
+ *     re-entered from the reactor
+ *
+ * con->hs_deadline is the overall budget for the whole handshake, armed by the
+ * proto layer before the first attempt. It bounds the total handshake duration
+ * across all attempts, which a per-attempt timeout cannot do on its own.
+ *
+ * Returns: 1 on success, 0 if the handshake is still in progress (the caller
+ * must keep it in the reactor), -1 on failure or if the overall budget
+ * expired. */
 int openssl_tls_async_connect(struct tcp_connection *con, int fd,
 	int timeout, trace_dest t_dst)
 {
-	unsigned int elapsed,to;
 	unsigned int err_len;
 	int poll_err, n, err;
-	struct timeval begin;
+	long long attempt_left, overall_left, poll_to;
+	struct timeval now;
+	unsigned long long now_us, attempt_deadline;
 	str tls_err_s;
 #if defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT)
 	fd_set sel_set;
@@ -655,8 +673,6 @@ int openssl_tls_async_connect(struct tcp_connection *con, int fd,
 
 	/* attempt to do connect and see if we do block or not */
 	poll_err=0;
-	elapsed = 0;
-	to = timeout*1000;
 
 #if defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT)
 	FD_ZERO(&orig_set);
@@ -666,10 +682,14 @@ int openssl_tls_async_connect(struct tcp_connection *con, int fd,
 	pf.events=POLLOUT|POLLIN;
 #endif
 
-	if (gettimeofday(&(begin), NULL)) {
+	if (gettimeofday(&now, NULL)) {
 		LM_ERR("Failed to get TLS connect start time\n");
 		goto failure;
 	}
+	now_us = (unsigned long long)now.tv_sec * 1000000 + now.tv_usec;
+
+	/* how long this particular attempt is allowed to block for */
+	attempt_deadline = now_us + (unsigned long long)timeout * 1000;
 
 	while (1) {
 		#ifndef NO_SSL_GLOBAL_LOCK
@@ -689,6 +709,7 @@ int openssl_tls_async_connect(struct tcp_connection *con, int fd,
 
 			tls_send_trace_data(con, t_dst);
 			con->proto_flags &= ~F_TLS_DO_CONNECT;
+			con->hs_deadline = 0;
 			return 1;
 		} else if (n == 0) {
 			err = SSL_get_error(ssl, n);
@@ -721,20 +742,51 @@ int openssl_tls_async_connect(struct tcp_connection *con, int fd,
 
 				/* we need to retry, if time has not passed yet */
 again:
-				elapsed=get_time_diff(&begin);
-				if (elapsed >= to) /* timed out */ {
-					LM_DBG("handshake timeout for connection %p %dms elapsed\n",
-							con, timeout);
+				if (gettimeofday(&now, NULL)) {
+					LM_ERR("Failed to get TLS connect current time\n");
+					goto failure;
+				}
+				now_us = (unsigned long long)now.tv_sec * 1000000 + now.tv_usec;
+
+				/* the overall handshake budget is a hard limit: if it expired,
+				 * the handshake failed and must not be retried any further */
+				if (con->hs_deadline) {
+					overall_left = (long long)con->hs_deadline
+						- (long long)now_us;
+					if (overall_left <= 0) {
+						LM_ERR("async TLS handshake to %s:%d did not complete "
+							"in time\n", ip_addr2a(&con->rcv.src_ip),
+							con->rcv.src_port);
+						goto failure;
+					}
+				} else {
+					/* no overall budget armed - only bound by this attempt */
+					overall_left = LLONG_MAX;
+				}
+
+				/* this attempt's window is only an optimization: when it
+				 * expires, report the handshake as still in progress so the
+				 * caller hands the connection over to the reactor */
+				attempt_left = (long long)attempt_deadline - (long long)now_us;
+				if (attempt_left <= 0) {
+					LM_DBG("handshake on connection %p not done after %dms, "
+						"passing it to the reactor\n", con, timeout);
 					return 0;
 				}
-				to -= elapsed;
+
+				/* never wait past the overall budget */
+				poll_to = (attempt_left < overall_left) ?
+					attempt_left : overall_left;
 #if defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT)
 				sel_set=orig_set;
-				timeout_val.tv_sec=to/1000000;
-				timeout_val.tv_usec=to%1000000;
+				timeout_val.tv_sec=poll_to/1000000;
+				timeout_val.tv_usec=poll_to%1000000;
 				n=select(fd+1, 0, &sel_set, 0, &timeout_val);
 #else
-				n=poll(&pf, 1, to/1000);
+				/* poll() expects milliseconds, while the budgets above are
+				 * tracked in microseconds - round up, so that a sub-1ms
+				 * remainder does not turn the retry into a busy loop */
+				n=poll(&pf, 1, (int)((poll_to + 999) / 1000));
 #endif
 				if (n<0){
 					if (errno == EINTR)

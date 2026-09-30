@@ -136,6 +136,30 @@ static mi_response_t *tls_trace_mi_1(const mi_params_t *params,
 
 trace_dest t_dst;
 
+/* Arm the overall deadline for an async TLS handshake on this connection.
+ *
+ * A handshake is attempted over several invocations of the TLS layer: a short
+ * blocking window in the sending process (tls_async_handshake_timeout), then
+ * one or more reactor callbacks. Each of those only bounds its own attempt, so
+ * without an overall deadline stored on the connection a peer that keeps the
+ * handshake perpetually "in progress" would never be timed out. */
+static void tls_arm_handshake_deadline(struct tcp_connection *c)
+{
+	struct timeval now;
+
+	if (c->hs_deadline)
+		return;
+
+	if (gettimeofday(&now, NULL)) {
+		LM_ERR("failed to read the current time, "
+			"TLS handshake will not be bounded\n");
+		return;
+	}
+
+	c->hs_deadline = (unsigned long long)now.tv_sec * 1000000 + now.tv_usec
+		+ (unsigned long long)tls_handshake_tout * 1000;
+}
+
 static int w_tls_blocking_write(struct tcp_connection *c, int fd, const char *buf,
 																	size_t len)
 {
@@ -551,6 +575,8 @@ static int proto_tls_send(const struct socket_info* send_sock,
 			/* we connect under lock to make sure no one else is reading our
 			 * connect status */
 			tls_mgm_api.tls_update_fd(c, fd);
+			/* bound the whole handshake, not just this first attempt */
+			tls_arm_handshake_deadline(c);
 			n = tls_mgm_api.tls_async_connect(c, fd,
 				tls_async_handshake_connect_timeout, t_dst);
 			lock_release(&c->write_lock);
