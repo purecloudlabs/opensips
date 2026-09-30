@@ -53,6 +53,7 @@ int clusterer_enable_rerouting = 1;
 int rst_ping_jitter = 0;
 int preserve_links_on_reload = 0;
 int reload_on_unknown_source = 0;
+int disable_db_reload = 0;
 static int *unk_src_last_reload;
 
 str clusterer_db_url = {NULL, 0};
@@ -176,6 +177,7 @@ static const param_export_t params[] = {
 	{"rst_ping_jitter",		INT_PARAM,	&rst_ping_jitter	},
 	{"preserve_links_on_reload",	INT_PARAM,	&preserve_links_on_reload	},
 	{"reload_on_unknown_source",	INT_PARAM,	&reload_on_unknown_source	},
+	{"disable_db_reload",		INT_PARAM,	&disable_db_reload	},
 	{0, 0, 0}
 };
 
@@ -594,6 +596,10 @@ mi_response_t *clusterer_reload(const mi_params_t *params,
 		LM_ERR("Running in non-DB mode\n");
 		return init_mi_error(400, MI_SSTR("Non-DB mode"));
 	}
+	if (disable_db_reload) {
+		LM_ERR("DB reload is disabled\n");
+		return init_mi_error(400, MI_SSTR("DB reload is disabled"));
+	}
 
 	if (load_db_info(&dr_dbf, db_hdl, &new_info) != 0) {
 		LM_ERR("Failed to load info from DB\n");
@@ -633,7 +639,7 @@ int reload_clusterer_on_unknown(void)
 	cluster_info_t *old_info;
 	int now = (int)time(NULL);
 
-	if (!db_mode)
+	if (!db_mode || disable_db_reload)
 		return -1;
 
 	if (now - *unk_src_last_reload < ping_interval)
