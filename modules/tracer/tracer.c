@@ -2122,9 +2122,8 @@ do { \
 	(((_msg)->rcv.bind_address && (_msg)->rcv.bind_address->adv_sock_str.len)? \
 	 (_msg)->rcv.bind_address->adv_port:(_msg)->rcv.dst_port)
 
-/* GCVCALLP-55 — inbound reply HEP "to" uses the UAC branch socket, not
- * only msg->rcv.bind_address (wrong/missing adv on TCP client conns).
- * Upgrade path: upstream tracer if they merge equivalent logic. */
+/* GCVCALLP-55 — inbound reply HEP "to" port matches outbound INVITE (trace_msg_out):
+ * adv IP if set, but port from last_real_ports->local, not adv_port/rcv.dst_port. */
 static void trace_set_inreply_local_endpoint(char *buff, struct socket_info *send_sock,
 		struct sip_msg *msg)
 {
@@ -2132,14 +2131,11 @@ static void trace_set_inreply_local_endpoint(char *buff, struct socket_info *sen
 	struct ip_addr *ip;
 
 	if (send_sock && send_sock->sock_str.s) {
-		if (send_sock->adv_sock_str.len) {
-			ip = (struct ip_addr *)&send_sock->adv_address;
-			port = send_sock->adv_port;
-		} else {
-			ip = (struct ip_addr *)&send_sock->address;
-			port = send_sock->last_real_ports->local ?
-				send_sock->last_real_ports->local : send_sock->port_no;
-		}
+		ip = send_sock->adv_sock_str.len ?
+			(struct ip_addr *)&send_sock->adv_address :
+			(struct ip_addr *)&send_sock->address;
+		port = send_sock->last_real_ports->local ?
+			send_sock->last_real_ports->local : send_sock->port_no;
 		set_sock_columns(db_vals[7], db_vals[8], db_vals[9], buff, ip, port,
 			send_sock->proto);
 		return;
