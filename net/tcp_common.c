@@ -557,6 +557,43 @@ struct tcp_async_chunk *tcp_async_get_chunk(struct tcp_connection *con)
 	return con->async->chunks[0];
 }
 
+
+void tcp_arm_handshake_deadline(struct tcp_connection *c, int handshake_tout)
+{
+	struct timeval now;
+
+	if (c->hs_deadline)
+		return;
+
+	if (gettimeofday(&now, NULL)) {
+		LM_ERR("failed to read the current time, "
+			"TLS handshake will not be bounded\n");
+		return;
+	}
+
+	c->hs_deadline = (unsigned long long)now.tv_sec * 1000000 + now.tv_usec
+		+ (unsigned long long)handshake_tout * 1000;
+}
+
+
+int tcp_handshake_deadline_expired(struct tcp_connection *c)
+{
+	struct timeval now;
+	unsigned long long now_us;
+
+	if (!c->hs_deadline)
+		return 0;
+
+	if (gettimeofday(&now, NULL)) {
+		LM_ERR("failed to read the current time, "
+			"cannot check TLS handshake deadline\n");
+		return 0;
+	}
+
+	now_us = (unsigned long long)now.tv_sec * 1000000 + now.tv_usec;
+	return now_us >= c->hs_deadline;
+}
+
 void tcp_async_update_write(struct tcp_connection *con, int len)
 {
 	int i = 0, c;

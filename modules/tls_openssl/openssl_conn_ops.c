@@ -33,6 +33,7 @@
 #include <netinet/tcp.h>
 
 #include "../../net/tcp_conn_defs.h"
+#include "../../net/tcp_common.h"
 #include "../../net/proto_tcp/tcp_common_defs.h"
 #include "../tls_mgm/tls_helper.h"
 
@@ -533,6 +534,7 @@ static int openssl_tls_accept(struct tcp_connection *c, short *poll_events)
 
 		/* TLS accept done, reset the flag */
 		c->proto_flags &= ~F_TLS_DO_ACCEPT;
+		c->hs_deadline = 0;
 
 		LM_DBG("new TLS connection from %s:%d using %s %s %d\n",
 			ip_addr2a(&c->rcv.src_ip), c->rcv.src_port,
@@ -578,20 +580,25 @@ static int openssl_tls_accept(struct tcp_connection *c, short *poll_events)
 
 				return -1;
 			case SSL_ERROR_WANT_READ:
-				#ifndef NO_SSL_GLOBAL_LOCK
-				lock_release(tls_global_lock);
-				#endif
-
-				if (poll_events)
-					*poll_events = POLLIN;
-				return 0;
 			case SSL_ERROR_WANT_WRITE:
 				#ifndef NO_SSL_GLOBAL_LOCK
 				lock_release(tls_global_lock);
 				#endif
 
+				/* accept has no retry loop of its own -- every attempt
+				 * is a single SSL_accept() re-entered by the reactor, so
+				 * the overall deadline must be checked here instead */
+				if (tcp_handshake_deadline_expired(c)) {
+					LM_ERR("async TLS accept from %s:%d did not complete "
+						"in time\n", ip_addr2a(&c->rcv.src_ip),
+						c->rcv.src_port);
+					c->state = S_CONN_BAD;
+					return -1;
+				}
+
 				if (poll_events)
-					*poll_events = POLLOUT;
+					*poll_events = (err == SSL_ERROR_WANT_READ) ?
+						POLLIN : POLLOUT;
 				return 0;
 			case SSL_ERROR_SYSCALL:
 				LM_ERR("SSL_ERROR_SYSCALL err=%s(%d)\n",

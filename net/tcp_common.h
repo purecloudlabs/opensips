@@ -67,4 +67,19 @@ void tcp_async_update_write(struct tcp_connection *con, int len);
 
 int tcp_read(struct tcp_connection *c,struct tcp_req *r);
 
+/* Arm the overall deadline (c->hs_deadline) for an async TLS/SSL handshake
+ * on this connection, so openssl_tls_async_connect()/_wolfssl_tls_async_connect()
+ * can bound it across however many reactor re-entries it takes -- a no-op if
+ * already armed. @handshake_tout is the caller's own configured overall
+ * handshake timeout, in ms (e.g. proto_tls's tls_handshake_timeout). Must be
+ * called before the first async connect/handshake attempt on the connection;
+ * every protocol that uses tls_mgm's async TLS handshake API needs to call
+ * this at each of its own "start a new async handshake" sites. */
+void tcp_arm_handshake_deadline(struct tcp_connection *c, int handshake_tout);
+
+/* 1 if c->hs_deadline is armed and has passed, 0 otherwise (including if
+ * unarmed). For a backend accept/connect retry loop to check on every
+ * WANT_READ/WANT_WRITE before handing the connection back to the reactor. */
+int tcp_handshake_deadline_expired(struct tcp_connection *c);
+
 #endif /* _NET_TCP_COMMON_H_ */
