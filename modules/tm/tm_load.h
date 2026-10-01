@@ -68,6 +68,10 @@ struct tm_binds {
 	taddblind_f      t_addblind;
 	treply_f         t_reply_unsafe;
 
+	/* fail one branch of t with a local reply, from any context --
+	 * see t_reply.h/t_reply.c for the full contract */
+	int (*t_fail_branch)(struct cell *t, int branch, unsigned int code);
+
 	/*
 	 * Return: 1 (success) or an error.h code otherwise.  On error, make sure
 	 * to free your parameter manually, as @release_func will be skipped!

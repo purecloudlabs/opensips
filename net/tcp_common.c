@@ -526,6 +526,8 @@ int tcp_async_add_chunk(struct tcp_connection *con, char *buf,
 	c->ticks = get_ticks();
 	c->buf = (char *)(c+1);
 	memcpy(c->buf,buf,len);
+	c->tm_ref = NULL;
+	c->tm_ref_release = NULL;
 
 	if (lock)
 		lock_get(&con->write_lock);

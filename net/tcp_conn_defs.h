@@ -111,6 +111,12 @@ struct tcp_async_chunk {
 	int len;   /* length of the buffer */
 	int ticks; /* time at which this chunk was initially
 				  attempted to be written */
+	/*!< opaque, protocol-owned data for a pending notification on this
+	 * chunk (NULL unless a protocol sets it, e.g. proto_tls). */
+	void *tm_ref;
+	/*!< destructor for tm_ref above; if non-NULL, core calls it right
+	 * before freeing a chunk that still carries a tm_ref. */
+	void (*tm_ref_release)(void *ref);
 };
 
 struct tcp_async_data {

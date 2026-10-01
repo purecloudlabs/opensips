@@ -80,6 +80,7 @@
 #include "../../usr_avp.h"
 #include "../../receive.h"
 #include "../../msg_callbacks.h"
+#include "../../context.h"
 
 #include "h_table.h"
 #include "t_hooks.h"
@@ -1166,6 +1167,59 @@ int t_reply_unsafe( struct cell *t, struct sip_msg* p_msg, unsigned int code,
 	str * text )
 {
 	return _reply( t, p_msg, code, text, 0 /* don't lock replies */ );
+}
+
+
+/*
+ * Fail one branch of t with a locally generated final reply, from a
+ * context other than the one that forwarded it (e.g. a TCP reactor
+ * callback). Goes through local_reply()/relay_reply(), same as
+ * fake_reply()'s fr_timeout case, so branch failover behaves identically.
+ *
+ * Caller must hold a ref on t (ref_cell) until this returns -- tm's own
+ * timer gets that for free, an external caller must take it explicitly.
+ */
+int t_fail_branch( struct cell *t, int branch, unsigned int code )
+{
+	context_p old_ctx, my_ctx;
+	branch_bm_t cancel_bitmap;
+	enum rps reply_status;
+
+	if (branch < 0 || branch >= t->nr_of_outgoings) {
+		LM_ERR("invalid branch %d for transaction %p (%d branches)\n",
+			branch, t, t->nr_of_outgoings);
+		return -1;
+	}
+
+	old_ctx = current_processing_ctx;
+	my_ctx = context_alloc(CONTEXT_GLOBAL);
+	if (my_ctx==NULL) {
+		LM_ERR("failed to alloc new ctx in pkg\n");
+		return -1;
+	}
+	memset( my_ctx, 0, context_size(CONTEXT_GLOBAL) );
+	set_global_context(my_ctx);
+	set_t(t);
+
+	LOCK_REPLIES(t);
+	_tm_branch_index = branch;
+	if ( is_local(t) ) {
+		reply_status=local_reply( t, FAKED_REPLY, branch, code, &cancel_bitmap );
+		if (reply_status==RPS_COMPLETED)
+			put_on_wait(t);
+	} else {
+		reply_status=relay_reply( t, FAKED_REPLY, branch, code, &cancel_bitmap );
+	}
+	_tm_branch_index = 0;
+
+	if (current_processing_ctx==NULL)
+		my_ctx=NULL;
+	else
+		context_destroy(CONTEXT_GLOBAL, my_ctx);
+	set_global_context(old_ctx);
+	init_t();
+
+	return 1;
 }
 
 
