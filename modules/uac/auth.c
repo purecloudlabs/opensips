@@ -355,6 +355,14 @@ int uac_auth( struct sip_msg *msg, unsigned algmask)
 	 * along with the buffer, so detach the buffer from new_hdr var */
 	new_hdr->s = NULL; new_hdr->len = 0;
 
+	/* failure_route fake_req() clears force_send_socket on purpose (so
+	 * failover is not stuck on the previous branch's proto). uac_auth is
+	 * a retry of that same hop, so restore its send socket. Otherwise
+	 * get_send_socket() uses protos[tcp].sendipv4 (first TCP listener)
+	 * and Via/Contact flip to that port. Leave a script $socket_out alone. */
+	if (!msg->force_send_socket)
+		msg->force_send_socket = t->uac[branch].request.dst.send_sock;
+
 	/* gather some information about the context of this request,
 	 * like if initial or sequential, if dialog support is on */
 	get_totag(msg, &ttag);

@@ -2122,7 +2122,7 @@ do { \
 	(((_msg)->rcv.bind_address && (_msg)->rcv.bind_address->adv_sock_str.len)? \
 	 (_msg)->rcv.bind_address->adv_port:(_msg)->rcv.dst_port)
 
-/* ponytail: GCVCALLP-55 — inbound reply HEP "to" uses the UAC branch socket, not
+/* GCVCALLP-55 — inbound reply HEP "to" uses the UAC branch socket, not
  * only msg->rcv.bind_address (wrong/missing adv on TCP client conns).
  * Upgrade path: upstream tracer if they merge equivalent logic. */
 static void trace_set_inreply_local_endpoint(char *buff, struct socket_info *send_sock,
