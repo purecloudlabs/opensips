@@ -30,6 +30,7 @@ extern int ping_interval;
 extern int node_timeout;
 extern long ping_timeout_us, ping_interval_us;
 extern int clusterer_enable_rerouting;
+extern int rst_ping_jitter;
 
 #define PING_REPLY_INTERVAL(_node) \
 	((_node)->last_pong.tv_sec*1000000 + (_node)->last_pong.tv_usec \
@@ -218,8 +219,20 @@ void heartbeats_timer(void)
 			prev_ls = -1;
 			new_ls = -1;
 
-			if (node->link_state == LS_RESTART_PINGING) {
+			if (rst_ping_jitter && node->link_state == LS_RESTART_PINGING &&
+				node->rst_ping_due.tv_sec == 0 && node->rst_ping_due.tv_usec == 0) {
+				node->rst_ping_due = now;
+				node->rst_ping_due.tv_usec += rand() % ping_interval_us;
+				node->rst_ping_due.tv_sec += node->rst_ping_due.tv_usec / 1000000;
+				node->rst_ping_due.tv_usec %= 1000000;
+				lock_release(node->lock);
+			} else if (rst_ping_jitter && node->link_state == LS_RESTART_PINGING &&
+				TIME_DIFF(now, node->rst_ping_due) > 0) {
+				lock_release(node->lock);
+			} else if (node->link_state == LS_RESTART_PINGING) {
 				prev_ls = node->link_state;
+				node->rst_ping_due.tv_sec = 0;
+				node->rst_ping_due.tv_usec = 0;
 				lock_release(node->lock);
 				CL_DBG("case 0: RESTART_PINGING\n");
 
@@ -748,7 +761,7 @@ int delete_neighbour(node_info_t *from_node, node_info_t *to_delete_n)
 	return 0;
 }
 
-static int add_neighbour(node_info_t *to_node, node_info_t *new_n)
+int add_neighbour(node_info_t *to_node, node_info_t *new_n)
 {
 	struct neighbour *neigh;
 
