@@ -62,6 +62,7 @@
 #include "../../net/proto_tcp/tcp_common_defs.h"
 #include "../tls_mgm/api.h"
 #include "../tls_mgm/tls_trace_common.h"
+#include "../tm/tm_load.h"
 
 #include "../../net/trans_trace.h"
 
@@ -88,6 +89,195 @@
  *   and may be accessed simultaneously
  */
 struct tls_mgm_binds tls_mgm_api;
+
+static struct tm_binds tmb;
+static int tm_loaded = 0;
+
+/* SIP status to inject via t_fail_branch() when an async TLS handshake
+ * fails after t_relay() succeeded (0 = disabled, fall back to fr_timeout). */
+static int tls_async_handshake_fail_code = 0;
+
+/* tcp_async_chunk.tm_ref points at one of these for a chunk queued while
+ * a new connection's TLS handshake is still pending -- see
+ * tls_attach_tm_ref_to_last_chunk() and tls_report_pending_tm_failure(). */
+struct tls_pending_tm_ref {
+	struct cell *t;
+	int branch;
+	struct tls_pending_tm_ref *next; /* scratch link, used only by
+		tls_report_pending_tm_failure() after it drops the lock */
+};
+
+/* release one tm_ref: drop tm's ref on the transaction and free the
+ * struct. Used directly below, and as tcp_async_chunk.tm_ref_release so
+ * the generic chunk-teardown path (__tcpconn_rm) can release it too. */
+static void tls_tm_ref_release(void *ref)
+{
+	struct tls_pending_tm_ref *r = ref;
+
+	tmb.unref_cell(r->t);
+	shm_free(r);
+}
+
+/* Branch index for tagging: must match the UAC slot whose request is
+ * being sent. send_pr_buffer() sets _tm_branch_index from rb->branch
+ * for the duration of msg_send(); validate before trusting it. */
+static int tls_tm_branch_for_tag(struct cell *t)
+{
+	int branch;
+
+	branch = tmb.get_branch_index();
+	if (branch >= 0 && (unsigned int)branch < t->nr_of_outgoings)
+		return branch;
+
+	LM_WARN("ambient branch index %d invalid for transaction %p "
+		"(%u branches); skipping async TLS 477 tag\n",
+		branch, t, t->nr_of_outgoings);
+	return -1;
+}
+
+/* Tag the chunk just queued for a connection whose TLS handshake is
+ * still pending with the current transaction/branch, so a later
+ * handshake failure can fail it promptly instead of via fr_timeout.
+ * No-op if tm isn't loaded or there is no current transaction. @lock:
+ * whether c->write_lock still needs to be taken (0 if the caller
+ * already holds it). */
+static void tls_attach_tm_ref_to_last_chunk(struct tcp_connection *c, int lock)
+{
+	struct cell *t;
+	struct tcp_async_chunk *chunk;
+	struct tls_pending_tm_ref *ref, *stale_ref = NULL;
+	int branch;
+
+	if (!tm_loaded || !tls_async_handshake_fail_code)
+		return;
+
+	t = tmb.t_gett();
+	/* (struct cell*)-1 is tm's T_UNDEFINED sentinel for "no current
+	 * transaction" -- spelled out here rather than pulling in tm's
+	 * internal headers just to name it */
+	if (t==NULL || t==(struct cell*)-1)
+		return;
+
+	branch = tls_tm_branch_for_tag(t);
+	if (branch < 0)
+		return;
+
+	ref = shm_malloc(sizeof *ref);
+	if (!ref) {
+		LM_ERR("no more shm, async TLS handshake failure on this "
+			"connection will not be reported until fr_timeout\n");
+		return;
+	}
+	ref->t = t;
+	ref->branch = branch;
+	tmb.ref_cell(t);
+
+	if (lock)
+		lock_get(&c->write_lock);
+	if (c->async && c->async->pending > 0) {
+		chunk = c->async->chunks[c->async->pending - 1];
+		/* defensive: release a stale tag if a concurrent caller raced --
+		 * deferred until the lock is dropped below, same reason as the
+		 * @ref fallback right after it */
+		stale_ref = chunk->tm_ref;
+		chunk->tm_ref = ref;
+		chunk->tm_ref_release = tls_tm_ref_release;
+		ref = NULL;
+	}
+	if (lock)
+		lock_release(&c->write_lock);
+
+	if (ref) /* chunk was already sent by the time we got the lock */
+		tls_tm_ref_release(ref);
+	if (stale_ref)
+		tls_tm_ref_release(stale_ref);
+}
+
+/* Handshake succeeded: every chunk's tm_ref is about to be sent
+ * normally, so drop the references instead of leaving them for the
+ * generic chunk-teardown path (which has no failure code to report).
+ * @lock: see tls_attach_tm_ref_to_last_chunk(). */
+static void tls_release_pending_tm_refs(struct tcp_connection *c, int lock)
+{
+	struct tls_pending_tm_ref *ref;
+	int i;
+
+	if (!tm_loaded || !c->async)
+		return;
+
+	if (lock)
+		lock_get(&c->write_lock);
+	for (i = 0; i < c->async->pending; i++) {
+		ref = c->async->chunks[i]->tm_ref;
+		if (!ref)
+			continue;
+		c->async->chunks[i]->tm_ref = NULL;
+		c->async->chunks[i]->tm_ref_release = NULL;
+		tls_tm_ref_release(ref);
+	}
+	if (lock)
+		lock_release(&c->write_lock);
+}
+
+/* Handshake failed: fail every transaction/branch still waiting on a
+ * chunk queued for it, instead of leaving them to fr_timeout.
+ * Controlled by tls_async_handshake_fail_code: 0 = release refs only
+ * (fr_timeout path); non-zero = t_fail_branch(code). Collects the refs
+ * under the lock, then drops it before calling into tm -- t_fail_branch()
+ * can run failure_route, which must not happen with a connection lock
+ * held. @lock: see tls_attach_tm_ref_to_last_chunk(); 0 means the caller
+ * already holds write_lock (tcp worker WRITE path) -- released before
+ * tm and restored after so the worker wrapper's lock_release still
+ * balances. */
+static void tls_report_pending_tm_failure(struct tcp_connection *c, int lock)
+{
+	struct tls_pending_tm_ref *ref, *head = NULL, *next;
+	unsigned int code;
+	int i;
+
+	if (!tm_loaded || !c->async)
+		return;
+
+	code = (unsigned int)tls_async_handshake_fail_code;
+
+	if (lock)
+		lock_get(&c->write_lock);
+	for (i = 0; i < c->async->pending; i++) {
+		ref = c->async->chunks[i]->tm_ref;
+		if (!ref)
+			continue;
+		c->async->chunks[i]->tm_ref = NULL;
+		c->async->chunks[i]->tm_ref_release = NULL;
+		ref->next = head;
+		head = ref;
+	}
+	if (lock)
+		lock_release(&c->write_lock);
+	else
+		lock_release(&c->write_lock);
+
+	for (ref = head; ref; ref = next) {
+		next = ref->next;
+		if (code) {
+			LM_WARN("async TLS handshake to %s:%d failed, failing branch "
+				"%d of transaction %p with %u\n",
+				ip_addr2a(&c->rcv.src_ip), c->rcv.src_port,
+				ref->branch, ref->t, code);
+			if (tmb.t_fail_branch(ref->t, ref->branch, code) < 0)
+				LM_ERR("failed to fail branch %d of transaction %p with "
+					"%u\n", ref->branch, ref->t, code);
+		} else {
+			LM_DBG("async TLS handshake to %s:%d failed, branch %d of "
+				"transaction %p will fail via fr_timeout\n",
+				ip_addr2a(&c->rcv.src_ip), c->rcv.src_port,
+				ref->branch, ref->t);
+		}
+		tls_tm_ref_release(ref);
+	}
+
+	if (!lock)
+		lock_get(&c->write_lock);
+}
 
 static int tls_port_no = SIPS_PORT;
 
@@ -169,9 +359,18 @@ static int tls_write_on_socket(struct tcp_connection* c, int fd,
 			if (n >= 0 && len - n) {
 				/* if could not write entire buffer, delay it */
 				n = tcp_async_add_chunk(c, buf + n, len - n, 0);
+				/* only relevant while the handshake itself is still
+				 * pending (a second caller found this same connection
+				 * before the first one's handshake resolved) -- for an
+				 * already-established connection this is ordinary
+				 * write-buffer flow control, nothing to track here */
+				if (n >= 0 && (c->proto_flags & F_TLS_DO_CONNECT))
+					tls_attach_tm_ref_to_last_chunk(c, 0);
 			}
 		} else {
 			n = tcp_async_add_chunk(c, buf, len, 0);
+			if (n >= 0 && (c->proto_flags & F_TLS_DO_CONNECT))
+				tls_attach_tm_ref_to_last_chunk(c, 0);
 		}
 	} else {
 		n = tls_mgm_api.tls_blocking_write(c, fd, buf, len,
@@ -245,6 +444,8 @@ static const param_export_t params[] = {
 											&tls_async_local_connect_timeout },
 	{ "tls_async_handshake_timeout",	 INT_PARAM,
 											&tls_async_handshake_connect_timeout },
+	{ "tls_async_handshake_fail_code", INT_PARAM,
+											&tls_async_handshake_fail_code },
 	{ "trace_on",					INT_PARAM, &trace_is_on_tmp           },
 	{ "trace_filter_route",			STR_PARAM, &trace_filter_route        },
 	{ "cert_check_on_conn_reusage",	INT_PARAM, &cert_check_on_conn_reusage},
@@ -255,6 +456,10 @@ static const dep_export_t deps = {
 	{ /* OpenSIPS module dependencies */
 		{ MOD_TYPE_DEFAULT, "tls_mgm"  , DEP_ABORT  },
 		{ MOD_TYPE_DEFAULT, "proto_hep", DEP_SILENT },
+		/* optional: only used for the async-handshake-failure fast
+		 * report below; works fine without it, just falls back to
+		 * fr_timeout (see tls_report_pending_tm_failure()) */
+		{ MOD_TYPE_DEFAULT, "tm"       , DEP_SILENT },
 		{ MOD_TYPE_NULL, NULL, 0 },
 	},
 	{ /* modparam dependencies */
@@ -310,6 +515,16 @@ static int mod_init(void)
 	if(load_tls_mgm_api(&tls_mgm_api) != 0){
 		LM_DBG("failed to find tls API - is tls_mgm module loaded?\n");
 		return -1;
+	}
+
+	/* optional: without tm, an async TLS handshake failure just keeps
+	 * falling back to fr_timeout, exactly as before this was added */
+	if (load_tm_api(&tmb) != 0) {
+		LM_INFO("tm module not loaded - an async TLS handshake failure "
+			"will not be reported to the transaction until fr_timeout\n");
+		tm_loaded = 0;
+	} else {
+		tm_loaded = 1;
 	}
 
 	if (trace_destination_name.s) {
@@ -560,11 +775,18 @@ static int proto_tls_send(const struct socket_info* send_sock,
 				/* the handshake itself hasn't started yet (TCP connect
 				 * is still in progress) -- tls_async_write() arms the
 				 * deadline once that first TLS attempt actually happens */
-				/* attach the write buffer to it */
-				if (tcp_async_add_chunk(c, buf, len, 1) < 0) {
+				lock_get(&c->write_lock);
+				if (tcp_async_add_chunk(c, buf, len, 0) < 0) {
 					LM_ERR("Failed to add the initial write chunk\n");
 					rlen = -1; /* report an error - let the caller decide what to do */
+				} else {
+					/* this chunk may still be sitting unsent by the time
+					 * the TLS handshake that follows the TCP connect
+					 * fails, so it needs the same tag as the phase-2
+					 * (TLS-pending) case below */
+					tls_attach_tm_ref_to_last_chunk(c, 0);
 				}
+				lock_release(&c->write_lock);
 
 				LM_DBG("Successfully started async connection \n");
 				goto con_release;
@@ -587,11 +809,16 @@ static int proto_tls_send(const struct socket_info* send_sock,
 				goto con_release;
 			}
 			if (n==0) {
-				/* attach the write buffer to it */
-				if (tcp_async_add_chunk(c, buf, len, 1) < 0) {
+				lock_get(&c->write_lock);
+				if (tcp_async_add_chunk(c, buf, len, 0) < 0) {
 					LM_ERR("Failed to add the initial write chunk\n");
 					rlen = -1; /* report an error - let the caller decide what to do */
+				} else {
+					/* so a later handshake failure can fail this
+					 * branch promptly instead of via fr_timeout */
+					tls_attach_tm_ref_to_last_chunk(c, 0);
 				}
+				lock_release(&c->write_lock);
 
 				LM_DBG("Successfully started async SSL connection \n");
 				goto con_release;
@@ -702,11 +929,15 @@ static int tls_read_req(struct tcp_connection* con, int* bytes_read)
 
 	if (ret < 0) {
 		LM_ERR("failed to do pre-tls handshake!\n");
+		/* lock=1: unlike tls_async_write(), this runs from the reactor's
+		 * READ dispatch, which does not hold con->write_lock */
+		tls_report_pending_tm_failure(con, 1);
 		goto error;
 	} else if (ret == 0) {
 		LM_DBG("SSL accept/connect still pending!\n");
 		return 0;
 	}
+	tls_release_pending_tm_refs(con, 1);
 
 	if(con->state!=S_CONN_OK)
 		goto done; /* not enough data */
@@ -787,12 +1018,16 @@ static int tls_async_write(struct tcp_connection* con, int fd)
 	err = proto_tls_reactor_handshake(con, fd, 0);
 	if (err < 0) {
 		LM_ERR("failed to do pre-tls handshake!\n");
+		/* lock=0: the reactor's WRITE dispatch already holds
+		 * con->write_lock around this whole call */
+		tls_report_pending_tm_failure(con, 0);
 		return -1;
 	} else if (err == 0) {
 		LM_DBG("SSL accept/connect still pending!\n");
 		return 1;
 	}
 	tls_mgm_api.tls_update_fd(con, fd);
+	tls_release_pending_tm_refs(con, 0);
 
 	while ((chunk = tcp_async_get_chunk(con)) != NULL) {
 		LM_DBG("Trying to send %d bytes from chunk %p in conn %p - %d %d \n",
