@@ -117,6 +117,11 @@ int t_gen_totag(struct sip_msg *msg, str *totag);
 
 int t_reply_unsafe( struct cell *t, struct sip_msg * , unsigned int , str * );
 
+/* fail one branch of t with a local reply of the given code, callable
+ * from any context (not just the one that forwarded that branch) --
+ * see the function definition in t_reply.c for the full contract */
+int t_fail_branch( struct cell *t, int branch, unsigned int code );
+
 
 enum rps relay_reply( struct cell *t, struct sip_msg *p_msg, int branch,
 	unsigned int msg_status, branch_bm_t *cancel_bitmap );
