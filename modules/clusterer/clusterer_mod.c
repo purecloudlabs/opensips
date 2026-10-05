@@ -49,6 +49,11 @@ int sync_timeout = DEFAULT_SYNC_TIMEOUT;
 int current_id = -1;
 int db_mode = 1;
 int clusterer_enable_rerouting = 1;
+int rst_ping_jitter = 0;
+int preserve_links_on_reload = 0;
+int reload_on_unknown_source = 0;
+int disable_db_reload = 0;
+static int *unk_src_last_reload;
 
 str clusterer_db_url = {NULL, 0};
 
@@ -167,6 +172,10 @@ static const param_export_t params[] = {
 	{"sync_packet_size",	INT_PARAM,	&sync_packet_size	},
 	{"dispatch_jobs",		INT_PARAM,	&dispatch_jobs		},
 	{"enable_rerouting",		INT_PARAM,	&clusterer_enable_rerouting	},
+	{"rst_ping_jitter",		INT_PARAM,	&rst_ping_jitter	},
+	{"preserve_links_on_reload",	INT_PARAM,	&preserve_links_on_reload	},
+	{"reload_on_unknown_source",	INT_PARAM,	&reload_on_unknown_source	},
+	{"disable_db_reload",		INT_PARAM,	&disable_db_reload	},
 	{0, 0, 0}
 };
 
@@ -426,6 +435,15 @@ static int mod_init(void)
 	if (clusterer_enable_stats==0)
 		exports.stats = 0;
 
+	if (unk_src_last_reload == NULL) {
+		unk_src_last_reload = shm_malloc(sizeof *unk_src_last_reload);
+		if (!unk_src_last_reload) {
+			LM_CRIT("No more shm memory\n");
+			goto error;
+		}
+		*unk_src_last_reload = 0;
+	}
+
 	/* data pointer in shm */
 	if (cluster_list == NULL) {
 		cluster_list = shm_malloc(sizeof *cluster_list);
@@ -572,6 +590,10 @@ mi_response_t *clusterer_reload(const mi_params_t *params,
 		LM_ERR("Running in non-DB mode\n");
 		return init_mi_error(400, MI_SSTR("Non-DB mode"));
 	}
+	if (disable_db_reload) {
+		LM_INFO("DB reload is disabled\n");
+		return init_mi_error(400, MI_SSTR("DB reload is disabled"));
+	}
 
 	if (load_db_info(&dr_dbf, db_hdl, &new_info) != 0) {
 		LM_ERR("Failed to load info from DB\n");
@@ -588,6 +610,8 @@ mi_response_t *clusterer_reload(const mi_params_t *params,
 
 		return init_mi_error(500, "Failed to reload", 16);
 	}
+	if (preserve_links_on_reload)
+		preserve_up_links(new_info);
 	old_info = *cluster_list;
 	*cluster_list = new_info;
 	lock_stop_write(cl_list_lock);
@@ -601,6 +625,50 @@ mi_response_t *clusterer_reload(const mi_params_t *params,
 	shtag_validate_list();
 
 	return init_mi_result_ok();
+}
+
+int reload_clusterer_on_unknown(void)
+{
+	cluster_info_t *new_info;
+	cluster_info_t *old_info;
+	int now = (int)time(NULL);
+
+	if (!db_mode || disable_db_reload)
+		return -1;
+
+	if (now - *unk_src_last_reload < ping_interval)
+		return -1;
+	*unk_src_last_reload = now;
+
+	if (load_db_info(&dr_dbf, db_hdl, &new_info) != 0) {
+		LM_ERR("Failed to reload clusterer info after unknown source\n");
+		return -1;
+	}
+
+	lock_start_write(cl_list_lock);
+	if (preserve_reg_caps(new_info) < 0) {
+		lock_stop_write(cl_list_lock);
+		LM_ERR("Failed to preserve registered capabilities\n");
+
+		if (new_info)
+			free_info(new_info);
+
+		return -1;
+	}
+	if (preserve_links_on_reload)
+		preserve_up_links(new_info);
+	old_info = *cluster_list;
+	*cluster_list = new_info;
+	lock_stop_write(cl_list_lock);
+
+	if (old_info)
+		free_info(old_info);
+
+	LM_INFO("Reloaded DB info after receiving message with unknown source\n");
+
+	shtag_validate_list();
+
+	return 0;
 }
 
 static mi_response_t *clusterer_set_status(const mi_params_t *params,
