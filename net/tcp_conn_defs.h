@@ -184,6 +184,15 @@ struct tcp_connection{
 	void *proto_data;
 	time_t first_seen;
 	int do_not_reuse;
+	/*!< absolute deadline (usec) for completing an async TLS/SSL handshake on
+	 * this connection, 0 if not armed. A handshake spans several invocations
+	 * of the proto layer (a short blocking attempt in the sending process,
+	 * then one or more reactor callbacks), so the overall deadline cannot be
+	 * kept on the stack of any single attempt.
+	 * NOTE: keep new fields at the end of this struct - it is shared with
+	 * separately built modules, so inserting in the middle shifts the offsets
+	 * of the following fields for any module not rebuilt against this header */
+	unsigned long long hs_deadline;
 };
 
 
