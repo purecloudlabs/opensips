@@ -198,6 +198,10 @@ int db_postgres_val2str(const db_con_t* _con, const db_val_t* _v,
 		return 0;
 	}
 
+	/* PQescapeStringConn / PQescapeByteaConn need a live PGconn.
+	 * Query text is built (dispatcher version check, WHERE clauses)
+	 * before submit_query(), so lazy_connect must open here. */
+
 	switch(VAL_TYPE(_v)) {
 	case DB_INT:
 		if (db_int2str(VAL_INT(_v), _s, _len) < 0) {
@@ -242,6 +246,8 @@ int db_postgres_val2str(const db_con_t* _con, const db_val_t* _v,
 			       *_len, l * 2 + 3);
 			return -4;
 		} else {
+			if (db_postgres_ensure_connected((struct pg_con *)_con->tail) != 0)
+				return -4;
 			old_s = _s;
 			*_s++ = '\'';
 			ret = PQescapeStringConn(CON_CONNECTION(_con), _s, VAL_STRING(_v),
@@ -268,6 +274,8 @@ int db_postgres_val2str(const db_con_t* _con, const db_val_t* _v,
 			       *_len, l * 2 + 3);
 			return -5;
 		} else {
+			if (db_postgres_ensure_connected((struct pg_con *)_con->tail) != 0)
+				return -5;
 			old_s = _s;
 			*_s++ = '\'';
 			ret = PQescapeStringConn(CON_CONNECTION(_con), _s, VAL_STR(_v).s,
@@ -303,6 +311,8 @@ int db_postgres_val2str(const db_con_t* _con, const db_val_t* _v,
 			       *_len, l * 2 + 3);
 			return -7;
 		} else {
+			if (db_postgres_ensure_connected((struct pg_con *)_con->tail) != 0)
+				return -7;
 			*_s++ = '\'';
 			tmp_s = (char*)PQescapeByteaConn(CON_CONNECTION(_con), (unsigned char*)VAL_STRING(_v),
 					(size_t)l, (size_t*)&tmp_len);

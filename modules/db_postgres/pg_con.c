@@ -256,6 +256,8 @@ int db_postgres_connect(struct pg_con* ptr)
 	{
 		LM_ERR("PQconnectdbParams: %s\n", PQerrorMessage(ptr->con));
 		PQfinish(ptr->con);
+		ptr->con = 0;
+		ptr->connected = 0;
 		return -1;
 	}
 
@@ -293,6 +295,12 @@ struct pg_con* db_postgres_new_connection(struct db_id* id)
 	ptr->ref = 1;
 	ptr->id = id;
 
+	if (pg_lazy_connect) {
+		LM_DBG("lazy_connect enabled, deferring PQconnect ptr=%p db_id=%p\n",
+			ptr, ptr->id);
+		return ptr;
+	}
+
 	LM_DBG("calling db_postgres_connect ptr = %p, db_id = %p\n", ptr, ptr->id);
 
 	if (db_postgres_connect(ptr)!=0) {
@@ -304,6 +312,21 @@ struct pg_con* db_postgres_new_connection(struct db_id* id)
 	}
 
 	return ptr;
+}
+
+int db_postgres_ensure_connected(struct pg_con* ptr)
+{
+	if (!ptr) {
+		LM_ERR("invalid connection parameter value\n");
+		return -1;
+	}
+
+	if (ptr->con)
+		return 0;
+
+	LM_DBG("opening deferred postgres connection ptr=%p db_id=%p\n",
+		ptr, ptr->id);
+	return db_postgres_connect(ptr);
 }
 
 /*
@@ -322,10 +345,17 @@ struct pg_con* db_postgres_new_async_connection(struct db_id* id)
 	}
 
 	ptr = db_postgres_new_connection(id);
+	if (!ptr)
+		return 0;
 
-	if (ptr) {
-		PQsetnonblocking(ptr->con, 1);
+	/* async queries need a live socket even when lazy_connect is set */
+	if (db_postgres_ensure_connected(ptr) != 0) {
+		LM_ERR("async connect failed, cleaning up %p=pkg_free()\n", ptr);
+		pkg_free(ptr);
+		return 0;
 	}
+
+	PQsetnonblocking(ptr->con, 1);
 
 	return ptr;
 }

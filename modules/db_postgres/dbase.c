@@ -149,6 +149,9 @@ static int db_postgres_submit_query(const db_con_t* _con, const str* _s)
 		return(-1);
 	}
 
+	if (db_postgres_ensure_connected((struct pg_con *)_con->tail) != 0)
+		return -1;
+
 	submit_func_called = 1;
 
 	/* this bit of nonsense in case our connection get screwed up */
@@ -244,6 +247,9 @@ static int db_postgres_submit_async_query(const db_con_t* _con, const str* _s)
 		LM_ERR("invalid parameter value\n");
 		return(-1);
 	}
+
+	if (db_postgres_ensure_connected((struct pg_con *)_con->tail) != 0)
+		return -1;
 
 	submit_func_called = 1;
 
