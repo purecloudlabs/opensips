@@ -64,6 +64,7 @@
 #include "../usrloc/ul_evi.h"
 #include "../../msg_callbacks.h"
 #include "../../mod_fix.h"
+#include "../../net/tcp_common.h"
 
 #define NO_BODY_CLONE_MARKER ((struct sip_msg_body*)-1)
 
@@ -732,7 +733,7 @@ int t_forward_nonack( struct cell *t, struct sip_msg* p_msg ,
 	str current_uri;
 	branch_bm_t  added_branches;
 	struct cell *t_invite;
-	int i, success_branch;
+	int i, success_branch, send_ret;
 	const struct socket_info *bk_sock;
 	unsigned int bk_bflags;
 	struct msg_branch *branch;
@@ -882,7 +883,12 @@ int t_forward_nonack( struct cell *t, struct sip_msg* p_msg ,
 							&t->uac[i].request.dst);
 					run_trans_callbacks(TMCB_PRE_SEND_BUFFER, t, p_msg, 0, i);
 
-					if (SEND_BUFFER( &t->uac[i].request)==0) {
+					tcp_chunk_fail_token = TM_CHUNK_FAIL_TOKEN(
+						t->hash_index, t->label, i);
+					send_ret = SEND_BUFFER( &t->uac[i].request);
+					tcp_chunk_fail_token = 0;
+
+					if (send_ret==0) {
 						reset_bavp_list();
 						ser_error = 0;
 						break;
