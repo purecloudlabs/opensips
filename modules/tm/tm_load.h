@@ -123,6 +123,11 @@ struct tm_binds {
 	t_ctx_get_int_f t_ctx_get_int;
 	t_ctx_get_str_f t_ctx_get_str;
 	t_ctx_get_ptr_f t_ctx_get_ptr;
+
+	/* fail one branch of t with a local reply, from any context --
+	 * see t_reply.h/t_reply.c for the full contract. NOTE: keep this at
+	 * the end of the struct -- see net/tcp_conn_defs.h for why. */
+	int (*t_fail_branch)(struct cell *t, int branch, unsigned int code);
 };
 
 
