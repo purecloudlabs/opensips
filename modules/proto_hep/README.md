@@ -302,7 +302,12 @@ modparam("proto_hep", "hep_async_local_write_timeout", 100)
 #### hep_tcp_conn_max_lifetime (integer)
 
 
-The number of seconds after which TCP/TLS connections are reopened.
+The maximum number of seconds an outgoing TCP/TLS connection is kept
+open, even if it is constantly in use. After that the connection is
+closed and the next HEP packet opens a new one, which allows the
+collector to be restarted or redeployed cleanly. Up to 10% of the
+value is randomly subtracted per connection, to avoid reopening all
+the connections at the same time.
 Setting the value to 0 will disable this option.
 (This is a Genesys-specific feature. It should be implemented in
 *tcp_mgm* after OpenSIPS 3.3!)

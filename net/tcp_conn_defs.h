@@ -198,8 +198,7 @@ struct tcp_connection{
 	struct tcp_async_data *async;
 	/* protocol specific data attached to this connection, in TCP-main-private memory */
 	void *proto_data;
-	time_t first_seen;
-	int do_not_reuse;
+	unsigned int max_lifetime;
 };
 
 
@@ -214,6 +213,8 @@ int tcpconn_add_alias(struct sip_msg *msg, unsigned int id, int port, int proto)
 #define tcp_conn_set_lifetime( _c, _lt) \
 	do { \
 		unsigned int _timeout = get_ticks() + _lt;\
+		if ((_c)->max_lifetime && _timeout > (_c)->max_lifetime) \
+			_timeout = (_c)->max_lifetime;\
 		if (_timeout > (_c)->lifetime ) \
 			(_c)->lifetime = _timeout;\
 	}while(0)
