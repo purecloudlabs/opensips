@@ -1022,6 +1022,7 @@ static int rtp_relay_b2b_new_tuple(struct b2bl_cb_params *p, unsigned int m)
 		return 0;
 	}
 	rtp_relay_ctx_set_b2b(ctx);
+	RTP_RELAY_CTX_REF(ctx);
 	RTP_RELAY_PUT_B2B_CTX(p->key, ctx);
 
 	return 0;
@@ -1871,6 +1872,26 @@ static int rtp_relay_ctx_leg_reply(struct rtp_relay_ctx *ctx, struct sip_msg *ms
 	return ret;
 }
 
+/* a session engaged for all the branches also covers the ones the failure
+ * route may still create (digest retry, failover), so a failed branch must
+ * not destroy it: release the media of the failed attempt and forget its
+ * callee, and the next branch that is forwarded makes a fresh offer */
+static void rtp_relay_sess_failed_branch(struct rtp_relay_ctx *ctx,
+		struct rtp_relay_sess *sess, struct sip_msg *rpl, struct sip_msg *req)
+{
+	struct rtp_relay_session info;
+
+	if (!rtp_sess_late(sess)) {
+		memset(&info, 0, sizeof info);
+		info.msg = (rpl == FAKED_REPLY ? req : rpl);
+		rtp_relay_delete(&info, ctx, sess, RTP_RELAY_CALLEE);
+		rtp_sess_reset_ongoing(sess);
+	}
+	/* the tag belongs to the branch that failed */
+	if (sess->legs[RTP_RELAY_CALLEE])
+		shm_str_clean(&sess->legs[RTP_RELAY_CALLEE]->tag);
+}
+
 static void rtp_relay_ctx_initial_cb(struct cell* t, int type, struct tmcb_params *p)
 {
 	struct rtp_relay_session info;
@@ -1897,6 +1918,11 @@ static void rtp_relay_ctx_initial_cb(struct cell* t, int type, struct tmcb_param
 				LM_DBG("disabled and/or pending session %d/%d\n",
 						rtp_sess_disabled(sess), rtp_sess_pending(sess));
 				goto end;
+			}
+			if (type == TMCB_ON_FAILURE &&
+					sess->index == RTP_RELAY_ALL_BRANCHES) {
+				rtp_relay_sess_failed_branch(ctx, sess, p->rpl, p->req);
+				break;
 			}
 			rtp_relay_fill_sess_leg(ctx, sess, RTP_RELAY_CALLEE,
 					NULL, rtp_relay_ctx_branch());
@@ -1976,10 +2002,6 @@ int rtp_relay_ctx_engage(struct sip_msg *msg,
 	}
 
 	if (route_type != LOCAL_ROUTE) {
-		if (rtp_relay_dlg_ctx_idx < 0) {
-			LM_ERR("dialog module not loaded - failed to engage\n");
-			return -1;
-		}
 		if (!rtp_relay_ctx_engaged(ctx)) {
 
 			/* handles the replies to the original INVITE */
@@ -1989,7 +2011,8 @@ int rtp_relay_ctx_engage(struct sip_msg *msg,
 				LM_ERR("failed to install TM reply callback\n");
 				return -1;
 			}
-			rtp_relay_dlg_req_callbacks(NULL, ctx);
+			if (rtp_relay_dlg_ctx_idx >= 0)
+				rtp_relay_dlg_req_callbacks(NULL, ctx);
 			rtp_relay_ctx_set_engaged(ctx);
 		}
 		sess = rtp_relay_new_sess(ctx, relay, set,
