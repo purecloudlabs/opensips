@@ -196,6 +196,14 @@ struct tcp_connection{
 	/* protocol specific data attached to this connection, in TCP-main-private memory */
 	void *proto_data;
 	unsigned int max_lifetime;
+	/*!< absolute deadline (usec) for completing an async TLS/SSL handshake on
+	 * this connection, 0 if not armed. A handshake spans several reactor
+	 * callbacks (one per IO event on the connection), so the overall deadline
+	 * cannot be kept on the stack of any single attempt.
+	 * NOTE: keep new fields at the end of this struct - it is shared with
+	 * separately built modules, so inserting in the middle shifts the offsets
+	 * of the following fields for any module not rebuilt against this header */
+	unsigned long long hs_deadline;
 };
 
 
