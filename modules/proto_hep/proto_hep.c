@@ -91,6 +91,18 @@ static int hep_async_local_write_timeout = 10;
 static int hep_tls_handshake_timeout = 100;
 static int hep_tcp_conn_max_lifetime = 0;
 
+/* How long a single reactor-driven TLS handshake attempt may block in the
+ * TCP IO thread, in ms. The callback runs with the connection's write_lock
+ * held, so any SIP worker sending on the same (still connecting) connection
+ * spins on that lock for as long as the attempt takes -- keep it short and let
+ * con->hs_deadline (armed from hep_tls_handshake_timeout) bound the overall handshake. */
+#define HEP_TLS_HS_ATTEMPT_TOUT 10
+
+/* per-attempt window, never longer than the overall handshake timeout (and
+ * never 0, which tls_fix_read_conn() would take as "do a blocking connect") */
+#define HEP_TLS_HS_ATTEMPT_TOUT_FOR(_hs_tout) \
+	(((_hs_tout) > 0 && (_hs_tout) < HEP_TLS_HS_ATTEMPT_TOUT) ? (_hs_tout) : HEP_TLS_HS_ATTEMPT_TOUT)
+
 int hep_ctx_idx = 0;
 int hep_capture_id = 1;
 int payload_compression = 0;
@@ -210,6 +222,12 @@ static int mod_init(void)
 	if (!protos[PROTO_HEP_UDP].listeners && !protos[PROTO_HEP_TCP].listeners
 		&& !protos[PROTO_HEP_TLS].listeners) {
 		LM_ERR("No HEP listener defined!\n");
+		return -1;
+	}
+
+	if (hep_tls_handshake_timeout < 0) {
+		LM_ERR("hep_tls_handshake_timeout cannot be negative (%d)\n",
+			hep_tls_handshake_timeout);
 		return -1;
 	}
 
@@ -811,7 +829,13 @@ static int hep_tls_async_write(struct tcp_connection* con, int fd)
 	int n;
 	struct tcp_async_chunk* chunk;
 
-	n = tls_mgm_api.tls_fix_read_conn(con, fd, hep_tls_handshake_timeout, NULL, 0);
+	/* first time this connection's TLS handshake is actually attempted
+	 * (its TCP connect is done from the reactor) -- a no-op if already armed */
+	if (con->proto_flags & (F_TLS_DO_ACCEPT|F_TLS_DO_CONNECT))
+		tcp_arm_handshake_deadline(con, hep_tls_handshake_timeout);
+
+	n = tls_mgm_api.tls_fix_read_conn(con, fd,
+		HEP_TLS_HS_ATTEMPT_TOUT_FOR(hep_tls_handshake_timeout), NULL, 0);
 	if (n < 0) {
 		LM_ERR("failed to do pre-tls handshake!\n");
 		return -1;
@@ -870,7 +894,13 @@ static int hep_tcp_or_tls_read_req(struct tcp_connection* con, int* bytes_read,
 	LM_DBG("Using the connection buff\n");
 	
 	if (is_tls) {
-		ret = tls_mgm_api.tls_fix_read_conn(con, con->fd, hep_tls_handshake_timeout, NULL, 1);
+		/* first time this connection's TLS handshake is actually attempted
+		 * (its TCP connect is done from the reactor) -- a no-op if already armed */
+		if (con->proto_flags & (F_TLS_DO_ACCEPT|F_TLS_DO_CONNECT))
+			tcp_arm_handshake_deadline(con, hep_tls_handshake_timeout);
+
+		ret = tls_mgm_api.tls_fix_read_conn(con, con->fd,
+			HEP_TLS_HS_ATTEMPT_TOUT_FOR(hep_tls_handshake_timeout), NULL, 1);
 		if (ret < 0) {
 			LM_ERR("failed to do pre-tls handshake!\n");
 			return -1;
@@ -1188,6 +1218,8 @@ static int proto_hep_tls_conn_init(struct tcp_connection* c)
 		LM_DBG("looking up TLS server "
 			"domain [%s:%d]\n", ip_addr2a(&c->rcv.dst_ip), c->rcv.dst_port);
 		dom = tls_mgm_api.find_server_domain(&c->rcv.dst_ip, c->rcv.dst_port);
+		/* bound this accept the same way an outbound connect is bounded */
+		tcp_arm_handshake_deadline(c, hep_tls_handshake_timeout);
 	} else {
 		dom = tls_mgm_api.find_client_domain(&c->rcv.src_ip, c->rcv.src_port);
 	}

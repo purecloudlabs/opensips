@@ -68,6 +68,18 @@ static int bins_max_msg_chunks = 32;
 static int bins_async = 1;
 static int bins_async_max_postponed_chunks = 32;
 static int bins_handshake_tout = 100;
+
+/* How long a single reactor-driven TLS handshake attempt may block in the
+ * TCP IO thread, in ms. The callback runs with the connection's write_lock
+ * held, so any SIP worker sending on the same (still connecting) connection
+ * spins on that lock for as long as the attempt takes -- keep it short and let
+ * con->hs_deadline (armed from bins_handshake_timeout) bound the overall handshake. */
+#define BINS_HS_ATTEMPT_TOUT 10
+
+/* per-attempt window, never longer than the overall handshake timeout (and
+ * never 0, which tls_fix_read_conn() would take as "do a blocking connect") */
+#define BINS_HS_ATTEMPT_TOUT_FOR(_hs_tout) \
+	(((_hs_tout) > 0 && (_hs_tout) < BINS_HS_ATTEMPT_TOUT) ? (_hs_tout) : BINS_HS_ATTEMPT_TOUT)
 static str trace_destination_name = {NULL, 0};
 static int trace_is_on_tmp;
 
@@ -177,6 +189,12 @@ static int mod_init(void)
 {
 	LM_INFO("initializing BINS protocol\n");
 
+	if (bins_handshake_tout < 0) {
+		LM_ERR("bins_handshake_timeout cannot be negative (%d)\n",
+			bins_handshake_tout);
+		return -1;
+	}
+
 	if (load_tls_mgm_api(&tls_mgm_api) != 0){
 		LM_DBG("failed to find tls API - is tls_mgm module loaded?\n");
 		return -1;
@@ -248,6 +266,8 @@ out:
 		LM_DBG("looking up TLS server "
 			"domain [%s:%d]\n", ip_addr2a(&c->rcv.dst_ip), c->rcv.dst_port);
 		dom = tls_mgm_api.find_server_domain(&c->rcv.dst_ip, c->rcv.dst_port);
+		/* bound this accept the same way an outbound connect is bounded */
+		tcp_arm_handshake_deadline(c, bins_handshake_tout);
 	} else {
 		dom = tls_mgm_api.find_client_domain(&c->rcv.src_ip, c->rcv.src_port);
 	}
@@ -473,7 +493,13 @@ static int bins_async_write(struct tcp_connection* con, int fd)
 	int n;
 	struct tcp_async_chunk *chunk;
 
-	n = tls_mgm_api.tls_fix_read_conn(con, fd, bins_handshake_tout, t_dst, 0);
+	/* first time this connection's TLS handshake is actually attempted
+	 * (its TCP connect is done from the reactor) -- a no-op if already armed */
+	if (con->proto_flags & (F_TLS_DO_ACCEPT|F_TLS_DO_CONNECT))
+		tcp_arm_handshake_deadline(con, bins_handshake_tout);
+
+	n = tls_mgm_api.tls_fix_read_conn(con, fd,
+		BINS_HS_ATTEMPT_TOUT_FOR(bins_handshake_tout), t_dst, 0);
 	if (n < 0) {
 		LM_ERR("failed to do pre-tls handshake!\n");
 		return -1;
@@ -522,7 +548,13 @@ static int bins_read_req(struct tcp_connection* con, int* bytes_read)
 		init_tcp_req(req, 0);
 	LM_DBG("Using the connection buff\n");
 
-	ret=tls_mgm_api.tls_fix_read_conn(con, con->fd, bins_handshake_tout, t_dst, 1);
+	/* first time this connection's TLS handshake is actually attempted
+	 * (its TCP connect is done from the reactor) -- a no-op if already armed */
+	if (con->proto_flags & (F_TLS_DO_ACCEPT|F_TLS_DO_CONNECT))
+		tcp_arm_handshake_deadline(con, bins_handshake_tout);
+
+	ret=tls_mgm_api.tls_fix_read_conn(con, con->fd,
+		BINS_HS_ATTEMPT_TOUT_FOR(bins_handshake_tout), t_dst, 1);
 	if (ret < 0) {
 		LM_ERR("failed to do pre-tls handshake!\n");
 		return -1;

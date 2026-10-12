@@ -324,6 +324,31 @@ static int tls_async_write(struct tcp_connection* con,int fd);
 static int proto_tls_conn_init(struct tcp_connection* c);
 static void proto_tls_conn_clean(struct tcp_connection* c);
 
+/* How long a single reactor-driven TLS handshake attempt may block in the
+ * TCP IO thread, in ms. The callback runs with the connection's write_lock
+ * held, so any SIP worker sending on the same (still connecting) connection
+ * spins on that lock for as long as the attempt takes -- keep it short and let
+ * con->hs_deadline (armed from tls_handshake_timeout) bound the overall handshake. */
+#define TLS_HS_ATTEMPT_TOUT 10
+
+/* per-attempt window, never longer than the overall handshake timeout (and
+ * never 0, which tls_fix_read_conn() would take as "do a blocking connect") */
+#define TLS_HS_ATTEMPT_TOUT_FOR(_hs_tout) \
+	(((_hs_tout) > 0 && (_hs_tout) < TLS_HS_ATTEMPT_TOUT) ? (_hs_tout) : TLS_HS_ATTEMPT_TOUT)
+
+/* One reactor-step of an async TLS handshake: arm the overall deadline
+ * (no-op if already armed), then call tls_fix_read_conn() with the short
+ * per-attempt window. @lock: pass tls_fix_read_conn()'s lock argument --
+ * 1 from the READ dispatch (no write_lock held), 0 from WRITE dispatch. */
+static int proto_tls_reactor_handshake(struct tcp_connection *con, int fd,
+		int lock)
+{
+	if (con->proto_flags & (F_TLS_DO_ACCEPT|F_TLS_DO_CONNECT))
+		tcp_arm_handshake_deadline(con, tls_handshake_tout);
+	return tls_mgm_api.tls_fix_read_conn(con, fd,
+		TLS_HS_ATTEMPT_TOUT_FOR(tls_handshake_tout), t_dst, lock);
+}
+
 static const cmd_export_t cmds[] = {
 	{"proto_init", (cmd_function)proto_tls_init, {{0, 0, 0}}, 0},
 	{ 0, 0, {{0, 0, 0}}, 0}
@@ -394,6 +419,12 @@ static int mod_init(void)
 {
 
 	LM_INFO("initializing TLS protocol\n");
+
+	if (tls_handshake_tout < 0) {
+		LM_ERR("tls_handshake_timeout cannot be negative (%d)\n",
+			tls_handshake_tout);
+		return -1;
+	}
 
 	if(load_tls_mgm_api(&tls_mgm_api) != 0){
 		LM_DBG("failed to find tls API - is tls_mgm module loaded?\n");
@@ -533,6 +564,9 @@ static int proto_tls_conn_init(struct tcp_connection* c)
 		LM_DBG("looking up TLS server "
 			"domain [%s:%d]\n", ip_addr2a(&c->rcv.dst_ip), c->rcv.dst_port);
 		dom = tls_mgm_api.find_server_domain(&c->rcv.dst_ip, c->rcv.dst_port);
+		/* bound this accept the same way an outbound connect is bounded --
+		 * see tls_read_req()/tls_async_write() for the connect-side case */
+		tcp_arm_handshake_deadline(c, tls_handshake_tout);
 	} else {
 		dom = tls_mgm_api.find_client_domain(&c->rcv.src_ip, c->rcv.src_port);
 	}
@@ -747,7 +781,7 @@ static int tls_read_req(struct tcp_connection* con, int* bytes_read)
 	}
 
 	/* do this trick in order to trace whether if it's an error or not */
-	ret=tls_mgm_api.tls_fix_read_conn(con, con->fd, tls_handshake_tout, t_dst, 1);
+	ret = proto_tls_reactor_handshake(con, con->fd, 1);
 
 	/* if there is pending tracing data on an accepted connection, flush it
 	 * As this is a read op, we look only for accepted conns, not to conflict
@@ -857,7 +891,7 @@ static int tls_async_write(struct tcp_connection* con, int fd)
 	if (err > 0)
 		return 1;
 
-	err = tls_mgm_api.tls_fix_read_conn(con, fd, tls_handshake_tout, t_dst, 0);
+	err = proto_tls_reactor_handshake(con, fd, 0);
 	if (err < 0) {
 		LM_ERR("failed to do pre-tls handshake!\n");
 		return -1;
