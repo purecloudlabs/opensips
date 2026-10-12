@@ -1361,10 +1361,21 @@ int update_cloned_msg_from_msg(struct sip_msg *c_msg, struct sip_msg *msg)
 		/* fake requests are built based on the T->uas request, sharing
 		 * the lump pointers; so, if we updated the T->uas (aka c_msg),
 		 * we need to update the fake msg (aka msg) before freeing the
-		 * old lumps */
-		if (l1_len) msg->add_rm = c_msg->add_rm;
-		if (l2_len) msg->body_lumps = c_msg->body_lumps;
-		if (l3_len) msg->reply_lump = c_msg->reply_lump;
+		 * old lumps; the PKG lumps added by the script to the fake msg
+		 * are linked only into the old lists and they were just cloned
+		 * into c_msg, so release them before dropping the old lists */
+		if (l1_len) {
+			del_notflaged_lumps( &msg->add_rm, LUMPFLAG_SHMEM);
+			msg->add_rm = c_msg->add_rm;
+		}
+		if (l2_len) {
+			del_notflaged_lumps( &msg->body_lumps, LUMPFLAG_SHMEM);
+			msg->body_lumps = c_msg->body_lumps;
+		}
+		if (l3_len) {
+			del_nonshm_lump_rpl( &msg->reply_lump);
+			msg->reply_lump = c_msg->reply_lump;
+		}
 		/* this will also prevent free_fake_req() to free again the
 		 * old lumps (as being different than t->uas */
 	}
