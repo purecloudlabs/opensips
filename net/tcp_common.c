@@ -425,6 +425,8 @@ int tcp_async_add_chunk(struct tcp_connection *con, char *buf,
 	c->ticks = get_ticks();
 	c->buf = (char *)(c+1);
 	memcpy(c->buf,buf,len);
+	c->tm_ref = NULL;
+	c->tm_ref_release = NULL;
 
 	if (con->async->allocated == con->async->pending) {
 		LM_ERR("We have reached the limit of max async postponed chunks %d "
@@ -665,8 +667,11 @@ void tcp_async_update_write(struct tcp_connection *con, int len)
 		}
 	}
 	con->async->pending -= i;
-	for (c = 0; c < i; c++)
+	for (c = 0; c < i; c++) {
+		if (con->async->chunks[c]->tm_ref_release)
+			con->async->chunks[c]->tm_ref_release(con->async->chunks[c]->tm_ref);
 		shm_free(con->async->chunks[c]);
+	}
 	if (con->async->pending) {
 		LM_DBG("We still have %d chunks pending on %p\n",
 				con->async->pending, con);
