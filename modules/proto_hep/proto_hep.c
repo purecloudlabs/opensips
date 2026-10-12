@@ -200,6 +200,12 @@ static int mod_init(void)
 		atomic_t hep_last_attempt;
 	} *sh_holders;
 
+	if (hep_tcp_conn_max_lifetime < 0) {
+		LM_ERR("invalid hep_tcp_conn_max_lifetime %d, must be >= 0\n",
+			hep_tcp_conn_max_lifetime);
+		return -1;
+	}
+
 	/* check if any listeners defined for this proto */
 	if (!protos[PROTO_HEP_UDP].listeners && !protos[PROTO_HEP_TCP].listeners
 		&& !protos[PROTO_HEP_TLS].listeners) {
@@ -417,11 +423,17 @@ static int hep_tls_send(const struct socket_info* send_sock,
 	return hep_tcp_or_tls_send(send_sock, buf, len, to, id, 1, msg);
 }
 
-static int is_connection_max_lifetime_exceeded(struct tcp_connection* c) {
-	if (hep_tcp_conn_max_lifetime == 0 || c == NULL) return 0;
-	int conn_life = time(0) - c->first_seen;
-	if (conn_life >= hep_tcp_conn_max_lifetime) return 1;
-	return 0;
+static void hep_cap_conn_lifetime(struct tcp_connection *c)
+{
+	unsigned int max = hep_tcp_conn_max_lifetime;
+
+	if (!max)
+		return;
+
+	max -= rand() % (max / 10 + 1);
+	c->max_lifetime = get_ticks() + max;
+	if (c->lifetime > c->max_lifetime)
+		c->lifetime = c->max_lifetime;
 }
 
 static int hep_tcp_or_tls_send(const struct socket_info* send_sock,
@@ -453,8 +465,6 @@ static int hep_tcp_or_tls_send(const struct socket_info* send_sock,
 		return -1;
 	}
 
-	if (is_connection_max_lifetime_exceeded(c)) c->do_not_reuse = 1;
-
 	/* was connection found ?? */
 	if (c == 0) {
 		struct tcp_conn_profile prof;
@@ -475,6 +485,7 @@ static int hep_tcp_or_tls_send(const struct socket_info* send_sock,
 				LM_ERR("async TCP connect failed\n");
 				return -1;
 			}
+			hep_cap_conn_lifetime(c);
 			/* attach the write buffer to it */
 			if (tcp_async_add_chunk(c, buf, len, 1) < 0) {
 				LM_ERR("Failed to add the initial write chunk\n");
@@ -494,8 +505,7 @@ static int hep_tcp_or_tls_send(const struct socket_info* send_sock,
 			LM_ERR("connect failed\n");
 			return -1;
 		}
-		c->first_seen = time(0);
-		c->do_not_reuse = 0;
+		hep_cap_conn_lifetime(c);
 		goto send_it;
 	}
 
@@ -539,11 +549,7 @@ send_it:
 			hep_send_timeout, hep_async_local_write_timeout);
 	}
 
-	if (c->do_not_reuse) {
-		c->lifetime = get_ticks() - 1;
-	} else {
-		tcp_conn_set_lifetime(c, tcp_con_lifetime);
-	}
+	tcp_conn_reset_lifetime(c);
 
 	LM_DBG("after write: c=%p n/len=%d/%d\n", c, n, len);
 	/* LM_DBG("buf=\n%.*s\n", (int)len, buf); */
