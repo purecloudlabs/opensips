@@ -103,8 +103,9 @@ make modules
 # team, live under modules-contrib and are built only when explicitly requested:
 
 make modules-contrib
+make all-modules         # builds every configured module collection
 
-or make all #builds everything
+or make all #builds the core, utilities and the default modules collection
 
 -compile debug mode version
 

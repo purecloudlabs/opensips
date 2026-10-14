@@ -78,6 +78,10 @@ exclude_modules?= aaa_diameter aaa_radius auth_jwt b2b_logic_xml cachedb_cassand
 
 include_modules?=
 
+# Source directories containing loadable module collections.  Each directory
+# is also available as a make target; all-modules builds all collections.
+MODULE_DIRS?= modules modules-contrib
+
 DEFS+= -DPKG_MALLOC #Use a faster malloc
 DEFS+= -DSHM_MMAP #Use mmap instead of SYSV shared memory
 DEFS+= -DUSE_MCAST #Compile in support for IP Multicast

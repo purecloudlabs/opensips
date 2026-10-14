@@ -998,6 +998,7 @@ LOCALBASE=/usr NICER=0 CFLAGS="%{optflags}" LDFLAGS="%{?__global_ldflags}" %{?_w
   modules_prefix=%{buildroot}%{_prefix} \
   modules_dir=%{_lib}/%{name}/modules
 LOCALBASE=/usr NICER=0 CFLAGS="%{optflags}" LDFLAGS="%{?__global_ldflags}" %{__make} modules-contrib %{?_smp_mflags} \
+  modules="$(find modules-contrib -mindepth 1 -maxdepth 1 -type d -printf '%%p ')" \
   cfg_target=%{_sysconfdir}/opensips/ \
   modules_prefix=%{buildroot}%{_prefix} \
   modules_dir=%{_lib}/%{name}/modules
@@ -1012,7 +1013,8 @@ LOCALBASE=/usr NICER=0 CFLAGS="%{optflags}" LDFLAGS="%{?__global_ldflags}" %{__m
   modules_dir=%{_lib}/%{name}/modules \
   DBTEXTON=yes # fixed dbtext documentation installation
 
-%{__make} install-modules-contrib-files LIBDIR=%{_lib} \
+%{__make} install-modules-files LIBDIR=%{_lib} \
+  modules="$(find modules-contrib -mindepth 1 -maxdepth 1 -type d -printf '%%p ')" \
   basedir=%{buildroot} prefix=%{_prefix} \
   cfg_prefix=%{buildroot} cfg_target=%{_sysconfdir}/opensips/ \
   modules_prefix=%{buildroot}/%{_prefix} \
