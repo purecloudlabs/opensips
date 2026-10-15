@@ -2674,6 +2674,10 @@ cmd:	 ASSERT LPAREN exp COMMA STRING RPAREN	 {
 				mk_action2($$, XLOG_T, STR_ST, STR_ST, $3, $5); }
 		| XLOG LPAREN STRING COMMA folded_string RPAREN {
 				mk_action2($$, XLOG_T, STR_ST, STR_ST, $3, $5); }
+		| XLOG LPAREN STRING COMMA STRING COMMA STRING RPAREN {
+				mk_action3($$, XLOG_T, STR_ST, STR_ST, STR_ST, $3, $5, $7); }
+		| XLOG LPAREN STRING COMMA folded_string COMMA STRING RPAREN {
+				mk_action3($$, XLOG_T, STR_ST, STR_ST, STR_ST, $3, $5, $7); }
 		| ASYNC_TOKEN LPAREN async_func COMMA route_name RPAREN {
 				rt_ref = ref_script_route_by_name( $5, sroutes->request,
 					RT_NO, REQUEST_ROUTE, 0);

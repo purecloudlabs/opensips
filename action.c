@@ -934,7 +934,35 @@ int do_action(struct action* a, struct sip_msg* msg)
 			break;
 		case XLOG_T:
 			script_trace("core", "xlog", msg, a->file, a->line) ;
-			if (a->elem[1].u.data != NULL)
+			if (a->elem[2].u.data != NULL)
+			{
+				if (a->elem[1].type != SCRIPTVAR_ELEM_ST)
+				{
+					LM_ALERT("BUG in xlog() type %d\n", a->elem[1].type);
+					ret=E_BUG;
+					break;
+				}
+				if (a->elem[0].type != STR_ST)
+				{
+					LM_ALERT("BUG in xlog() type %d\n", a->elem[0].type);
+					ret=E_BUG;
+					break;
+				}
+				if (a->elem[2].type != STR_ST)
+				{
+					LM_ALERT("BUG in xlog() type %d\n", a->elem[2].type);
+					ret=E_BUG;
+					break;
+				}
+				ret = xlog_3(msg, a->elem[0].u.data, a->elem[1].u.data,
+					a->elem[2].u.data);
+				if (ret < 0)
+				{
+					LM_ERR("error while printing xlog message\n");
+					break;
+				}
+			}
+			else if (a->elem[1].u.data != NULL)
 			{
 				if (a->elem[1].type != SCRIPTVAR_ELEM_ST)
 				{
