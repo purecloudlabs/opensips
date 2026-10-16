@@ -1607,6 +1607,22 @@ static int fix_actions(struct action* a)
 
 					t->elem[1].u.data = model;
 					t->elem[1].type = SCRIPTVAR_ELEM_ST;
+
+					/* optional 3rd param: the JSON log_ctx blob */
+					if (t->elem[2].u.data != NULL)
+					{
+						s.s = t->elem[2].u.data;
+						s.len = strlen(s.s);
+						if (pv_parse_format(&s, &model) || model == NULL)
+						{
+							LM_ERR("wrong format [%s] for log_ctx param\n",s.s);
+							ret=E_BUG;
+							goto error;
+						}
+
+						t->elem[2].u.data = model;
+						t->elem[2].type = SCRIPTVAR_ELEM_ST;
+					}
 				}
 				break;
 		}

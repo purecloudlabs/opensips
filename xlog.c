@@ -41,11 +41,17 @@
 #define XLOG_TRACE_API_MODULE "proto_hep"
 #define XLOG_CORRELATION_MAGIC "XLOGCORR"
 
+/* headroom (bytes) reserved in the JSON log line for the fixed keys and their
+ * values - time, pid, level, module, function, prefix, pname, hostname and
+ * the surrounding JSON punctuation - on top of the message and log_ctx blob */
+#define XLOG_JSON_KEYS_OVERHEAD 1024
 
 
 char *log_buf = NULL;
+char *log_ctx_buf = NULL;
 
 int xlog_buf_size = 4096;
+int xlog_ctx_buf_size = 4096;
 int xlog_force_color = 0;
 
 /* the log level used when printing xlog messages */
@@ -127,6 +133,12 @@ static int buf_init(void)
 		LM_ERR("no pkg memory left\n");
 		return -1;
 	}
+	log_ctx_buf = (char*)pkg_malloc((xlog_ctx_buf_size+1)*sizeof(char));
+	if(log_ctx_buf==NULL)
+	{
+		LM_ERR("no pkg memory left\n");
+		return -1;
+	}
 	return 0;
 }
 
@@ -160,6 +172,30 @@ int init_xlog(void)
 		}
 	}
 
+	/* The JSON log line (log_json_buf) must hold the rendered message
+	 * (up to xlog_buf_size) plus the raw log_ctx blob (up to
+	 * xlog_ctx_buf_size) plus the fixed JSON keys/values (time, pid, level,
+	 * module, func, prefix, pname, hostname, ...). If the configured
+	 * log_json_buf_size is too small, large message+ctx xlog entries would
+	 * be silently dropped by the JSON consumer, so raise it to a safe floor.
+	 * Note: JSON escaping may still expand the message beyond its raw size;
+	 * operators logging heavily-escaped messages may need a larger value. */
+	{
+		int min_json_buf = xlog_buf_size + xlog_ctx_buf_size +
+			XLOG_JSON_KEYS_OVERHEAD;
+
+		if (log_json_buf_size < min_json_buf) {
+			LM_WARN("log_json_buf_size (%d) too small for xlog_buf_size (%d) "
+				"+ xlog_ctx_buf_size (%d); raising to %d\n",
+				log_json_buf_size, xlog_buf_size, xlog_ctx_buf_size,
+				min_json_buf);
+			log_json_buf_size = min_json_buf;
+			if (init_log_json_buf(1) < 0) {
+				LM_ERR("failed to grow JSON log buffer\n");
+				return -1;
+			}
+		}
+	}
 
 	return 0;
 }
@@ -308,6 +344,59 @@ int xlog_2(struct sip_msg* msg, char* lev, char* frm)
 
 	/* log_buf[log_len] = '\0'; */
 	LM_GEN1((int)level, "%.*s", log_len, log_buf);
+
+	reset_proc_log_level();
+
+	return ret;
+}
+
+
+int xlog_3(struct sip_msg* msg, char* lev, char* ctx, char* frm)
+{
+	int log_len, ctx_len, ret;
+	long level;
+	xl_level_p xlp;
+	pv_value_t value;
+
+	xlp = (xl_level_t*)(void*)lev;
+	if(xlp->type==1)
+	{
+		if(pv_get_spec_value(msg, &xlp->v.sp, &value)!=0
+			|| value.flags&PV_VAL_NULL || !(value.flags&PV_VAL_INT))
+		{
+			LM_ERR("invalid log level value [%d]\n", value.flags);
+			return -1;
+		}
+		level = (long)value.ri;
+	} else {
+		level = xlp->v.level;
+	}
+
+	if(!is_xlog_printable((int)level))
+		return 1;
+
+	/* render the message into the shared log buffer */
+	log_len = xlog_buf_size;
+	ret = xl_print_log(msg, (pv_elem_t*)(void*)frm, &log_len);
+	if (ret == -1) {
+		LM_ERR("global print buffer too small, increase 'xlog_buf_size'\n");
+		return -1;
+	}
+
+	/* render the log_ctx blob into its own buffer (NUL-terminated for the
+	 * downstream strlen() in the JSON log consumers) */
+	ctx_len = xlog_ctx_buf_size;
+	if (pv_printf(msg, (pv_elem_t*)(void*)ctx, log_ctx_buf, &ctx_len) < 0) {
+		LM_ERR("global ctx print buffer too small, "
+			"increase 'xlog_ctx_buf_size'\n");
+		return -1;
+	}
+	log_ctx_buf[ctx_len] = '\0';
+
+	/* set the xlog as log level to trick "LM_GEN" */
+	set_proc_log_level( *xlog_level );
+
+	LM_GEN1_CTX((int)level, log_ctx_buf, "%.*s", log_len, log_buf);
 
 	reset_proc_log_level();
 

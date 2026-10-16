@@ -300,6 +300,7 @@ extern int cfg_parse_only_routes;
 %token XDBG
 %token XLOG
 %token XLOG_BUF_SIZE
+%token XLOG_CTX_BUF_SIZE
 %token XLOG_FORCE_COLOR
 %token XLOG_PRINT_LEVEL
 %token XLOG_LEVEL
@@ -1432,11 +1433,14 @@ assign_stm: LOGLEVEL EQUAL snumber { IFOR();
 		| PV_PRINT_BUF_SIZE EQUAL error { yyerror("number expected"); }
 		| XLOG_BUF_SIZE EQUAL NUMBER { IFOR();
 							xlog_buf_size = $3; }
+		| XLOG_CTX_BUF_SIZE EQUAL NUMBER { IFOR();
+							xlog_ctx_buf_size = $3; }
 		| XLOG_FORCE_COLOR EQUAL NUMBER { IFOR();
 							xlog_force_color = $3; }
 		| XLOG_PRINT_LEVEL EQUAL NUMBER { IFOR();
 							xlog_print_level = $3; }
 		| XLOG_BUF_SIZE EQUAL error { yyerror("number expected"); }
+		| XLOG_CTX_BUF_SIZE EQUAL error { yyerror("number expected"); }
 		| XLOG_FORCE_COLOR EQUAL error { yyerror("boolean value expected"); }
 		| XLOG_PRINT_LEVEL EQUAL error { yyerror("number expected"); }
 		| XLOG_LEVEL EQUAL snumber { IFOR();
@@ -2674,6 +2678,14 @@ cmd:	 ASSERT LPAREN exp COMMA STRING RPAREN	 {
 				mk_action2($$, XLOG_T, STR_ST, STR_ST, $3, $5); }
 		| XLOG LPAREN STRING COMMA folded_string RPAREN {
 				mk_action2($$, XLOG_T, STR_ST, STR_ST, $3, $5); }
+		| XLOG LPAREN STRING COMMA STRING COMMA STRING RPAREN {
+				mk_action3($$, XLOG_T, STR_ST, STR_ST, STR_ST, $3, $5, $7); }
+		| XLOG LPAREN STRING COMMA folded_string COMMA STRING RPAREN {
+				mk_action3($$, XLOG_T, STR_ST, STR_ST, STR_ST, $3, $5, $7); }
+		| XLOG LPAREN STRING COMMA STRING COMMA folded_string RPAREN {
+				mk_action3($$, XLOG_T, STR_ST, STR_ST, STR_ST, $3, $5, $7); }
+		| XLOG LPAREN STRING COMMA folded_string COMMA folded_string RPAREN {
+				mk_action3($$, XLOG_T, STR_ST, STR_ST, STR_ST, $3, $5, $7); }
 		| ASYNC_TOKEN LPAREN async_func COMMA route_name RPAREN {
 				rt_ref = ref_script_route_by_name( $5, sroutes->request,
 					RT_NO, REQUEST_ROUTE, 0);

@@ -171,8 +171,8 @@ int dp_my_pid(void);
 void stderr_dprint_tmp(char *format, ...);
 
 void dprint(int log_level, int facility, const char *module, const char *func,
-	char *stderr_fmt, char *syslog_fmt, char *format, ...)
-	__attribute__ ((__format__ (__printf__, 5, 8)));
+	char *stderr_fmt, char *syslog_fmt, char *format, char *log_ctx, ...)
+	__attribute__ ((__format__ (__printf__, 5, 9)));
 
 int str2facility(char *s);
 
@@ -266,6 +266,8 @@ static inline const char *dp_log_level_str(int log_level)
 	#ifdef __SUNPRO_C
 		#define LM_GEN2(facility, lev, ...)
 		#define LM_GEN1(lev, ...)
+		#define LM_GEN2_CTX(facility, lev, ctx, ...)
+		#define LM_GEN1_CTX(lev, ctx, ...)
 		#define LM_GEN(lev, ...)
 		#define LM_ALERT( ...)
 		#define LM_CRIT( ...)
@@ -277,6 +279,8 @@ static inline const char *dp_log_level_str(int log_level)
 	#else
 		#define LM_GEN2(facility, lev, fmt, args...)
 		#define LM_GEN1(lev, fmt, args...)
+		#define LM_GEN2_CTX(facility, lev, ctx, fmt, args...)
+		#define LM_GEN1_CTX(lev, ctx, fmt, args...)
 		#define LM_GEN(lev, fmt, args...)
 		#define LM_ALERT(fmt, args...)
 		#define LM_CRIT(fmt, args...)
@@ -304,6 +308,7 @@ static inline const char *dp_log_level_str(int log_level)
 					_stderr_prefix LOG_PREFIX _fmt, \
 					"%s" _prefix LOG_PREFIX _fmt, \
 					_fmt, \
+					NULL, \
 					dp_time(), dp_my_pid(), log_prefix __VA_ARGS__ ) \
 
 		#define LM_GEN(_lev, fmt, ...) \
@@ -363,13 +368,43 @@ static inline const char *dp_log_level_str(int log_level)
 					case L_INFO: \
 					case L_DBG: \
 						dprint(_lev, _facility, NULL, NULL, \
-							"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, \
+							"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, NULL, \
 							dp_time(), dp_my_pid(), log_prefix __VA_ARGS__); \
 						break; \
 					default: \
 						if (_lev > L_DBG) \
 							dprint(_lev, _facility, NULL, NULL, \
-								"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, \
+								"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, NULL, \
+								dp_time(), dp_my_pid(), log_prefix __VA_ARGS__); \
+						break; \
+					} \
+					ENABLE_FORMAT_WARNING; \
+				} \
+			}while(0)
+
+		#define LM_GEN1_CTX(_lev, _ctx, ...) \
+			LM_GEN2_CTX( log_facility, _lev, _ctx, __VA_ARGS__)
+
+		#define LM_GEN2_CTX( _facility, _lev, _ctx, fmt, ...) \
+			do { \
+				if (is_printable(_lev)){ \
+					DISABLE_FORMAT_WARNING; \
+					switch(_lev){ \
+					case L_CRIT: \
+					case L_ALERT: \
+					case L_ERR: \
+					case L_WARN: \
+					case L_NOTICE: \
+					case L_INFO: \
+					case L_DBG: \
+						dprint(_lev, _facility, NULL, NULL, \
+							"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, _ctx, \
+							dp_time(), dp_my_pid(), log_prefix __VA_ARGS__); \
+						break; \
+					default: \
+						if (_lev > L_DBG) \
+							dprint(_lev, _facility, NULL, NULL, \
+								"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, _ctx, \
 								dp_time(), dp_my_pid(), log_prefix __VA_ARGS__); \
 						break; \
 					} \
@@ -447,6 +482,7 @@ static inline const char *dp_log_level_str(int log_level)
 					_stderr_prefix LOG_PREFIX _fmt, \
 					(char *)"%s" _syslog_prefix LOG_PREFIX _fmt, \
 					(char *)_fmt, \
+					NULL, \
 					dp_time(), dp_my_pid(), log_prefix, __DP_FUNC, ## args) \
 
 		#define LM_GEN(_lev, fmt, args...) \
@@ -506,13 +542,43 @@ static inline const char *dp_log_level_str(int log_level)
 					case L_INFO: \
 					case L_DBG: \
 						dprint(_lev, _facility, NULL, NULL, \
-							"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, \
+							"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, NULL, \
 							dp_time(), dp_my_pid(), log_prefix, ## args); \
 						break; \
 					default: \
 						if (_lev > L_DBG) \
 							dprint(_lev, _facility, NULL, NULL, \
-							"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, \
+							"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, NULL, \
+							dp_time(), dp_my_pid(), log_prefix, ## args); \
+						break; \
+					} \
+					ENABLE_FORMAT_WARNING; \
+				} \
+			}while(0)
+
+		#define LM_GEN1_CTX(_lev, _ctx, args...) \
+			LM_GEN2_CTX( log_facility, _lev, _ctx, ##args)
+
+		#define LM_GEN2_CTX( _facility, _lev, _ctx, fmt, args...) \
+			do { \
+				if (is_printable(_lev)){ \
+					DISABLE_FORMAT_WARNING; \
+					switch(_lev){ \
+					case L_CRIT: \
+					case L_ALERT: \
+					case L_ERR: \
+					case L_WARN: \
+					case L_NOTICE: \
+					case L_INFO: \
+					case L_DBG: \
+						dprint(_lev, _facility, NULL, NULL, \
+							"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, _ctx, \
+							dp_time(), dp_my_pid(), log_prefix, ## args); \
+						break; \
+					default: \
+						if (_lev > L_DBG) \
+							dprint(_lev, _facility, NULL, NULL, \
+							"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, _ctx, \
 							dp_time(), dp_my_pid(), log_prefix, ## args); \
 						break; \
 					} \

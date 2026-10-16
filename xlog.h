@@ -41,12 +41,14 @@ typedef struct _xl_trace
 } xl_trace_t;
 
 extern int xlog_buf_size;
+extern int xlog_ctx_buf_size;
 extern int xlog_force_color;
 extern int xlog_print_level;
 extern int *xlog_level;
 
 int xlog_1(struct sip_msg*, char*);
 int xlog_2(struct sip_msg*, char*, char*);
+int xlog_3(struct sip_msg*, char*, char*, char*);
 int xdbg(struct sip_msg*, char*);
 
 int pv_parse_color_name(pv_spec_p sp, const str *in);

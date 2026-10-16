@@ -948,11 +948,31 @@ int do_action(struct action* a, struct sip_msg* msg)
 					ret=E_BUG;
 					break;
 				}
-				ret = xlog_2(msg,a->elem[0].u.data, a->elem[1].u.data);
-				if (ret < 0)
+				if (a->elem[2].u.data != NULL)
 				{
-					LM_ERR("error while printing xlog message\n");
-					break;
+					if (a->elem[2].type != SCRIPTVAR_ELEM_ST)
+					{
+						LM_ALERT("BUG in xlog() type %d\n", a->elem[2].type);
+						ret=E_BUG;
+						break;
+					}
+					/* 3-arg form: level, message, log_ctx JSON blob */
+					ret = xlog_3(msg, a->elem[0].u.data, a->elem[2].u.data,
+						a->elem[1].u.data);
+					if (ret < 0)
+					{
+						LM_ERR("error while printing xlog message\n");
+						break;
+					}
+				}
+				else
+				{
+					ret = xlog_2(msg,a->elem[0].u.data, a->elem[1].u.data);
+					if (ret < 0)
+					{
+						LM_ERR("error while printing xlog message\n");
+						break;
+					}
 				}
 			}
 			else

@@ -141,6 +141,7 @@ READONLY		"read-only"|"readonly"
 EXPIRE			"expire"
 PV_PRINT_BUF_SIZE	"pv_print_buf_size"
 XLOG_BUF_SIZE	"xlog_buf_size"
+XLOG_CTX_BUF_SIZE	"xlog_ctx_buf_size"
 XLOG_FORCE_COLOR	"xlog_force_color"
 XLOG_PRINT_LEVEL	"xlog_print_level"
 XLOG_LEVEL		"xlog_level"
@@ -408,6 +409,8 @@ SPACE		[ ]
 									return XLOG; }
 <INITIAL>{XLOG_BUF_SIZE}	{	count(); yylval.strval=yytext;
 									return XLOG_BUF_SIZE; }
+<INITIAL>{XLOG_CTX_BUF_SIZE}	{	count(); yylval.strval=yytext;
+									return XLOG_CTX_BUF_SIZE; }
 <INITIAL>{XLOG_FORCE_COLOR}	{	count(); yylval.strval=yytext;
 									return XLOG_FORCE_COLOR;}
 <INITIAL>{XLOG_PRINT_LEVEL}	{	count(); yylval.strval=yytext;

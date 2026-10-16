@@ -41,7 +41,10 @@
 /* used internally by the log interface */
 typedef void (*log_print_pre_fmt_f)(log_print_f gen_print_func, int log_level,
 	int facility, const char *module, const char *func,
-	char *stderr_plain_fmt, char *syslog_plain_fmt, char *format, va_list ap);
+	char *stderr_plain_fmt, char *syslog_plain_fmt, char *log_ctx,
+	char *format, va_list ap);
+typedef void (*log_print_ctx_f)(int log_level, int facility, const char *module,
+	const char *func, char *log_ctx, char *format, va_list ap);
 
 struct log_consumer_t {
 	str name;
@@ -73,22 +76,24 @@ int log_msg_buf_size = 4096;
 str log_cee_hostname;
 
 static void stderr_dprint(int log_level, int facility, const char *module, const char *func,
-	char *format, va_list ap);
+	char *log_ctx, char *format, va_list ap);
 static void syslog_dprint(int log_level, int facility, const char *module, const char *func,
-	char *format, va_list ap);
+	char *log_ctx, char *format, va_list ap);
 
 static void stderr_pre_fmt_func(log_print_f gen_print_func, int log_level,
 	int facility, const char *module, const char *func,
-	char *stderr_plain_fmt, char *syslog_plain_fmt, char *format, va_list ap);
+	char *stderr_plain_fmt, char *syslog_plain_fmt, char *log_ctx,
+	char *format, va_list ap);
 static void syslog_pre_fmt_func(log_print_f gen_print_func, int log_level,
 	int facility, const char *module, const char *func,
-	char *stderr_plain_fmt, char *syslog_plain_fmt, char *format, va_list ap);
+	char *stderr_plain_fmt, char *syslog_plain_fmt, char *log_ctx,
+	char *format, va_list ap);
 
 /* static consumer table to be used until a shm one is alloc'ed;
  * only stderror is enabled initially */
 static struct log_consumer_t default_log_consumers[2] ={
-	{str_init(STDERR_CONSUMER_NAME), stderr_dprint, stderr_pre_fmt_func, 0, 0},
-	{str_init(SYSLOG_CONSUMER_NAME), syslog_dprint, syslog_pre_fmt_func, 0, 1}
+	{str_init(STDERR_CONSUMER_NAME), (log_print_f)stderr_dprint, stderr_pre_fmt_func, 0, 0},
+	{str_init(SYSLOG_CONSUMER_NAME), (log_print_f)syslog_dprint, syslog_pre_fmt_func, 0, 1}
 };
 
 struct log_consumer_t *log_consumers = default_log_consumers;
@@ -227,10 +232,13 @@ int init_log_cee_hostname(void)
 #define DP_JSON_CEE_MSG_B_KEY    "\"}, \"msg\": \""
 #define DP_JSON_CEE_MSG_KEY      "\", \"msg\": \""
 #define DP_JSON_CEE_PNAME_KEY    "\", \"pname\": \""
+#define DP_JSON_CEE_PNAME_KEY_AFTER_CTX "\"pname\": \""
 #define DP_JSON_CEE_PNAME_VAL    "opensips"
 #define DP_JSON_CEE_HOST_KEY     "\", \"hostname\": \""
 
 #define DP_JSON_MSG_END       "\"}"
+#define DP_JSON_CTX_SEP       "\", "
+#define DP_JSON_CTX_END       "}"
 
 static int log_escape_json_buf(char *src, int src_len, char *dst, int dst_max_len)
 {
@@ -313,16 +321,53 @@ enum log_json_format {
 
 static int log_print_json(str *buf, enum log_json_format json_fmt, char *time,
 	int pid, char *prefix, const char *level, const char *module, const char *func,
-	char *format, va_list ap)
+	char *log_ctx, char *format, va_list ap)
 {
 	char *p, *tmp;
 	int len = 0, rlen;
 	int l;
+	str ctx = STR_NULL;
+
+	/* a non-empty log_ctx is expected to be a JSON object ("{...}"); we
+	 * merge its members at the top level by stripping the enclosing braces
+	 * and appending the inner content verbatim (unescaped) after the
+	 * message field */
+	if (log_ctx) {
+		ctx.s = log_ctx;
+		ctx.len = strlen(log_ctx);
+		/* trim surrounding whitespace */
+		while (ctx.len > 0 && (ctx.s[0]==' ' || ctx.s[0]=='\t' ||
+				ctx.s[0]=='\r' || ctx.s[0]=='\n')) {
+			ctx.s++;
+			ctx.len--;
+		}
+		while (ctx.len > 0 && (ctx.s[ctx.len-1]==' ' || ctx.s[ctx.len-1]=='\t' ||
+				ctx.s[ctx.len-1]=='\r' || ctx.s[ctx.len-1]=='\n'))
+			ctx.len--;
+		/* strip the leading '{' and trailing '}' */
+		if (ctx.len >= 2 && ctx.s[0]=='{' && ctx.s[ctx.len-1]=='}') {
+			ctx.s++;
+			ctx.len -= 2;
+			/* trim again inside the braces */
+			while (ctx.len > 0 && (ctx.s[0]==' ' || ctx.s[0]=='\t' ||
+					ctx.s[0]=='\r' || ctx.s[0]=='\n')) {
+				ctx.s++;
+				ctx.len--;
+			}
+			while (ctx.len > 0 && (ctx.s[ctx.len-1]==' ' || ctx.s[ctx.len-1]=='\t' ||
+					ctx.s[ctx.len-1]=='\r' || ctx.s[ctx.len-1]=='\n'))
+				ctx.len--;
+		} else {
+			/* not a JSON object - ignore to avoid producing invalid JSON */
+			ctx.len = 0;
+		}
+	}
 
 	if (json_fmt > LOG_JSON_SCHEMA_BASIC) {
 		rlen = S_LEN(DP_JSON_CEE_PNAME_KEY) + (log_name ? strlen(log_name) :
 			S_LEN(DP_JSON_CEE_PNAME_VAL)) + S_LEN(DP_JSON_CEE_HOST_KEY) +
-			log_cee_hostname.len + S_LEN(DP_JSON_MSG_END) + 1;
+			log_cee_hostname.len + S_LEN(DP_JSON_MSG_END) + 1 +
+			(ctx.len ? S_LEN(DP_JSON_CTX_SEP) + ctx.len : 0);
 
 		if (json_fmt == LOG_JSON_SCHEMA_CEE_PREFIX)
 			len = S_LEN(DP_JSON_CEE_AT_PREFIX);
@@ -336,7 +381,8 @@ static int log_print_json(str *buf, enum log_json_format json_fmt, char *time,
 			S_LEN(DP_JSON_CEE_PREFIX_O_KEY) + strlen(prefix) +
 			S_LEN(DP_JSON_MSG_KEY) + rlen;
 	} else {
-		rlen = S_LEN(DP_JSON_MSG_END) + 1;
+		rlen = S_LEN(DP_JSON_MSG_END) + 1 +
+			(ctx.len ? S_LEN(DP_JSON_CTX_SEP) + ctx.len : 0);
 
 		len = S_LEN(DP_JSON_TIME_KEY) + strlen(time) + S_LEN(DP_JSON_PID_KEY) +
 			INT2STR_MAX_LEN + S_LEN(DP_JSON_LEVEL_KEY) + strlen(level) +
@@ -435,10 +481,21 @@ static int log_print_json(str *buf, enum log_json_format json_fmt, char *time,
 	p += l;
 	len += l;
 
+	if (ctx.len) {
+		append_string_st(p, DP_JSON_CTX_SEP);
+		append_string(p, ctx.s, ctx.len);
+	}
+
 	if (json_fmt == LOG_JSON_SCHEMA_BASIC) {
-		append_string_st(p, DP_JSON_MSG_END);
+		if (ctx.len)
+			append_string_st(p, DP_JSON_CTX_END);
+		else
+			append_string_st(p, DP_JSON_MSG_END);
 	} else {
-		append_string_st(p, DP_JSON_CEE_PNAME_KEY);
+		if (ctx.len)
+			append_string_st(p, DP_JSON_CEE_PNAME_KEY_AFTER_CTX);
+		else
+			append_string_st(p, DP_JSON_CEE_PNAME_KEY);
 		if (log_name)
 			append_string(p, log_name, strlen(log_name));
 		else
@@ -456,7 +513,7 @@ static int log_print_json(str *buf, enum log_json_format json_fmt, char *time,
 }
 
 static void stderr_dprint(int log_level, int facility, const char *module, const char *func,
-	char *format, va_list ap)
+	char *log_ctx, char *format, va_list ap)
 {
 	char *time;
 	int pid;
@@ -474,7 +531,7 @@ static void stderr_dprint(int log_level, int facility, const char *module, const
 		if ((len = log_print_json(&buf, stderr_log_format==LOG_FORMAT_JSON_CEE ?
 			LOG_JSON_SCHEMA_CEE : LOG_JSON_SCHEMA_BASIC,
 			time, pid, prefix, dp_log_level_str(log_level), module, func,
-			format, ap)) < 0) {
+			log_ctx, format, ap)) < 0) {
 			stderr_dprint_tmp_err("failed to print JSON log!\n");
 			return;
 		}
@@ -488,7 +545,7 @@ static void stderr_dprint(int log_level, int facility, const char *module, const
 }
 
 static void syslog_dprint(int log_level, int facility, const char *module, const char *func,
-	char *format, va_list ap)
+	char *log_ctx, char *format, va_list ap)
 {
 	int level;
 	char *time;
@@ -531,7 +588,7 @@ static void syslog_dprint(int log_level, int facility, const char *module, const
 		if ((len = log_print_json(&buf, syslog_log_format==LOG_FORMAT_JSON_CEE ?
 			LOG_JSON_SCHEMA_CEE_PREFIX : LOG_JSON_SCHEMA_BASIC,
 			time, pid, prefix, dp_log_level_str(log_level), module, func,
-			format, ap)) < 0) {
+			log_ctx, format, ap)) < 0) {
 			stderr_dprint_tmp_err("failed to print JSON log!\n");
 			return;
 		}
@@ -654,8 +711,13 @@ end_free:
 /* generic consumer that registers to the log interface */
 static void gen_consumer_pre_fmt_func(log_print_f gen_print_func, int log_level,
 	int facility, const char *module, const char *func,
-	char *stderr_plain_fmt, char *syslog_plain_fmt, char *format, va_list ap)
+	char *stderr_plain_fmt, char *syslog_plain_fmt, char *log_ctx,
+	char *format, va_list ap)
 {
+	/* externally registered consumers use the public log_print_f signature
+	 * which carries no log_ctx; drop it here */
+	(void)log_ctx;
+
 	/* skip the time, pid, prefix and function arguments from va_list */
 	va_arg(ap, char *);
     va_arg(ap, int);
@@ -668,29 +730,33 @@ static void gen_consumer_pre_fmt_func(log_print_f gen_print_func, int log_level,
 
 static void stderr_pre_fmt_func(log_print_f gen_print_func, int log_level,
 	int facility, const char *module, const char *func,
-	char *stderr_plain_fmt, char *syslog_plain_fmt, char *format, va_list ap)
+	char *stderr_plain_fmt, char *syslog_plain_fmt, char *log_ctx,
+	char *format, va_list ap)
 {
 	char *fmt = stderr_log_format == LOG_FORMAT_PLAIN ? stderr_plain_fmt : format;
 
-	gen_print_func(log_level, facility, module, func, fmt, ap);
+	((log_print_ctx_f)gen_print_func)(log_level, facility, module, func,
+		log_ctx, fmt, ap);
 }
 
 static void syslog_pre_fmt_func(log_print_f gen_print_func, int log_level,
 	int facility, const char *module, const char *func,
-	char *stderr_plain_fmt, char *syslog_plain_fmt, char *format, va_list ap)
+	char *stderr_plain_fmt, char *syslog_plain_fmt, char *log_ctx,
+	char *format, va_list ap)
 {
 	char *fmt = syslog_log_format == LOG_FORMAT_PLAIN ? syslog_plain_fmt : format;
 
-	gen_print_func(log_level, facility, module, func, fmt, ap);
+	((log_print_ctx_f)gen_print_func)(log_level, facility, module, func,
+		log_ctx, fmt, ap);
 }
 
 void dprint(int log_level, int facility, const char *module, const char *func,
-	char *stderr_fmt, char *syslog_fmt, char *format, ...)
+	char *stderr_fmt, char *syslog_fmt, char *format, char *log_ctx, ...)
 {
 	va_list ap, ap_copy;
 	int i;
 
-	va_start(ap, format);
+	va_start(ap, log_ctx);
 
 	for (i=0; i<log_consumers_no; i++)
 		if (!log_consumers[i].muted && (!log_consumers[i].level_filter ||
@@ -698,7 +764,7 @@ void dprint(int log_level, int facility, const char *module, const char *func,
 			va_copy(ap_copy, ap);
 			log_consumers[i].pre_fmt_print_func(log_consumers[i].gen_print_func,
 				log_level, facility, module, func, stderr_fmt, syslog_fmt,
-				format, ap_copy);
+				log_ctx, format, ap_copy);
 			va_end(ap_copy);
 		}
 

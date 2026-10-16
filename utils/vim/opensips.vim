@@ -29,7 +29,7 @@ syn keyword osGlobalParam disable_tcp disable_tls check_via dns rev_dns
 syn keyword osGlobalParam tcp_send_timeout tcp_connect_timeout tcp_no_new_conn_bflag
 syn keyword osGlobalParam disable_dns_failover disable_dns_blacklist dst_blacklist
 syn keyword osGlobalParam exec_dns_threshold exec_msg_threshold tcpthreshold
-syn keyword osGlobalParam xlog_buf_size xlog_force_color enable_asserts
+syn keyword osGlobalParam xlog_buf_size xlog_ctx_buf_size xlog_force_color enable_asserts
 syn keyword osGlobalParam user_agent_header db_version_table use_workers
 syn keyword osGlobalParam advertised_address advertised_port disable_core_dump
 syn keyword osGlobalParam db_max_async_connections include_file avp_aliases
