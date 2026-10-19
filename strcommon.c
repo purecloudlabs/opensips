@@ -166,6 +166,11 @@ int _unescape_user(const str_const *sin, str *sout)
 	{
 		if (*p == '%')
 		{
+			if (sin->s + sin->len - p < 3) {
+				LM_ERR("escape sequence too short in <%.*s>\n",
+					sin->len, sin->s);
+				return -1;
+			}
 			p++;
 			switch (*p)
 			{
