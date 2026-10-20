@@ -32,6 +32,7 @@
 #include <netinet/tcp.h>
 
 #include "../../net/tcp_conn_defs.h"
+#include "../../net/tcp_common.h"
 #include "../../net/proto_tcp/tcp_common_defs.h"
 #include "../tls_mgm/tls_helper.h"
 
@@ -344,41 +345,40 @@ static inline void _wolfssl_enforce_max_version(struct tcp_connection *c)
 	}
 }
 
+/* Attempt to advance an async TLS handshake.
+ *
+ * @timeout is how long this *single* attempt may block, in ms:
+ *   - proto_tls_send() passes tls_async_handshake_timeout (a short
+ *     optimization window, after which the handshake is handed over to the
+ *     reactor)
+ *   - tls_async_write()/tls_read_req() pass tls_async_handshake_connect_timeout
+ *     (a short per-attempt window) when re-entered from the reactor
+ *
+ * con->hs_deadline is the overall budget for the whole handshake, armed by the
+ * proto layer before the first attempt. It bounds the total handshake duration
+ * across all attempts, which a per-attempt timeout cannot do on its own.
+ *
+ * Returns: 1 on success, 0 if the handshake is still in progress (the caller
+ * must keep it in the reactor), -1 on failure or if the overall budget
+ * expired. */
 int _wolfssl_tls_async_connect(struct tcp_connection *con, int fd,
 	int timeout, trace_dest t_dst)
 {
-	unsigned int elapsed,to;
-	unsigned int err_len;
-	int poll_err, n, err;
-	struct timeval begin;
+	int n, err, wait_ret, hs_fail_kind, hs_fail_err;
+	struct timeval now;
+	unsigned long long now_us, attempt_deadline;
 	char err_buf[_WOLFSSL_ERR_BUFLEN];
 	str tls_err_s;
-#if defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT)
-	fd_set sel_set;
-	fd_set orig_set;
-	struct timeval timeout_val;
-#else
-	struct pollfd pf;
-#endif
 	WOLFSSL *ssl = _WOLFSSL_READ_SSL(con->extra_data);
 
-	/* attempt to do connect and see if we do block or not */
-	poll_err=0;
-	elapsed = 0;
-	to = timeout*1000;
-
-#if defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT)
-	FD_ZERO(&orig_set);
-	FD_SET(fd, &orig_set);
-#else
-	pf.fd=fd;
-	pf.events=POLLOUT|POLLIN;
-#endif
-
-	if (gettimeofday(&(begin), NULL)) {
+	if (gettimeofday(&now, NULL)) {
 		LM_ERR("Failed to get TLS connect start time\n");
 		goto failure;
 	}
+	now_us = (unsigned long long)now.tv_sec * 1000000 + now.tv_usec;
+
+	/* how long this particular attempt is allowed to block for */
+	attempt_deadline = now_us + (unsigned long long)timeout * 1000;
 
 	while (1) {
 		if ((n = wolfSSL_connect(ssl)) == SSL_SUCCESS) {
@@ -400,6 +400,7 @@ int _wolfssl_tls_async_connect(struct tcp_connection *con, int fd,
 
 			_wolfssl_enforce_max_version(con);
 
+			con->hs_deadline = 0; /* clear so a later reuse can re-arm */
 			return 1;
 		}
 
@@ -412,58 +413,48 @@ int _wolfssl_tls_async_connect(struct tcp_connection *con, int fd,
 				goto failure;
 			case SSL_ERROR_WANT_READ:
 			case SSL_ERROR_WANT_WRITE:
-				/* we need to retry, if time has not passed yet */
-again:
-				elapsed=get_time_diff(&begin);
-				if (elapsed >= to) /* timed out */ {
-					LM_DBG("handshake timeout for connection %p %dms elapsed\n",
-							con, timeout);
+				wait_ret = tcp_handshake_async_wait(fd, con, attempt_deadline,
+					err == SSL_ERROR_WANT_READ, &hs_fail_kind, &hs_fail_err);
+				if (wait_ret == 0) {
+					LM_DBG("handshake on connection %p not done after %dms, "
+						"passing it to the reactor\n", con, timeout);
 					return 0;
 				}
-				to -= elapsed;
-#if defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT)
-				sel_set=orig_set;
-				timeout_val.tv_sec=to/1000000;
-				timeout_val.tv_usec=to%1000000;
-				n=select(fd+1, 0, &sel_set, 0, &timeout_val);
-#else
-				n=poll(&pf, 1, to/1000);
-#endif
-				if (n<0){
-					if (errno == EINTR)
-						goto again;
-					LM_ERR("poll/select failed:[server=%s:%d] (%d) %s\n",
+				if (wait_ret < 0) {
+					switch (hs_fail_kind) {
+					case TCP_HS_WAIT_FAIL_DEADLINE:
+						LM_ERR("async TLS handshake to %s:%d did not complete "
+							"in time\n", ip_addr2a(&con->rcv.src_ip),
+							con->rcv.src_port);
+						break;
+					case TCP_HS_WAIT_FAIL_POLL:
+						LM_ERR("poll/select failed:[server=%s:%d] (%d) %s\n",
 							ip_addr2a(&con->rcv.src_ip), con->rcv.src_port,
-							errno, strerror(errno));
-					goto failure;
-				}else if (n==0) /* timeout */
-					goto again;
-#if defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT)
-				if (FD_ISSET(fd, &sel_set))
-#else
-				if (pf.revents&(POLLERR|POLLHUP|POLLNVAL)){
-					LM_ERR("poll error: flags %x\n", pf.revents);
-					poll_err=1;
-				}
-#endif
-				{
-					err_len=sizeof(err);
-					if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {
-						LM_WARN("getsockopt error: fd=%d [server=%s:%d]: (%d) %s\n", fd,
-								ip_addr2a(&con->rcv.src_ip), con->rcv.src_port,
-								errno, strerror(errno));
-						goto failure;
-					}
-					if ((err==0) && (poll_err==0))
-						continue; /* retry ssl connect */
-					if (err!=EINPROGRESS && err!=EALREADY){
+							hs_fail_err, strerror(hs_fail_err));
+						break;
+					case TCP_HS_WAIT_FAIL_GETSOCKOPT:
+						LM_WARN("getsockopt error: fd=%d [server=%s:%d]: (%d) %s\n",
+							fd, ip_addr2a(&con->rcv.src_ip), con->rcv.src_port,
+							hs_fail_err, strerror(hs_fail_err));
+						break;
+					case TCP_HS_WAIT_FAIL_SO_ERROR:
 						LM_ERR("failed to retrieve SO_ERROR [server=%s:%d] (%d) %s\n",
-								ip_addr2a(&con->rcv.src_ip), con->rcv.src_port,
-								err, strerror(err));
-						goto failure;
+							ip_addr2a(&con->rcv.src_ip), con->rcv.src_port,
+							hs_fail_err, strerror(hs_fail_err));
+						break;
+					case TCP_HS_WAIT_FAIL_TIME:
+						LM_ERR("Failed to get TLS connect current time (%d) %s\n",
+							hs_fail_err, strerror(hs_fail_err));
+						break;
+					default:
+						LM_ERR("poll/select failed:[server=%s:%d] (%d) %s\n",
+							ip_addr2a(&con->rcv.src_ip), con->rcv.src_port,
+							hs_fail_err, strerror(hs_fail_err));
+						break;
 					}
-					continue;
+					goto failure;
 				}
+				continue;
 			case SSL_ERROR_SYSCALL:
 				LM_ERR("SSL_ERROR_SYSCALL err=%s(%d)\n",
 					strerror(errno), errno);
@@ -569,6 +560,7 @@ static int _wolfssl_tls_accept(struct tcp_connection *c, short *poll_events)
 
 		/* TLS accept done, reset the flag */
 		c->proto_flags &= ~F_TLS_DO_ACCEPT;
+		c->hs_deadline = 0; /* clear so a later reuse can re-arm */
 
 		_WOLFSSL_WRITE_SSL(c->extra_data) = wolfSSL_write_dup(ssl);
 		if (!_WOLFSSL_WRITE_SSL(c->extra_data)) {
@@ -615,13 +607,22 @@ static int _wolfssl_tls_accept(struct tcp_connection *c, short *poll_events)
 
 				return -1;
 			case SSL_ERROR_WANT_READ:
-				if (poll_events)
-					*poll_events = POLLIN;
-
-				return 0;
 			case SSL_ERROR_WANT_WRITE:
+				/* accept has no retry loop of its own -- every attempt
+				 * is a single wolfSSL_accept() re-entered by the
+				 * reactor, so the overall deadline must be checked
+				 * here instead */
+				if (tcp_handshake_deadline_expired(c)) {
+					LM_ERR("async TLS accept from %s:%d did not complete "
+						"in time\n", ip_addr2a(&c->rcv.src_ip),
+						c->rcv.src_port);
+					c->state = S_CONN_BAD;
+					return -1;
+				}
+
 				if (poll_events)
-					*poll_events = POLLOUT;
+					*poll_events = (err == SSL_ERROR_WANT_READ) ?
+						POLLIN : POLLOUT;
 
 				return 0;
 			case SSL_ERROR_SYSCALL:

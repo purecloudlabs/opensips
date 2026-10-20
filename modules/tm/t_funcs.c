@@ -56,6 +56,8 @@
 #include "t_stats.h"
 #include "../../context.h"
 
+extern int _tm_branch_index;
+
 
 /* ----------------------------------------------------- */
 int send_pr_buffer( struct retr_buf *rb, void *buf, int len,
@@ -64,10 +66,17 @@ int send_pr_buffer( struct retr_buf *rb, void *buf, int len,
 #endif
 					void* ctx)
 {
-	if (buf && len && rb )
-		return msg_send( rb->dst.send_sock, rb->dst.proto, &rb->dst.to,
+	int prev_branch;
+	int ret;
+
+	if (buf && len && rb ) {
+		prev_branch = _tm_branch_index;
+		_tm_branch_index = rb->branch;
+		ret = msg_send( rb->dst.send_sock, rb->dst.proto, &rb->dst.to,
 				         rb->dst.proto_reserved1, buf, len, ctx);
-	else {
+		_tm_branch_index = prev_branch;
+		return ret;
+	} else {
 #ifdef EXTRA_DEBUG
 		LM_CRIT("sending an empty buffer from %s: %s (%d)\n",file,
 				function, line);

@@ -111,6 +111,13 @@ struct tcp_async_chunk {
 	int len;   /* length of the buffer */
 	int ticks; /* time at which this chunk was initially
 				  attempted to be written */
+	/*!< opaque, protocol-owned data for a pending notification on this
+	 * chunk (NULL unless a protocol sets it, e.g. proto_tls). */
+	void *tm_ref;
+	/*!< destructor for tm_ref above; if non-NULL, core calls it right
+	 * before freeing a chunk that still carries a tm_ref (e.g. connection
+	 * teardown in __tcpconn_rm -- ref leak prevention only, no 477). */
+	void (*tm_ref_release)(void *ref);
 };
 
 struct tcp_async_data {
@@ -184,6 +191,15 @@ struct tcp_connection{
 	void *proto_data;
 	time_t first_seen;
 	int do_not_reuse;
+	/*!< absolute deadline (usec) for completing an async TLS/SSL handshake on
+	 * this connection, 0 if not armed. A handshake spans several invocations
+	 * of the proto layer (a short blocking attempt in the sending process,
+	 * then one or more reactor callbacks), so the overall deadline cannot be
+	 * kept on the stack of any single attempt.
+	 * NOTE: keep new fields at the end of this struct - it is shared with
+	 * separately built modules, so inserting in the middle shifts the offsets
+	 * of the following fields for any module not rebuilt against this header */
+	unsigned long long hs_deadline;
 };
 
 
