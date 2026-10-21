@@ -328,16 +328,16 @@ int xlog_2(struct sip_msg* msg, char* lev, char* frm)
 
 /* Like xlog_2, but takes a 3rd argument selecting the output format for this
  * one message, overriding the configured log format. Recognized values:
- *   "plain"     -> plain (unwrapped) text
- *   "json"      -> basic JSON envelope
- *   "json_cee"  -> CEE JSON envelope
+ *   "plain_text" -> plain (unwrapped) text
+ *   "json"       -> basic JSON envelope
+ *   "json_cee"   -> CEE JSON envelope
  * Any other value falls back to the configured format. */
 int xlog_3(struct sip_msg* msg, char* lev, char* frm, char* fmt_flag)
 {
 	enum log_fmt_override fmt_ovr = LOG_FMT_OVR_NONE;
 
 	if (fmt_flag) {
-		if (strcmp(fmt_flag, "plain") == 0)
+		if (strcmp(fmt_flag, "plain_text") == 0)
 			fmt_ovr = LOG_FMT_OVR_PLAIN;
 		else if (strcmp(fmt_flag, "json") == 0)
 			fmt_ovr = LOG_FMT_OVR_JSON;
