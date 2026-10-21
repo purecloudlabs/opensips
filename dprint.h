@@ -121,6 +121,16 @@ enum log_format {
 	LOG_FORMAT_JSON_CEE
 };
 
+/* Per-call override of the configured output format. LOG_FMT_OVR_NONE means "use
+ * the consumer's configured format"; other values force a specific representation for
+ * that single log line regardless of the configured stderr_log_format/syslog_log_format. */
+enum log_fmt_override {
+	LOG_FMT_OVR_NONE = 0,
+	LOG_FMT_OVR_PLAIN,
+	LOG_FMT_OVR_JSON,
+	LOG_FMT_OVR_JSON_CEE
+};
+
 /* vars:*/
 
 extern int *log_level;
@@ -173,6 +183,12 @@ void stderr_dprint_tmp(char *format, ...);
 void dprint(int log_level, int facility, const char *module, const char *func,
 	char *stderr_fmt, char *syslog_fmt, char *format, ...)
 	__attribute__ ((__format__ (__printf__, 5, 8)));
+
+/* like dprint(), but with an explicit per-call format override */
+void dprint_fmt_ovr(enum log_fmt_override fmt_ovr, int log_level, int facility,
+	const char *module, const char *func,
+	char *stderr_fmt, char *syslog_fmt, char *format, ...)
+	__attribute__ ((__format__ (__printf__, 6, 9)));
 
 int str2facility(char *s);
 
@@ -266,6 +282,7 @@ static inline const char *dp_log_level_str(int log_level)
 	#ifdef __SUNPRO_C
 		#define LM_GEN2(facility, lev, ...)
 		#define LM_GEN1(lev, ...)
+		#define LM_GEN1_FMT_OVR(fmt_ovr, lev, ...)
 		#define LM_GEN(lev, ...)
 		#define LM_ALERT( ...)
 		#define LM_CRIT( ...)
@@ -277,6 +294,7 @@ static inline const char *dp_log_level_str(int log_level)
 	#else
 		#define LM_GEN2(facility, lev, fmt, args...)
 		#define LM_GEN1(lev, fmt, args...)
+		#define LM_GEN1_FMT_OVR(fmt_ovr, lev, fmt, args...)
 		#define LM_GEN(lev, fmt, args...)
 		#define LM_ALERT(fmt, args...)
 		#define LM_CRIT(fmt, args...)
@@ -373,6 +391,18 @@ static inline const char *dp_log_level_str(int log_level)
 								dp_time(), dp_my_pid(), log_prefix __VA_ARGS__); \
 						break; \
 					} \
+					ENABLE_FORMAT_WARNING; \
+				} \
+			}while(0)
+
+		/* like LM_GEN1, but with an explicit per-call format override */
+		#define LM_GEN1_FMT_OVR(_fmt_ovr, _lev, fmt, ...) \
+			do { \
+				if (is_printable(_lev)){ \
+					DISABLE_FORMAT_WARNING; \
+					dprint_fmt_ovr(_fmt_ovr, _lev, log_facility, NULL, NULL, \
+						"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, \
+						dp_time(), dp_my_pid(), log_prefix __VA_ARGS__); \
 					ENABLE_FORMAT_WARNING; \
 				} \
 			}while(0)
@@ -516,6 +546,18 @@ static inline const char *dp_log_level_str(int log_level)
 							dp_time(), dp_my_pid(), log_prefix, ## args); \
 						break; \
 					} \
+					ENABLE_FORMAT_WARNING; \
+				} \
+			}while(0)
+
+		/* like LM_GEN1, but with an explicit per-call format override */
+		#define LM_GEN1_FMT_OVR(_fmt_ovr, _lev, fmt, args...) \
+			do { \
+				if (is_printable(_lev)){ \
+					DISABLE_FORMAT_WARNING; \
+					dprint_fmt_ovr(_fmt_ovr, _lev, log_facility, NULL, NULL, \
+						"%.0s%.0s%.0s" fmt, "%.0s" fmt, fmt, \
+						dp_time(), dp_my_pid(), log_prefix, ## args); \
 					ENABLE_FORMAT_WARNING; \
 				} \
 			}while(0)
