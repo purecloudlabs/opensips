@@ -130,6 +130,7 @@
 extern int yylex();
 static void yyerror(char* s);
 static void yyerrorf(char* fmt, ...);
+static void check_xlog_format(char* fmt);
 static char* tmp;
 static int i_tmp, rc;
 static struct socket_id* lst_tmp;
@@ -2675,9 +2676,11 @@ cmd:	 ASSERT LPAREN exp COMMA STRING RPAREN	 {
 		| XLOG LPAREN STRING COMMA folded_string RPAREN {
 				mk_action2($$, XLOG_T, STR_ST, STR_ST, $3, $5); }
 		| XLOG LPAREN STRING COMMA STRING COMMA STRING RPAREN {
-				mk_action3($$, XLOG_T, STR_ST, STR_ST, STR_ST, $3, $5, $7); }
+				mk_action3($$, XLOG_T, STR_ST, STR_ST, STR_ST, $3, $5, $7);
+				check_xlog_format($7); }
 		| XLOG LPAREN STRING COMMA folded_string COMMA STRING RPAREN {
-				mk_action3($$, XLOG_T, STR_ST, STR_ST, STR_ST, $3, $5, $7); }
+				mk_action3($$, XLOG_T, STR_ST, STR_ST, STR_ST, $3, $5, $7);
+				check_xlog_format($7); }
 		| ASYNC_TOKEN LPAREN async_func COMMA route_name RPAREN {
 				rt_ref = ref_script_route_by_name( $5, sroutes->request,
 					RT_NO, REQUEST_ROUTE, 0);
@@ -2742,6 +2745,20 @@ static void yyerrorf(char *fmt, ...)
 
 	pkg_free(tmp);
 	va_end(ap);
+}
+
+
+/* reject unknown xlog() format overrides at startup, rather than silently
+ * falling back to the configured log format at runtime */
+static void check_xlog_format(char* fmt)
+{
+	str s;
+
+	s.s = fmt;
+	s.len = strlen(fmt);
+	if (parse_log_format(&s) < 0)
+		yyerrorf("unknown xlog() log format '%s' (expected '%s', '%s' or "
+			"'%s')", fmt, LOG_PLAIN_NAME, LOG_JSON_NAME, LOG_JSON_CEE_NAME);
 }
 
 

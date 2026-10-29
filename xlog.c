@@ -331,7 +331,8 @@ int xlog_2(struct sip_msg* msg, char* lev, char* frm)
  *   "plain_text" -> plain (unwrapped) text
  *   "json"       -> basic JSON envelope
  *   "json_cee"   -> CEE JSON envelope
- * Any other value falls back to the configured format. */
+ * Values are validated at config parse time (see cfg.y); anything else
+ * falling through here uses the configured format. */
 int xlog_3(struct sip_msg* msg, char* lev, char* frm, char* fmt_flag)
 {
 	enum log_fmt_override fmt_ovr = LOG_FMT_OVR_NONE;
