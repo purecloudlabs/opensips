@@ -337,11 +337,11 @@ int xlog_3(struct sip_msg* msg, char* lev, char* frm, char* fmt_flag)
 	enum log_fmt_override fmt_ovr = LOG_FMT_OVR_NONE;
 
 	if (fmt_flag) {
-		if (strcmp(fmt_flag, "plain_text") == 0)
+		if (strcmp(fmt_flag, LOG_PLAIN_NAME) == 0)
 			fmt_ovr = LOG_FMT_OVR_PLAIN;
-		else if (strcmp(fmt_flag, "json") == 0)
+		else if (strcmp(fmt_flag, LOG_JSON_NAME) == 0)
 			fmt_ovr = LOG_FMT_OVR_JSON;
-		else if (strcmp(fmt_flag, "json_cee") == 0)
+		else if (strcmp(fmt_flag, LOG_JSON_CEE_NAME) == 0)
 			fmt_ovr = LOG_FMT_OVR_JSON_CEE;
 	}
 
