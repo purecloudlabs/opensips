@@ -130,7 +130,7 @@
 extern int yylex();
 static void yyerror(char* s);
 static void yyerrorf(char* fmt, ...);
-static void check_xlog_format(char* fmt);
+static enum log_fmt_override parse_xlog_format(char* fmt);
 static char* tmp;
 static int i_tmp, rc;
 static struct socket_id* lst_tmp;
@@ -2676,11 +2676,9 @@ cmd:	 ASSERT LPAREN exp COMMA STRING RPAREN	 {
 		| XLOG LPAREN STRING COMMA folded_string RPAREN {
 				mk_action2($$, XLOG_T, STR_ST, STR_ST, $3, $5); }
 		| XLOG LPAREN STRING COMMA STRING COMMA STRING RPAREN {
-				mk_action3($$, XLOG_T, STR_ST, STR_ST, STR_ST, $3, $5, $7);
-				check_xlog_format($7); }
+				mk_action3($$, XLOG_T, STR_ST, STR_ST, NUMBER_ST, $3, $5, (void*)(long)parse_xlog_format($7)); }
 		| XLOG LPAREN STRING COMMA folded_string COMMA STRING RPAREN {
-				mk_action3($$, XLOG_T, STR_ST, STR_ST, STR_ST, $3, $5, $7);
-				check_xlog_format($7); }
+				mk_action3($$, XLOG_T, STR_ST, STR_ST, NUMBER_ST, $3, $5, (void*)(long)parse_xlog_format($7)); }
 		| ASYNC_TOKEN LPAREN async_func COMMA route_name RPAREN {
 				rt_ref = ref_script_route_by_name( $5, sroutes->request,
 					RT_NO, REQUEST_ROUTE, 0);
@@ -2748,17 +2746,26 @@ static void yyerrorf(char *fmt, ...)
 }
 
 
-/* reject unknown xlog() format overrides at startup, rather than silently
- * falling back to the configured log format at runtime */
-static void check_xlog_format(char* fmt)
+/* resolve the xlog() per-call format override at parse time, so a typo fails
+ * config load instead of silently using the configured log format */
+static enum log_fmt_override parse_xlog_format(char* fmt)
 {
 	str s;
 
 	s.s = fmt;
 	s.len = strlen(fmt);
-	if (parse_log_format(&s) < 0)
+	switch (parse_log_format(&s)) {
+	case LOG_FORMAT_PLAIN:
+		return LOG_FMT_OVR_PLAIN;
+	case LOG_FORMAT_JSON:
+		return LOG_FMT_OVR_JSON;
+	case LOG_FORMAT_JSON_CEE:
+		return LOG_FMT_OVR_JSON_CEE;
+	default:
 		yyerrorf("unknown xlog() log format '%s' (expected '%s', '%s' or "
 			"'%s')", fmt, LOG_PLAIN_NAME, LOG_JSON_NAME, LOG_JSON_CEE_NAME);
+		return LOG_FMT_OVR_NONE;
+	}
 }
 
 

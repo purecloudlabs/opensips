@@ -948,14 +948,14 @@ int do_action(struct action* a, struct sip_msg* msg)
 					ret=E_BUG;
 					break;
 				}
-				if (a->elem[2].type != STR_ST)
+				if (a->elem[2].type != NUMBER_ST)
 				{
 					LM_ALERT("BUG in xlog() type %d\n", a->elem[2].type);
 					ret=E_BUG;
 					break;
 				}
 				ret = xlog_3(msg, a->elem[0].u.data, a->elem[1].u.data,
-					a->elem[2].u.data);
+					(enum log_fmt_override)a->elem[2].u.number);
 				if (ret < 0)
 				{
 					LM_ERR("error while printing xlog message\n");
