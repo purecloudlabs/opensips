@@ -73,21 +73,6 @@ int log_msg_buf_size = 4096;
 
 str log_cee_hostname;
 
-/* Resolve a per-call format override against the channel's configured format.
- * LOG_FMT_OVR_NONE keeps the configured format; any other override forces a
- * specific format for this one call. */
-static inline enum log_format resolve_log_format(enum log_format configured,
-	enum log_fmt_override fmt_ovr)
-{
-	switch (fmt_ovr) {
-	case LOG_FMT_OVR_PLAIN:     return LOG_FORMAT_PLAIN;
-	case LOG_FMT_OVR_JSON:      return LOG_FORMAT_JSON;
-	case LOG_FMT_OVR_JSON_CEE:  return LOG_FORMAT_JSON_CEE;
-	case LOG_FMT_OVR_NONE:
-	default:                    return configured;
-	}
-}
-
 static void stderr_dprint(enum log_format eff_fmt, int log_level, int facility,
 	const char *module, const char *func, char *format, va_list ap);
 static void syslog_dprint(enum log_format eff_fmt, int log_level, int facility,
