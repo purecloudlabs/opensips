@@ -209,6 +209,12 @@ static int mod_init(void)
 		return -1;
 	}
 
+	if (hep_tls_handshake_timeout < 0) {
+		LM_ERR("hep_tls_handshake_timeout cannot be negative (%d)\n",
+			hep_tls_handshake_timeout);
+		return -1;
+	}
+
 	if (init_hep_id() < 0) {
 		LM_ERR("could not initialize HEP id list!\n");
 		return -1;
@@ -471,6 +477,9 @@ static int hep_tcp_or_tls_send(const struct socket_info* send_sock,
 			}
 			/* connect succeeded, we have a connection */
 			if (n == 0) {
+				/* if is_tls, the handshake itself hasn't started yet
+				 * (TCP connect still in progress) -- hep_tls_async_write()
+				 * arms the deadline once that first TLS attempt happens */
 				/* attach the write buffer to it */
 				if (tcp_async_add_chunk(c, buf, len, 1) < 0) {
 					LM_ERR("Failed to add the initial write chunk\n");
@@ -497,6 +506,8 @@ static int hep_tcp_or_tls_send(const struct socket_info* send_sock,
 				/* we connect under lock to make sure no one else is reading our
 				 * connect status */
 				tls_mgm_api.tls_update_fd(c, fd);
+				/* bound the whole handshake, not just this first attempt */
+				tcp_arm_handshake_deadline(c, hep_tls_handshake_timeout);
 				n = tls_mgm_api.tls_async_connect(c, fd,
 					hep_tls_async_handshake_connect_timeout, NULL);
 				lock_release(&c->write_lock);
@@ -866,7 +877,17 @@ static int hep_tls_async_write(struct tcp_connection* con, int fd)
 	int n;
 	struct tcp_async_chunk* chunk;
 
-	n = tls_mgm_api.tls_fix_read_conn(con, fd, hep_tls_handshake_timeout, NULL, 0);
+	/* first time this connection's TLS handshake is actually attempted
+	 * (e.g. its TCP connect was deferred to the reactor) -- a no-op if
+	 * already armed */
+	if (con->proto_flags & (F_TLS_DO_ACCEPT|F_TLS_DO_CONNECT))
+		tcp_arm_handshake_deadline(con, hep_tls_handshake_timeout);
+
+	/* short per-attempt window, same reasoning as the read side:
+	 * con->hs_deadline bounds the overall handshake, this only bounds
+	 * how long this one reactor callback may hold its worker captive. */
+	n = tls_mgm_api.tls_fix_read_conn(con, fd,
+		hep_tls_async_handshake_connect_timeout, NULL, 0);
 	if (n < 0) {
 		LM_ERR("failed to do pre-tls handshake!\n");
 		return -1;
@@ -926,7 +947,16 @@ static int hep_tcp_or_tls_read_req(struct tcp_connection* con, int* bytes_read,
 	}
 	
 	if (is_tls) {
-		ret = tls_mgm_api.tls_fix_read_conn(con, con->fd, hep_tls_handshake_timeout, NULL, 1);
+		/* short per-attempt window, not the full hep_tls_handshake_timeout:
+		 * this call runs synchronously on whichever TCP worker picks up
+		 * this reactor event, so a long timeout here would hold that
+		 * worker captive for the whole window instead of yielding it
+		 * back for other connections between attempts. con->hs_deadline
+		 * (armed from hep_tls_handshake_timeout) still bounds the total
+		 * handshake duration across however many such short attempts
+		 * this takes. */
+		ret = tls_mgm_api.tls_fix_read_conn(con, con->fd,
+			hep_tls_async_handshake_connect_timeout, NULL, 1);
 		if (ret < 0) {
 			LM_ERR("failed to do pre-tls handshake!\n");
 			return -1;
@@ -1242,6 +1272,8 @@ static int proto_hep_tls_conn_init(struct tcp_connection* c)
 		LM_DBG("looking up TLS server "
 			"domain [%s:%d]\n", ip_addr2a(&c->rcv.dst_ip), c->rcv.dst_port);
 		dom = tls_mgm_api.find_server_domain(&c->rcv.dst_ip, c->rcv.dst_port);
+		/* bound this accept the same way an outbound connect is bounded */
+		tcp_arm_handshake_deadline(c, hep_tls_handshake_timeout);
 	} else {
 		dom = tls_mgm_api.find_client_domain(&c->rcv.src_ip, c->rcv.src_port);
 	}

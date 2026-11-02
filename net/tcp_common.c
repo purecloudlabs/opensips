@@ -557,6 +557,171 @@ struct tcp_async_chunk *tcp_async_get_chunk(struct tcp_connection *con)
 	return con->async->chunks[0];
 }
 
+
+static unsigned long long tcp_handshake_now_us(void)
+{
+	struct timeval now;
+
+	if (gettimeofday(&now, NULL))
+		return 0;
+	return (unsigned long long)now.tv_sec * 1000000 + now.tv_usec;
+}
+
+
+void tcp_arm_handshake_deadline(struct tcp_connection *c, int handshake_tout)
+{
+	unsigned long long now_us;
+
+	if (c->hs_deadline)
+		return;
+
+	if (handshake_tout <= 0)
+		return;
+
+	now_us = tcp_handshake_now_us();
+	if (!now_us) {
+		/* fail closed: treat as immediately expired rather than leaving
+		 * the handshake unbounded if gettimeofday() fails */
+		LM_ERR("failed to read the current time, "
+			"treating TLS handshake deadline as expired\n");
+		c->hs_deadline = 1;
+		return;
+	}
+
+	c->hs_deadline = now_us + (unsigned long long)handshake_tout * 1000;
+}
+
+
+int tcp_handshake_deadline_expired(struct tcp_connection *c)
+{
+	unsigned long long now_us;
+
+	if (!c->hs_deadline)
+		return 0;
+
+	now_us = tcp_handshake_now_us();
+	if (!now_us) {
+		LM_ERR("failed to read the current time, "
+			"treating TLS handshake deadline as expired\n");
+		return 1;
+	}
+
+	return now_us >= c->hs_deadline;
+}
+
+
+static void tcp_handshake_wait_set_fail(int *fail_kind, int *fail_err,
+		int kind, int err)
+{
+	if (fail_kind)
+		*fail_kind = kind;
+	if (fail_err)
+		*fail_err = err;
+}
+
+
+/* Wait for one async TLS handshake step: poll/select until @attempt_deadline_us
+ * or the connection's overall hs_deadline, whichever comes first. @want_read
+ * mirrors SSL_get_error() (POLLIN for WANT_READ, POLLOUT for WANT_WRITE) --
+ * do not wait on both or a post-TCP-connect socket spins forever. Returns
+ * 1 when the fd is ready, 0 when only the per-attempt window expired (caller
+ * should return to the reactor), -1 on hard failure/deadline. */
+int tcp_handshake_async_wait(int fd, struct tcp_connection *con,
+	unsigned long long attempt_deadline_us, int want_read,
+	int *fail_kind, int *fail_err)
+{
+	long long attempt_left, poll_to;
+	unsigned long long now_us;
+	unsigned int err_len;
+	int poll_err = 0, n, err;
+#if defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT)
+	fd_set rset, wset;
+	struct timeval timeout_val;
+#else
+	struct pollfd pf;
+#endif
+
+again:
+	now_us = tcp_handshake_now_us();
+	if (!now_us) {
+		tcp_handshake_wait_set_fail(fail_kind, fail_err,
+			TCP_HS_WAIT_FAIL_TIME, errno);
+		return -1;
+	}
+
+	if (tcp_handshake_deadline_expired(con)) {
+		tcp_handshake_wait_set_fail(fail_kind, fail_err,
+			TCP_HS_WAIT_FAIL_DEADLINE, 0);
+		return -1;
+	}
+
+	attempt_left = (long long)attempt_deadline_us - (long long)now_us;
+	if (attempt_left <= 0)
+		return 0;
+
+	if (con->hs_deadline) {
+		long long overall_left = (long long)con->hs_deadline - (long long)now_us;
+
+		if (overall_left <= 0) {
+			tcp_handshake_wait_set_fail(fail_kind, fail_err,
+				TCP_HS_WAIT_FAIL_DEADLINE, 0);
+			return -1;
+		}
+		/* never poll/select longer than the overall handshake budget */
+		poll_to = (attempt_left < overall_left) ? attempt_left : overall_left;
+	} else {
+		poll_to = attempt_left;
+	}
+
+#if defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT)
+	FD_ZERO(&rset);
+	FD_ZERO(&wset);
+	if (want_read)
+		FD_SET(fd, &rset);
+	else
+		FD_SET(fd, &wset);
+	timeout_val.tv_sec = poll_to / 1000000;
+	timeout_val.tv_usec = poll_to % 1000000;
+	n = select(fd + 1, &rset, &wset, NULL, &timeout_val);
+#else
+	pf.fd = fd;
+	pf.events = want_read ? POLLIN : POLLOUT;
+	/* poll() takes ms; round up so a sub-ms budget is not truncated to 0 */
+	n = poll(&pf, 1, (int)((poll_to + 999) / 1000));
+#endif
+	if (n < 0) {
+		if (errno == EINTR)
+			goto again;
+		tcp_handshake_wait_set_fail(fail_kind, fail_err,
+			TCP_HS_WAIT_FAIL_POLL, errno);
+		return -1;
+	}
+	if (n == 0)
+		goto again;
+
+#if !(defined(HAVE_SELECT) && defined(BLOCKING_USE_SELECT))
+	if (pf.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+		LM_ERR("poll error: flags %x\n", pf.revents);
+		poll_err = 1;
+	}
+#endif
+
+	err_len = sizeof(err);
+	if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &err_len) != 0) {
+		tcp_handshake_wait_set_fail(fail_kind, fail_err,
+			TCP_HS_WAIT_FAIL_GETSOCKOPT, errno);
+		return -1;
+	}
+	if ((err == 0) && (poll_err == 0))
+		return 1;
+	if (err != EINPROGRESS && err != EALREADY) {
+		tcp_handshake_wait_set_fail(fail_kind, fail_err,
+			TCP_HS_WAIT_FAIL_SO_ERROR, err);
+		return -1;
+	}
+	return 1;
+}
+
 void tcp_async_update_write(struct tcp_connection *con, int len)
 {
 	int i = 0, c;
