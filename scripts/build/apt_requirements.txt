@@ -10,6 +10,7 @@ libexpat1-dev
 libfreediameter-dev
 libgeoip-dev
 libhiredis-dev
+libicu-dev
 libjson-c-dev
 libldap2-dev
 liblua5.1-0-dev
@@ -21,6 +22,7 @@ libmysqlclient-dev
 libpcre2-dev
 libperl-dev
 libpq-dev
+libprotobuf-dev
 librabbitmq-dev
 libradcli-dev
 libsctp-dev
@@ -31,6 +33,8 @@ libxml2-dev
 make
 odbcinst
 patch
+pkg-config
+protobuf-compiler
 python-dev-is-python3
 unixodbc
 unixodbc-dev

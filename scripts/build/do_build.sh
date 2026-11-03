@@ -21,6 +21,9 @@ then
   EXCLUDE_MODULES="${EXCLUDE_MODULES} ${EXCLUDE_MODULES_ADD}"
 fi
 
+# Besides the core collection ("all"), the community-contributed modules
+# (modules-contrib/) are built too, unless MAKE_TGT overrides the targets.
+
 MAKE_ENV="FASTER=1 NICER=0 RADIUSCLIENT=RADCLI"
 MAKE_CMD="${MAKE_ENV} make"
 DEFAULT_CC_EXTRA_OPTS="-Werror"
@@ -37,5 +40,5 @@ then
    -C "modules/${ONE_MODULE}"
 else
   env CC_EXTRA_OPTS="${CC_EXTRA_OPTS:-"${DEFAULT_CC_EXTRA_OPTS}"}" ${MAKE_CMD} \
-   exclude_modules="${EXCLUDE_MODULES}" "${@}" ${MAKE_TGT:-"all"}
+   exclude_modules="${EXCLUDE_MODULES}" "${@}" ${MAKE_TGT:-all modules-contrib}
 fi

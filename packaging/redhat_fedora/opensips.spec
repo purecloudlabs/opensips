@@ -49,7 +49,7 @@
 
 # Contrib modules which require external libraries belong here. Each must have
 # matching build requirements and an opensips-module-contrib-<module> package.
-%global STANDALONE_CONTRIB_MODULES %{nil}
+%global STANDALONE_CONTRIB_MODULES libphonenumber
 
 # Database backends shipped as opensips-dbschema-<backend> packages.
 %global DBSCHEMA_MODULES berkeley mysql postgres sqlite
@@ -159,6 +159,22 @@ per second even on low-budget hardware.
 This package contains community-contributed modules which do not require
 external build dependencies. These modules are not maintained by the OpenSIPS
 core team and may have different support guarantees.
+
+%package -n %{name}-module-contrib-libphonenumber
+Summary:  OpenSIPS libphonenumber contributed module
+Group:    System Environment/Daemons
+Requires: %{name} = %{version}-%{release}
+BuildRequires: cmake
+BuildRequires: libicu-devel
+BuildRequires: pkgconfig
+BuildRequires: protobuf-compiler
+BuildRequires: protobuf-devel
+
+%description -n %{name}-module-contrib-libphonenumber
+This package contains only the libphonenumber contributed module for OpenSIPS,
+which parses, formats and validates phone numbers using Google's libphonenumber
+library (bundled and statically linked). It is not maintained by the OpenSIPS
+core team.
 
 %if 0%{?_with_auth_jwt:1}
 %package  auth-jwt-module
@@ -2795,6 +2811,10 @@ fi
 %files -n %{name}-module-db-unixodbc
 %{_libdir}/opensips/modules/db_unixodbc.so
 %doc docdir/README.db_unixodbc
+
+%files -n %{name}-module-contrib-libphonenumber
+%{_libdir}/opensips/modules/libphonenumber.so
+%doc docdir/README.libphonenumber
 
 %files -n %{name}-module-uuid
 %{_libdir}/opensips/modules/uuid.so
