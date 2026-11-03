@@ -140,7 +140,7 @@ int dp_my_pid(void)
 	return my_pid();
 }
 
-int parse_log_format(str *format)
+int parse_log_format(const str *format)
 {
 	if (str_match(format, (&str_init(LOG_PLAIN_NAME))))
 		return LOG_FORMAT_PLAIN;

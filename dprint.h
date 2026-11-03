@@ -175,7 +175,7 @@ int get_log_consumer_mute_state(str *name, int *state);
 int set_log_consumer_level_filter(str *name, int level);
 int get_log_consumer_level_filter(str *name, int *level_filter);
 
-int parse_log_format(str *format);
+int parse_log_format(const str *format);
 int dp_my_pid(void);
 
 void stderr_dprint_tmp(char *format, ...);
