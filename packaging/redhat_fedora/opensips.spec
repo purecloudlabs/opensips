@@ -42,7 +42,7 @@
 # Contrib modules which require external libraries belong here.  Add matching
 # build requirements, subpackage metadata and file sections for each one, as
 # done for dependency-bearing modules from the main module tree.
-%global CONTRIB_MODULES_WITH_DEPS %{nil}
+%global CONTRIB_MODULES_WITH_DEPS libphonenumber
 
 Summary:  Very fast and configurable SIP server
 Name:     opensips
@@ -479,6 +479,22 @@ per second even on low-budget hardware.
 This package provides the ldap and h350 modules for OpenSIPS, enabling LDAP
 queries from the OpenSIPS config and storage of SIP account data in an LDAP
 directory.
+
+%package  libphonenumber-module
+Summary:  OpenSIPS libphonenumber contributed module
+Group:    System Environment/Daemons
+Requires: %{name} = %{version}-%{release}
+BuildRequires: cmake
+BuildRequires: libicu-devel
+BuildRequires: pkgconfig
+BuildRequires: protobuf-compiler
+BuildRequires: protobuf-devel
+
+%description  libphonenumber-module
+This package contains only the libphonenumber contributed module for OpenSIPS,
+which parses, formats and validates phone numbers using Google's libphonenumber
+library (bundled and statically linked). It is not maintained by the OpenSIPS
+core team.
 
 %package  lua-module
 Summary:  Lua extensions for OpenSIPS
@@ -1473,6 +1489,10 @@ fi
 %doc docdir/README.h350
 %{_libdir}/opensips/modules/ldap.so
 %doc docdir/README.ldap
+
+%files libphonenumber-module
+%{_libdir}/opensips/modules/libphonenumber.so
+%doc docdir/README.libphonenumber
 
 %files lua-module
 %{_libdir}/opensips/modules/lua.so

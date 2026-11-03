@@ -3,6 +3,7 @@ Section: net
 Priority: optional
 Maintainer: Răzvan Crainea <razvan@opensips.org>
 Build-Depends: bison,
+               cmake,
                debhelper (>= 10),
                default-libmysqlclient-dev | libmysqlclient-dev,
                debhelper (>= 9.20160709) | dh-systemd (>= 1.5),
@@ -17,6 +18,7 @@ Build-Depends: bison,
                libexpat1-dev,
                libmaxminddb-dev | libgeoip-dev (>= 1.4.4),
                libhiredis-dev,
+               libicu-dev,
                libjson-c-dev,
                libjwt-dev | base-files,
                librdkafka-dev,
@@ -32,6 +34,7 @@ Build-Depends: bison,
                libpcre3-dev,
                libperl-dev,
                libpq-dev,
+               libprotobuf-dev,
                librabbitmq-dev,
                libradcli-dev | libfreeradius-client-dev,
                libsctp-dev [linux-any],
@@ -42,6 +45,7 @@ Build-Depends: bison,
                uuid-dev,
                libxml2-dev,
                pkg-config,
+               protobuf-compiler,
                python | python-is-python3,
                python-dev | python-dev-is-python3,
                unixodbc-dev,
@@ -74,6 +78,7 @@ Suggests: opensips-auth-jwt-module,
           opensips-json-module,
           opensips-kafka-module,
           opensips-ldap-modules,
+          opensips-libphonenumber-module,
           opensips-lua-module,
           opensips-memcached-module,
           opensips-mongodb-module,
@@ -436,6 +441,16 @@ Description: LDAP modules for OpenSIPS
  This package provides the ldap and h350 modules for OpenSIPS, enabling LDAP
  queries from the OpenSIPS config and storage of SIP account data in an LDAP
  directory.
+
+Package: opensips-libphonenumber-module
+Architecture: any
+Multi-Arch: same
+Depends: opensips (= ${binary:Version}), ${misc:Depends}, ${shlibs:Depends}
+Description: OpenSIPS libphonenumber contributed module
+ This package contains only the libphonenumber contributed module for
+ OpenSIPS, which parses, formats and validates phone numbers using Google's
+ libphonenumber library (bundled and statically linked). It is not
+ maintained by the OpenSIPS core team.
 
 Package: opensips-lua-module
 Architecture: any
