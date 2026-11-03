@@ -61,10 +61,13 @@ int tcp_async_add_chunk(struct tcp_connection *con, char *buf,
 		int len, int lock);
 
 /*
- * Register callbacks for subsequently queued async chunks.  The registered
- * list is copied to every chunk until it is cleared.
+ * Register a failure callback for subsequently queued async chunks. It is
+ * copied to every chunk queued, until cleared, on a connection leading to
+ * @dst (same proto, and same connection id or same remote IP and port /
+ * port alias). Passing a NULL @dst attaches it to every queued chunk.
  */
-int tcp_register_fail_cb(tcp_fail_f *f, void *param, tcp_fail_free_f *free);
+int tcp_register_fail_cb(tcp_fail_f *f, void *param, tcp_fail_free_f *free,
+		const struct dest_info *dst);
 /* clear the callback registered for subsequently queued chunks */
 void tcp_clear_fail_cb(void);
 

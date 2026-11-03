@@ -27,6 +27,10 @@
 #include "../ipc.h"
 
 static struct tcp_fail_cb tcp_fail_cb;
+/* destination the registered callback is meant for; only chunks queued on
+ * a connection to this destination get the callback attached */
+static struct dest_info tcp_fail_cb_dst;
+static int tcp_fail_cb_has_dst;
 
 struct tcp_fail_job {
 	tcp_fail_f *f;
@@ -44,7 +48,8 @@ static void tcp_fail_rpc(int sender, void *param)
 	shm_free(job);
 }
 
-int tcp_register_fail_cb(tcp_fail_f *f, void *param, tcp_fail_free_f *free)
+int tcp_register_fail_cb(tcp_fail_f *f, void *param, tcp_fail_free_f *free,
+		const struct dest_info *dst)
 {
 	if (!f)
 		return -1;
@@ -52,12 +57,54 @@ int tcp_register_fail_cb(tcp_fail_f *f, void *param, tcp_fail_free_f *free)
 	tcp_fail_cb.f = f;
 	tcp_fail_cb.param = param;
 	tcp_fail_cb.free = free;
+	if (dst) {
+		tcp_fail_cb_dst = *dst;
+		tcp_fail_cb_has_dst = 1;
+	} else {
+		tcp_fail_cb_has_dst = 0;
+	}
 	return 0;
 }
 
 void tcp_clear_fail_cb(void)
 {
 	memset(&tcp_fail_cb, 0, sizeof tcp_fail_cb);
+	memset(&tcp_fail_cb_dst, 0, sizeof tcp_fail_cb_dst);
+	tcp_fail_cb_has_dst = 0;
+}
+
+/* Does @con lead to the destination the fail callback was registered for?
+ * Other async writes may be queued while the callback is registered (e.g.
+ * TLS/HEP tracing done from inside the send path), and those chunks must not
+ * report their failures as failures of the registered send. */
+static int tcp_fail_cb_match(const struct tcp_connection *con)
+{
+	struct ip_addr ip;
+	unsigned short port;
+	int i;
+
+	if (!tcp_fail_cb_has_dst)
+		return 1;
+
+	if (con->type != tcp_fail_cb_dst.proto)
+		return 0;
+
+	if (tcp_fail_cb_dst.proto_reserved1 &&
+	con->id == tcp_fail_cb_dst.proto_reserved1)
+		return 1;
+
+	su2ip_addr(&ip, &tcp_fail_cb_dst.to);
+	if (!ip_addr_cmp(&ip, &con->rcv.src_ip))
+		return 0;
+
+	port = su_getport(&tcp_fail_cb_dst.to);
+	if (con->rcv.src_port == port)
+		return 1;
+	for (i = 0; i < con->aliases && i < TCP_CON_MAX_ALIASES; i++)
+		if (con->con_aliases[i].port == port)
+			return 1;
+
+	return 0;
 }
 
 static void tcp_free_fail_cb(struct tcp_async_chunk *chunk)
@@ -597,7 +644,10 @@ int tcp_async_add_chunk(struct tcp_connection *con, char *buf,
 		return -1;
 	}
 
-	c->fail_cb = tcp_fail_cb;
+	if (tcp_fail_cb.f && tcp_fail_cb_match(con))
+		c->fail_cb = tcp_fail_cb;
+	else
+		memset(&c->fail_cb, 0, sizeof c->fail_cb);
 	c->len = len;
 	c->ticks = get_ticks();
 	c->buf = (char *)(c+1);
