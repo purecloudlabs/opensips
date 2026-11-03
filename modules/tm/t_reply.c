@@ -668,6 +668,9 @@ static inline int is_3263_failure(struct cell *t)
 	switch (t->uac[picked_branch].last_received) {
 		case 408:
 			return ((t->uac[picked_branch].flags&T_UAC_HAS_RECV_REPLY)==0);
+		case 477:
+			return (t->uac[picked_branch].reply==FAKED_REPLY &&
+				(t->uac[picked_branch].flags&T_UAC_HAS_RECV_REPLY)==0);
 		case 503:
 			if (t->uac[picked_branch].reply==NULL ||
 			t->uac[picked_branch].reply==FAKED_REPLY)
