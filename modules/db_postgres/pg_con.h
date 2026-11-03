@@ -73,6 +73,9 @@ struct pg_con {
  * Create a new connection structure,
  * open the PostgreSQL connection and set reference count to 1
  */
+int db_postgres_connect(struct pg_con* ptr);
+int db_postgres_ensure_connected(struct pg_con* ptr);
+
 struct pg_con* db_postgres_new_connection(struct db_id* id);
 
 /*

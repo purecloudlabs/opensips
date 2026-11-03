@@ -195,6 +195,33 @@ modparam("usrloc", "db_url", "postgres://root:1234@localhost/opensips?tls_domain
 </programlisting>
 		</example>
 	</section>
+
+	<section id="param_lazy_connect" xreflabel="lazy_connect">
+		<title><varname>lazy_connect</varname> (integer)</title>
+		<para>
+		If set to 1, the module only allocates the connection handle at
+		init. The PostgreSQL socket is opened on the first query
+		(including string escaping via PQescapeStringConn, which
+		runs while the SQL text is built) or when an async
+		connection is created. Worker processes that never query
+		the database therefore keep no idle backend sockets. The <emphasis>db_virtual</emphasis> probe timer still
+		issues <emphasis>SELECT 1</emphasis> on a temporary handle so a
+		down URL is not marked up without a real connect.
+		</para>
+		<para>
+		<emphasis>
+			Default value is 0 (connect at init).
+		</emphasis>
+		</para>
+		<example>
+		<title>Set <varname>lazy_connect</varname> parameter</title>
+		<programlisting format="linespecific">
+...
+modparam("db_postgres", "lazy_connect", 1)
+...
+</programlisting>
+		</example>
+	</section>
 	</section>
 	<section id="exported_functions" xreflabel="exported_functions">
 	<title>Exported Functions</title>

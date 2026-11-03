@@ -17,6 +17,7 @@ db_postgres Module
               1.3.2. max_db_queries (integer)
               1.3.3. timeout (integer)
               1.3.4. use_tls (integer)
+              1.3.5. lazy_connect (integer)
 
         1.4. Exported Functions
         1.5. Installation and Running
@@ -43,6 +44,7 @@ db_postgres Module
    1.2. Set max_db_queries parameter
    1.3. Set timeout parameter
    1.4. Set the use_tls parameter
+   1.5. Set lazy_connect parameter
 
 Chapter 1. Admin Guide
 
@@ -163,6 +165,23 @@ modparam("db_postgres", "use_tls", 1)
 ...
 modparam("usrloc", "db_url", "postgres://root:1234@localhost/opensips?tl
 s_domain=dom1")
+...
+
+1.3.5. lazy_connect (integer)
+
+   If set to 1, db_init() only allocates the connection handle.
+   PQconnectdbParams() runs on the first query (including
+   PQescapeStringConn while SQL text is built) or on async
+   connection setup. SIP worker processes that never query
+   PostgreSQL therefore keep no idle backend sockets. The
+   db_virtual probe timer still issues SELECT 1 on a temporary
+   handle so a down URL is not marked up without a real connect.
+
+   Default value is 0 (connect at init, historic behaviour).
+
+   Example 1.5. Set lazy_connect parameter
+...
+modparam("db_postgres", "lazy_connect", 1)
 ...
 
 1.4. Exported Functions

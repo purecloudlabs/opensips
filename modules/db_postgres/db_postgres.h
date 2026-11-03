@@ -31,6 +31,8 @@ extern int pq_timeout;
 
 extern int use_tls;
 
+extern int pg_lazy_connect;
+
 extern struct tls_mgm_binds tls_api;
 
 #endif /* DB_POSTGRES_H */
