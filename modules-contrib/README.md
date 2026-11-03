@@ -31,3 +31,8 @@ The Debian and RPM packaging builds place dependency-free modules from this
 directory in `opensips-modules-contrib`. A module with external dependencies
 must be added to the explicit contrib dependency list in both packaging
 backends and shipped as `opensips-module-contrib-<module>`.
+
+The CI (`scripts/build/do_build.sh`) builds the contrib modules along with the
+core collection. A module may ship a functional test runner as
+`test/run-tests.sh`; `scripts/build/run_contrib_tests.sh` runs it from the
+source tree root after the build, and a non-zero exit status fails the CI.

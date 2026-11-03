@@ -7,3 +7,11 @@
 [submodule "modules/http2d/lib/nghttp2"]
 	path = modules/http2d/lib/nghttp2
 	url = https://github.com/nghttp2/nghttp2
+[submodule "modules-contrib/libphonenumber/lib/libphonenumber"]
+	path = modules-contrib/libphonenumber/lib/libphonenumber
+	url = https://github.com/google/libphonenumber.git
+	shallow = true
+[submodule "modules-contrib/libphonenumber/lib/abseil-cpp"]
+	path = modules-contrib/libphonenumber/lib/abseil-cpp
+	url = https://github.com/abseil/abseil-cpp.git
+	shallow = true

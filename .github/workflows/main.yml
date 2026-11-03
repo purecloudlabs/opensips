@@ -14,6 +14,8 @@ on:
       - 'cfg.y'
       - 'cfg.lex'
       - 'scripts/**'
+      - 'modules-contrib/**'
+      - '.gitmodules'
   pull_request:
     paths:
       - '**/Makefile*'
@@ -23,6 +25,8 @@ on:
       - 'cfg.y'
       - 'cfg.lex'
       - 'scripts/**'
+      - 'modules-contrib/**'
+      - '.gitmodules'
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -94,6 +98,9 @@ jobs:
 
       - name: Build
         run: sh -x scripts/build/do_build.sh
+
+      - name: Test contrib modules
+        run: sh -x scripts/build/run_contrib_tests.sh
 
   all_done:
     needs: build

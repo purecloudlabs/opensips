@@ -1,0 +1,3 @@
+# bundled libphonenumber / abseil build output
+/lib/build/
+/lib/install/

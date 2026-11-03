@@ -67,7 +67,7 @@ jobs:
 
       - name: Exclude external libraries from Coverity
         run: |
-          EXCLUDE_RE="$GITHUB_WORKSPACE/(modules/tls_wolfssl/lib|modules/http2d/lib/nghttp2|modules/freeswitch/esl/src|modules/launch_darkly/lib)(/|$)"
+          EXCLUDE_RE="$GITHUB_WORKSPACE/(modules/tls_wolfssl/lib|modules/http2d/lib/nghttp2|modules/freeswitch/esl/src|modules/launch_darkly/lib|modules-contrib/libphonenumber/lib)(/|$)"
 
           cov-manage-emit \
             --dir cov-int \
