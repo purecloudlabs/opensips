@@ -346,7 +346,7 @@ static inline char del_transfer(int fd)
 }
 
 /*
- * GCVCALLP-3344: guard against registering a non-socket fd. libcurl's
+ * guard against registering a non-socket fd. libcurl's
  * internal wakeup eventfd can appear in curl_multi_fdset()'s read set
  * alongside the real transfer socket (observed on 8.21.0, not 8.17.0);
  * is_new_transfer() only checks fd numbers, not fd type.
@@ -1034,19 +1034,11 @@ int start_async_http_req(struct sip_msg *msg, enum rest_client_method method,
 			busy_wait = connect_poll_interval < timeout ? connect_poll_interval : timeout;
 		}
 
-		if (busy_wait <= 0) {
-			/*
-			 * curl_multi_timeout() may legitimately request an immediate retry.
-			 * The loop accounts elapsed time by subtracting busy_wait, so a zero
-			 * value would otherwise spin forever.  A 1ms floor keeps this path
-			 * bounded while still promptly driving curl's state machine.
-			 */
-			busy_wait = 1;
+		if (busy_wait > 0) {
+			/* libcurl seems to be stuck in internal operations (TCP connect?) */
+			LM_DBG("busy waiting %ldms ...\n", busy_wait);
+			usleep(1000UL * busy_wait);
 		}
-
-		/* libcurl seems to be stuck in internal operations (TCP connect?) */
-		LM_DBG("busy waiting %ldms ...\n", busy_wait);
-		usleep(1000UL * busy_wait);
 	}
 
 	LM_ERR("connect timeout on %s (%lds)\n", url, connection_timeout);
