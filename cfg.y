@@ -1050,20 +1050,9 @@ assign_stm: LOGLEVEL EQUAL snumber { IFOR();
 			if ((i_tmp = parse_log_format(&s_tmp)) < 0) {
 				yyerror("unknown log format");
 			} else {
-				if (i_tmp != LOG_FORMAT_PLAIN) {
-					if (init_log_json_buf(0) < 0) {
-						yyerror("failed to allocate json log buffer");
-						YYABORT;
-					}
-					if (init_log_msg_buf(0) < 0) {
-						yyerror("failed to allocate msg log buffer");
-						YYABORT;
-					}
-
-					if (i_tmp == LOG_FORMAT_JSON_CEE && init_log_cee_hostname() < 0) {
-						yyerror("failed to allocate hostname buffer");
-						YYABORT;
-					}
+				if (init_log_format_bufs(i_tmp) < 0) {
+					yyerror("failed to allocate log format buffers");
+					YYABORT;
 				}
 
 				stderr_log_format = i_tmp;
@@ -1075,20 +1064,9 @@ assign_stm: LOGLEVEL EQUAL snumber { IFOR();
 			if ((i_tmp = parse_log_format(&s_tmp)) < 0) {
 				yyerror("unknown log format");
 			} else {
-				if (i_tmp != LOG_FORMAT_PLAIN) {
-					if (init_log_json_buf(0) < 0) {
-						yyerror("failed to allocate json log buffer");
-						YYABORT;
-					}
-					if (init_log_msg_buf(0) < 0) {
-						yyerror("failed to allocate msg log buffer");
-						YYABORT;
-					}
-
-					if (i_tmp == LOG_FORMAT_JSON_CEE && init_log_cee_hostname() < 0) {
-						yyerror("failed to allocate hostname buffer");
-						YYABORT;
-					}
+				if (init_log_format_bufs(i_tmp) < 0) {
+					yyerror("failed to allocate log format buffers");
+					YYABORT;
 				}
 
 				syslog_log_format = i_tmp;
@@ -2751,10 +2729,20 @@ static void yyerrorf(char *fmt, ...)
 static enum log_fmt_override parse_xlog_format(char* fmt)
 {
 	str s;
+	int fmt_id;
 
 	s.s = fmt;
 	s.len = strlen(fmt);
-	switch (parse_log_format(&s)) {
+	fmt_id = parse_log_format(&s);
+
+	/* the configured stderr/syslog formats may both be plain, in which case
+	 * the json buffers were never allocated - the override needs them too */
+	if (fmt_id >= 0 && init_log_format_bufs(fmt_id) < 0) {
+		yyerror("failed to allocate log format buffers");
+		return LOG_FMT_OVR_NONE;
+	}
+
+	switch (fmt_id) {
 	case LOG_FORMAT_PLAIN:
 		return LOG_FMT_OVR_PLAIN;
 	case LOG_FORMAT_JSON:

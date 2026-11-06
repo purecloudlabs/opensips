@@ -10,8 +10,10 @@
 # Each check prints "ok" or "FAIL" and records failures; finish exits non-zero
 # if any check failed.
 
-# minimal config needed for 'opensips -c' and for short test runs
-CFG_PRELUDE='socket = udp:127.0.0.1:15060'
+# minimal config needed for 'opensips -c' and for short test runs; proto_udp
+# is built into the core, but must still be loaded for the socket to be valid
+CFG_PRELUDE='loadmodule "proto_udp.so"
+socket = udp:127.0.0.1:15060'
 
 # script_init [opensips-binary]  (default ./opensips)
 script_init() {

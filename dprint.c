@@ -757,6 +757,30 @@ int register_log_consumer(char *name, log_print_f print_func,
 	return 0;
 }
 
+/* allocate what a non-plain log format needs (json/msg buffers, cee hostname);
+ * idempotent, so it may be called for the configured formats as well as for
+ * every per-call format override */
+int init_log_format_bufs(enum log_format format)
+{
+	if (format == LOG_FORMAT_PLAIN)
+		return 0;
+
+	if (init_log_json_buf(0) < 0) {
+		LM_ERR("failed to allocate json log buffer\n");
+		return -1;
+	}
+	if (init_log_msg_buf(0) < 0) {
+		LM_ERR("failed to allocate msg log buffer\n");
+		return -1;
+	}
+	if (format == LOG_FORMAT_JSON_CEE && init_log_cee_hostname() < 0) {
+		LM_ERR("failed to allocate hostname buffer\n");
+		return -1;
+	}
+
+	return 0;
+}
+
 int init_log_json_buf(int realloc_buf)
 {
 	if (realloc_buf && log_json_buf) {

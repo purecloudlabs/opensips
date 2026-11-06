@@ -164,6 +164,7 @@ int init_log_json_buf(int realloc);
 int init_log_msg_buf(int realloc);
 
 int init_log_cee_hostname(void);
+int init_log_format_bufs(enum log_format format);
 
 int init_log_event_cons();
 int set_log_event_cons_cfg_state(void);
