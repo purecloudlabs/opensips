@@ -39,7 +39,8 @@
 #endif
 
 /* used internally by the log interface */
-typedef void (*log_print_pre_fmt_f)(log_print_f gen_print_func, int log_level,
+typedef void (*log_print_pre_fmt_f)(log_print_f gen_print_func,
+	enum log_fmt_override fmt_ovr, int log_level,
 	int facility, const char *module, const char *func,
 	char *stderr_plain_fmt, char *syslog_plain_fmt, char *format, va_list ap);
 
@@ -72,15 +73,17 @@ int log_msg_buf_size = 4096;
 
 str log_cee_hostname;
 
-static void stderr_dprint(int log_level, int facility, const char *module, const char *func,
-	char *format, va_list ap);
-static void syslog_dprint(int log_level, int facility, const char *module, const char *func,
-	char *format, va_list ap);
+static void stderr_dprint(enum log_format eff_fmt, int log_level, int facility,
+	const char *module, const char *func, char *format, va_list ap);
+static void syslog_dprint(enum log_format eff_fmt, int log_level, int facility,
+	const char *module, const char *func, char *format, va_list ap);
 
-static void stderr_pre_fmt_func(log_print_f gen_print_func, int log_level,
+static void stderr_pre_fmt_func(log_print_f gen_print_func,
+	enum log_fmt_override fmt_ovr, int log_level,
 	int facility, const char *module, const char *func,
 	char *stderr_plain_fmt, char *syslog_plain_fmt, char *format, va_list ap);
-static void syslog_pre_fmt_func(log_print_f gen_print_func, int log_level,
+static void syslog_pre_fmt_func(log_print_f gen_print_func,
+	enum log_fmt_override fmt_ovr, int log_level,
 	int facility, const char *module, const char *func,
 	char *stderr_plain_fmt, char *syslog_plain_fmt, char *format, va_list ap);
 
@@ -137,7 +140,7 @@ int dp_my_pid(void)
 	return my_pid();
 }
 
-int parse_log_format(str *format)
+int parse_log_format(const str *format)
 {
 	if (str_match(format, (&str_init(LOG_PLAIN_NAME))))
 		return LOG_FORMAT_PLAIN;
@@ -455,8 +458,8 @@ static int log_print_json(str *buf, enum log_json_format json_fmt, char *time,
 	return len;
 }
 
-static void stderr_dprint(int log_level, int facility, const char *module, const char *func,
-	char *format, va_list ap)
+static void stderr_dprint(enum log_format eff_fmt, int log_level, int facility,
+	const char *module, const char *func, char *format, va_list ap)
 {
 	char *time;
 	int pid;
@@ -464,14 +467,14 @@ static void stderr_dprint(int log_level, int facility, const char *module, const
 	int len;
 	str buf = {log_json_buf, log_json_buf_size};
 
-	if (stderr_log_format != LOG_FORMAT_PLAIN) {
+	if (eff_fmt != LOG_FORMAT_PLAIN) {
 		time = va_arg(ap, char *);
 		pid = va_arg(ap, int);
 		prefix = va_arg(ap, char *);
 		if (module && func)
 			va_arg(ap, char *);
 
-		if ((len = log_print_json(&buf, stderr_log_format==LOG_FORMAT_JSON_CEE ?
+		if ((len = log_print_json(&buf, eff_fmt==LOG_FORMAT_JSON_CEE ?
 			LOG_JSON_SCHEMA_CEE : LOG_JSON_SCHEMA_BASIC,
 			time, pid, prefix, dp_log_level_str(log_level), module, func,
 			format, ap)) < 0) {
@@ -487,8 +490,8 @@ static void stderr_dprint(int log_level, int facility, const char *module, const
 	}
 }
 
-static void syslog_dprint(int log_level, int facility, const char *module, const char *func,
-	char *format, va_list ap)
+static void syslog_dprint(enum log_format eff_fmt, int log_level, int facility,
+	const char *module, const char *func, char *format, va_list ap)
 {
 	int level;
 	char *time;
@@ -521,14 +524,14 @@ static void syslog_dprint(int log_level, int facility, const char *module, const
 		level = LOG_DEBUG;
 	}
 
-	if (syslog_log_format != LOG_FORMAT_PLAIN) {
+	if (eff_fmt != LOG_FORMAT_PLAIN) {
 		time = va_arg(ap, char *);
 		pid = va_arg(ap, int);
 		prefix = va_arg(ap, char *);
 		if (module && func)
 			va_arg(ap, char *);
 
-		if ((len = log_print_json(&buf, syslog_log_format==LOG_FORMAT_JSON_CEE ?
+		if ((len = log_print_json(&buf, eff_fmt==LOG_FORMAT_JSON_CEE ?
 			LOG_JSON_SCHEMA_CEE_PREFIX : LOG_JSON_SCHEMA_BASIC,
 			time, pid, prefix, dp_log_level_str(log_level), module, func,
 			format, ap)) < 0) {
@@ -554,13 +557,15 @@ static str evi_func_str = str_init("function");
 static str evi_prefix_str = str_init("prefix");
 static str evi_msg_str = str_init("message");
 
-static void event_dprint(int level, int facility, const char *module, const char *func,
-	char *format, va_list ap)
+static void event_dprint(enum log_format eff_fmt, int level, int facility,
+	const char *module, const char *func, char *format, va_list ap)
 {
 	evi_params_p list = NULL;
 	str s;
 	int n;
 	int suppressed;
+
+	(void)eff_fmt;  /* event consumer does not vary output by format */
 
 	suppressed = pt[process_no].suppress_log_event;
 
@@ -652,7 +657,8 @@ end_free:
 }
 
 /* generic consumer that registers to the log interface */
-static void gen_consumer_pre_fmt_func(log_print_f gen_print_func, int log_level,
+static void gen_consumer_pre_fmt_func(log_print_f gen_print_func,
+	enum log_fmt_override fmt_ovr, int log_level,
 	int facility, const char *module, const char *func,
 	char *stderr_plain_fmt, char *syslog_plain_fmt, char *format, va_list ap)
 {
@@ -663,45 +669,72 @@ static void gen_consumer_pre_fmt_func(log_print_f gen_print_func, int log_level,
     if (module && func)
 		va_arg(ap, char *);
 
-	gen_print_func(log_level, facility, module, func, format, ap);
+	/* generic consumers have no configured format of their own; honor an
+	 * explicit override, else default to plain */
+	gen_print_func(resolve_log_format(LOG_FORMAT_PLAIN, fmt_ovr),
+		log_level, facility, module, func, format, ap);
 }
 
-static void stderr_pre_fmt_func(log_print_f gen_print_func, int log_level,
+static void stderr_pre_fmt_func(log_print_f gen_print_func,
+	enum log_fmt_override fmt_ovr, int log_level,
 	int facility, const char *module, const char *func,
 	char *stderr_plain_fmt, char *syslog_plain_fmt, char *format, va_list ap)
 {
-	char *fmt = stderr_log_format == LOG_FORMAT_PLAIN ? stderr_plain_fmt : format;
+	enum log_format eff_fmt = resolve_log_format(stderr_log_format, fmt_ovr);
+	char *fmt = eff_fmt == LOG_FORMAT_PLAIN ? stderr_plain_fmt : format;
 
-	gen_print_func(log_level, facility, module, func, fmt, ap);
+	gen_print_func(eff_fmt, log_level, facility, module, func, fmt, ap);
 }
 
-static void syslog_pre_fmt_func(log_print_f gen_print_func, int log_level,
+static void syslog_pre_fmt_func(log_print_f gen_print_func,
+	enum log_fmt_override fmt_ovr, int log_level,
 	int facility, const char *module, const char *func,
 	char *stderr_plain_fmt, char *syslog_plain_fmt, char *format, va_list ap)
 {
-	char *fmt = syslog_log_format == LOG_FORMAT_PLAIN ? syslog_plain_fmt : format;
+	enum log_format eff_fmt = resolve_log_format(syslog_log_format, fmt_ovr);
+	char *fmt = eff_fmt == LOG_FORMAT_PLAIN ? syslog_plain_fmt : format;
 
-	gen_print_func(log_level, facility, module, func, fmt, ap);
+	gen_print_func(eff_fmt, log_level, facility, module, func, fmt, ap);
 }
 
-void dprint(int log_level, int facility, const char *module, const char *func,
-	char *stderr_fmt, char *syslog_fmt, char *format, ...)
+static void vdprint_fmt_ovr(enum log_fmt_override fmt_ovr, int log_level, int facility,
+	const char *module, const char *func,
+	char *stderr_fmt, char *syslog_fmt, char *format, va_list ap)
 {
-	va_list ap, ap_copy;
+	va_list ap_copy;
 	int i;
-
-	va_start(ap, format);
 
 	for (i=0; i<log_consumers_no; i++)
 		if (!log_consumers[i].muted && (!log_consumers[i].level_filter ||
 			log_consumers[i].level_filter >= log_level)) {
 			va_copy(ap_copy, ap);
 			log_consumers[i].pre_fmt_print_func(log_consumers[i].gen_print_func,
-				log_level, facility, module, func, stderr_fmt, syslog_fmt,
+				fmt_ovr, log_level, facility, module, func, stderr_fmt, syslog_fmt,
 				format, ap_copy);
 			va_end(ap_copy);
 		}
+}
 
+void dprint_fmt_ovr(enum log_fmt_override fmt_ovr, int log_level, int facility,
+	const char *module, const char *func,
+	char *stderr_fmt, char *syslog_fmt, char *format, ...)
+{
+	va_list ap;
+
+	va_start(ap, format);
+	vdprint_fmt_ovr(fmt_ovr, log_level, facility, module, func,
+		stderr_fmt, syslog_fmt, format, ap);
+	va_end(ap);
+}
+
+void dprint(int log_level, int facility, const char *module, const char *func,
+	char *stderr_fmt, char *syslog_fmt, char *format, ...)
+{
+	va_list ap;
+
+	va_start(ap, format);
+	vdprint_fmt_ovr(LOG_FMT_OVR_NONE, log_level, facility, module, func,
+		stderr_fmt, syslog_fmt, format, ap);
 	va_end(ap);
 }
 
@@ -720,6 +753,30 @@ int register_log_consumer(char *name, log_print_f print_func,
 	log_consumers[log_consumers_no].muted = muted;
 
 	log_consumers_no++;
+
+	return 0;
+}
+
+/* allocate what a non-plain log format needs (json/msg buffers, cee hostname);
+ * idempotent, so it may be called for the configured formats as well as for
+ * every per-call format override */
+int init_log_format_bufs(enum log_format format)
+{
+	if (format == LOG_FORMAT_PLAIN)
+		return 0;
+
+	if (init_log_json_buf(0) < 0) {
+		LM_ERR("failed to allocate json log buffer\n");
+		return -1;
+	}
+	if (init_log_msg_buf(0) < 0) {
+		LM_ERR("failed to allocate msg log buffer\n");
+		return -1;
+	}
+	if (format == LOG_FORMAT_JSON_CEE && init_log_cee_hostname() < 0) {
+		LM_ERR("failed to allocate hostname buffer\n");
+		return -1;
+	}
 
 	return 0;
 }
