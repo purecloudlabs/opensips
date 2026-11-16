@@ -271,7 +271,11 @@ int xl_print_log(struct sip_msg* msg, pv_elem_p list, int *len)
 }
 
 
-int xlog_2(struct sip_msg* msg, char* lev, char* frm)
+/* Shared implementation for the 2- and 3-argument xlog() forms.
+ * @lev/@frm are the level and format args; @fmt_ovr selects a per-call output
+ * format override (LOG_FMT_OVR_NONE uses the configured format). */
+static int _xlog_impl(struct sip_msg* msg, char* lev, char* frm,
+	enum log_fmt_override fmt_ovr)
 {
 	int log_len, ret;
 	long level;
@@ -307,11 +311,29 @@ int xlog_2(struct sip_msg* msg, char* lev, char* frm)
 	set_proc_log_level( *xlog_level );
 
 	/* log_buf[log_len] = '\0'; */
-	LM_GEN1((int)level, "%.*s", log_len, log_buf);
+	LM_GEN1_FMT_OVR(fmt_ovr,
+		(int)level, "%.*s", log_len, log_buf);
 
 	reset_proc_log_level();
 
 	return ret;
+}
+
+
+int xlog_2(struct sip_msg* msg, char* lev, char* frm)
+{
+	return _xlog_impl(msg, lev, frm, LOG_FMT_OVR_NONE);
+}
+
+
+/* Like xlog_2, but takes a 3rd argument selecting the output format for this
+ * one message, overriding the configured log format. The string given in the
+ * script ("plain_text", "json" or "json_cee") is resolved to @fmt_ovr when
+ * the config is parsed (see cfg.y). */
+int xlog_3(struct sip_msg* msg, char* lev, char* frm,
+	enum log_fmt_override fmt_ovr)
+{
+	return _xlog_impl(msg, lev, frm, fmt_ovr);
 }
 
 

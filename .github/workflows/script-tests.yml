@@ -1,0 +1,47 @@
+name: Script Tests
+
+# Builds a regular (non unit-test) opensips binary and runs script-level tests
+# against it: config parsing and runtime behaviour. See test/script/.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  script_tests:
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:24.04
+    env:
+      COMPILER: gcc
+      BUILD_OS: ubuntu:24.04
+      MAKE_TGT: opensips
+
+    steps:
+      - name: Install git
+        run: |
+          apt-get update
+          apt-get install -y git lsb-release gnupg2 wget
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sh -x scripts/build/reset_sources.sh
+          sh -x scripts/build/install_depends.sh
+
+      - name: Build
+        run: sh -x scripts/build/do_build.sh
+
+      - name: Run script tests
+        run: sh test/script/run_all.sh ./opensips
+
+  all_done:
+    needs: script_tests
+    uses: ./.github/workflows/.notify.yml
+    with:
+      job_name: "Script Tests"
+      job_result: ${{ needs.script_tests.result }}
+    if: ${{ always() }}

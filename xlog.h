@@ -21,6 +21,7 @@
 #ifndef _XLOG_H_
 #define _XLOG_H_
 
+#include "dprint.h"
 #include "pvar.h"
 
 typedef struct _xl_level
@@ -47,6 +48,7 @@ extern int *xlog_level;
 
 int xlog_1(struct sip_msg*, char*);
 int xlog_2(struct sip_msg*, char*, char*);
+int xlog_3(struct sip_msg*, char*, char*, enum log_fmt_override);
 int xdbg(struct sip_msg*, char*);
 
 int pv_parse_color_name(pv_spec_p sp, const str *in);

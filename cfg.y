@@ -130,6 +130,7 @@
 extern int yylex();
 static void yyerror(char* s);
 static void yyerrorf(char* fmt, ...);
+static enum log_fmt_override parse_xlog_format(char* fmt);
 static char* tmp;
 static int i_tmp, rc;
 static struct socket_id* lst_tmp;
@@ -1049,20 +1050,9 @@ assign_stm: LOGLEVEL EQUAL snumber { IFOR();
 			if ((i_tmp = parse_log_format(&s_tmp)) < 0) {
 				yyerror("unknown log format");
 			} else {
-				if (i_tmp != LOG_FORMAT_PLAIN) {
-					if (init_log_json_buf(0) < 0) {
-						yyerror("failed to allocate json log buffer");
-						YYABORT;
-					}
-					if (init_log_msg_buf(0) < 0) {
-						yyerror("failed to allocate msg log buffer");
-						YYABORT;
-					}
-
-					if (i_tmp == LOG_FORMAT_JSON_CEE && init_log_cee_hostname() < 0) {
-						yyerror("failed to allocate hostname buffer");
-						YYABORT;
-					}
+				if (init_log_format_bufs(i_tmp) < 0) {
+					yyerror("failed to allocate log format buffers");
+					YYABORT;
 				}
 
 				stderr_log_format = i_tmp;
@@ -1074,20 +1064,9 @@ assign_stm: LOGLEVEL EQUAL snumber { IFOR();
 			if ((i_tmp = parse_log_format(&s_tmp)) < 0) {
 				yyerror("unknown log format");
 			} else {
-				if (i_tmp != LOG_FORMAT_PLAIN) {
-					if (init_log_json_buf(0) < 0) {
-						yyerror("failed to allocate json log buffer");
-						YYABORT;
-					}
-					if (init_log_msg_buf(0) < 0) {
-						yyerror("failed to allocate msg log buffer");
-						YYABORT;
-					}
-
-					if (i_tmp == LOG_FORMAT_JSON_CEE && init_log_cee_hostname() < 0) {
-						yyerror("failed to allocate hostname buffer");
-						YYABORT;
-					}
+				if (init_log_format_bufs(i_tmp) < 0) {
+					yyerror("failed to allocate log format buffers");
+					YYABORT;
 				}
 
 				syslog_log_format = i_tmp;
@@ -2674,6 +2653,10 @@ cmd:	 ASSERT LPAREN exp COMMA STRING RPAREN	 {
 				mk_action2($$, XLOG_T, STR_ST, STR_ST, $3, $5); }
 		| XLOG LPAREN STRING COMMA folded_string RPAREN {
 				mk_action2($$, XLOG_T, STR_ST, STR_ST, $3, $5); }
+		| XLOG LPAREN STRING COMMA STRING COMMA STRING RPAREN {
+				mk_action3($$, XLOG_T, STR_ST, STR_ST, NUMBER_ST, $3, $5, (void*)(long)parse_xlog_format($7)); }
+		| XLOG LPAREN STRING COMMA folded_string COMMA STRING RPAREN {
+				mk_action3($$, XLOG_T, STR_ST, STR_ST, NUMBER_ST, $3, $5, (void*)(long)parse_xlog_format($7)); }
 		| ASYNC_TOKEN LPAREN async_func COMMA route_name RPAREN {
 				rt_ref = ref_script_route_by_name( $5, sroutes->request,
 					RT_NO, REQUEST_ROUTE, 0);
@@ -2738,6 +2721,39 @@ static void yyerrorf(char *fmt, ...)
 
 	pkg_free(tmp);
 	va_end(ap);
+}
+
+
+/* resolve the xlog() per-call format override at parse time, so a typo fails
+ * config load instead of silently using the configured log format */
+static enum log_fmt_override parse_xlog_format(char* fmt)
+{
+	str s;
+	int fmt_id;
+
+	s.s = fmt;
+	s.len = strlen(fmt);
+	fmt_id = parse_log_format(&s);
+
+	/* the configured stderr/syslog formats may both be plain, in which case
+	 * the json buffers were never allocated - the override needs them too */
+	if (fmt_id >= 0 && init_log_format_bufs(fmt_id) < 0) {
+		yyerror("failed to allocate log format buffers");
+		return LOG_FMT_OVR_NONE;
+	}
+
+	switch (fmt_id) {
+	case LOG_FORMAT_PLAIN:
+		return LOG_FMT_OVR_PLAIN;
+	case LOG_FORMAT_JSON:
+		return LOG_FMT_OVR_JSON;
+	case LOG_FORMAT_JSON_CEE:
+		return LOG_FMT_OVR_JSON_CEE;
+	default:
+		yyerrorf("unknown xlog() log format '%s' (expected '%s', '%s' or "
+			"'%s')", fmt, LOG_PLAIN_NAME, LOG_JSON_NAME, LOG_JSON_CEE_NAME);
+		return LOG_FMT_OVR_NONE;
+	}
 }
 
 
