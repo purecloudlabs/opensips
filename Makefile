@@ -252,8 +252,8 @@ git-dir:
 		echo "error: Not a git repo! (.git dir not found)"; exit 1; \
 	fi
 
-.PHONY: modules-contrib
-modules-contrib: git-dir
+.PHONY: modules-contributors
+modules-contributors: git-dir
 	@set -e; ./doc/build-contrib.sh $(modules)
 
 .PHONY: modules-readme
