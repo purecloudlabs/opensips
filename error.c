@@ -169,6 +169,7 @@ char *error_text( int code )
 		case 436: return "Bad Identity-Info";
 		case 437: return "Unsupported Certificate";
 		case 438: return "Invalid Identity Header";
+		case 477: return "Connection Failed/Rejected";
 		case 480: return "Temporarily Unavailable";
 		case 481: return "Call/Transaction Does not Exist";
 		case 482: return "Loop Detected";
