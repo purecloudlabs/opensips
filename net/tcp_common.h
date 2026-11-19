@@ -61,8 +61,10 @@ int tcp_async_add_chunk(struct tcp_connection *con, char *buf,
 		int len, int lock);
 
 /*
- * Register callbacks for subsequently queued async chunks.  The registered
- * list is copied to every chunk until it is cleared.
+ * Register a failure callback for subsequently queued async chunks. Until
+ * cleared, it is copied to every chunk queued on a connection of a SIP
+ * protocol (is_sip_proto()), any such connection, not only the one of the
+ * send; chunks of other protocols (HEP, BIN, BINS) do not get it.
  */
 int tcp_register_fail_cb(tcp_fail_f *f, void *param, tcp_fail_free_f *free);
 /* clear the callback registered for subsequently queued chunks */

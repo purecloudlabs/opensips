@@ -597,7 +597,14 @@ int tcp_async_add_chunk(struct tcp_connection *con, char *buf,
 		return -1;
 	}
 
-	c->fail_cb = tcp_fail_cb;
+	/* the failure callback is registered around a SIP send (tm); do not
+	 * attach it to non-SIP chunks queued from inside that send (e.g. HEP
+	 * traces of the TCP connect or TLS handshake), their failures are not
+	 * the SIP send's */
+	if (is_sip_proto(con->type))
+		c->fail_cb = tcp_fail_cb;
+	else
+		memset(&c->fail_cb, 0, sizeof c->fail_cb);
 	c->len = len;
 	c->ticks = get_ticks();
 	c->buf = (char *)(c+1);
