@@ -60,6 +60,7 @@
 #include "tcp_conn_profile.h"
 #include "trans.h"
 #include "net_tcp_dbg.h"
+#include "tcp_common.h"
 
 struct struct_hist_list *con_hist;
 
