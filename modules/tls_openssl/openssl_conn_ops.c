@@ -456,6 +456,12 @@ static int openssl_tls_connect(struct tcp_connection *c, short *poll_events,
 					strerror(errno), errno);
 				/* fall through */
 			default:
+				/* release the lock before tracing: sending the trace may
+				 * need it again (e.g. HEP over TLS) */
+				#ifndef NO_SSL_GLOBAL_LOCK
+				lock_release(tls_global_lock);
+				#endif
+
 				LM_ERR("New TLS connection to %s:%d failed\n",
 					ip_addr2a(&c->rcv.src_ip), c->rcv.src_port);
 
@@ -477,10 +483,6 @@ static int openssl_tls_connect(struct tcp_connection *c, short *poll_events,
 				} else {
 					tls_print_errstack();
 				}
-
-				#ifndef NO_SSL_GLOBAL_LOCK
-				lock_release(tls_global_lock);
-				#endif
 
 				return -1;
 		}
@@ -604,7 +606,14 @@ static int openssl_tls_accept(struct tcp_connection *c, short *poll_events)
 			case SSL_ERROR_SYSCALL:
 				LM_ERR("SSL_ERROR_SYSCALL err=%s(%d)\n",
 					strerror(errno), errno);
+				/* fall through */
 			default:
+				/* release the lock before tracing (the trace route may
+				 * run script code that needs it) */
+				#ifndef NO_SSL_GLOBAL_LOCK
+				lock_release(tls_global_lock);
+				#endif
+
 				c->state = S_CONN_BAD;
 				LM_ERR("New TLS connection from %s:%d failed to accept\n",
 				       ip_addr2a(&c->rcv.src_ip), c->rcv.src_port);
@@ -632,10 +641,6 @@ static int openssl_tls_accept(struct tcp_connection *c, short *poll_events)
 				} else {
 					tls_print_errstack();
 				}
-
-				#ifndef NO_SSL_GLOBAL_LOCK
-				lock_release(tls_global_lock);
-				#endif
 
 				return -1;
 		}
@@ -771,13 +776,17 @@ int openssl_tls_async_connect(struct tcp_connection *con, int fd,
 				}
 				continue;
 			case SSL_ERROR_SYSCALL:
+				LM_ERR("SSL_ERROR_SYSCALL err=%s(%d)\n",
+					strerror(errno), errno);
+				/* fall through */
+			default:
+				/* release the lock (once, also for SSL_ERROR_SYSCALL) before
+				 * tracing: sending the trace may need it again (e.g. HEP
+				 * over TLS) */
 				#ifndef NO_SSL_GLOBAL_LOCK
 				lock_release(tls_global_lock);
 				#endif
 
-				LM_ERR("SSL_ERROR_SYSCALL err=%s(%d)\n",
-					strerror(errno), errno);
-			default:
 				LM_ERR("New TLS connection to %s:%d failed\n",
 					ip_addr2a(&con->rcv.src_ip), con->rcv.src_port);
 
@@ -798,10 +807,6 @@ int openssl_tls_async_connect(struct tcp_connection *con, int fd,
 					tls_send_trace_data(con, t_dst);
 				}
 				tls_print_errstack();
-
-				#ifndef NO_SSL_GLOBAL_LOCK
-				lock_release(tls_global_lock);
-				#endif
 
 				return -1;
 		}
