@@ -295,8 +295,14 @@ void tm_tcp_chunk_fail(void *param)
 		t->uac[branch].last_received != 0 ||
 		t->uac[branch].request.buffer.s == NULL)
 			UNLOCK_REPLIES(t);
-		else
+		else {
+			/* the branch is final now - stop its timers, as
+			 * reply_received() does, so the FR timer does not later
+			 * fire a stale 408 on it */
+			reset_timer(&t->uac[branch].request.retr_timer);
+			reset_timer(&t->uac[branch].request.fr_timer);
 			fake_reply(t, branch, -E_SEND);
+		}
 
 		init_t();
 		pop_pushed_global_context();
