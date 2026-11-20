@@ -474,20 +474,22 @@ static void get_siptrace_type(str *name, str *trace_uri, str *param1,
 {
 	#define IS_HEP_URI(__url__) ((__url__->len > 3/*O_o*/ \
 				&& (__url__->s[0]|0x20) == 'h' && (__url__->s[1]|0x20) == 'e' \
-					&& (__url__->s[2]|0x20) == 'p'))
+					&& (__url__->s[2]|0x20) == 'p' && __url__->s[3] == ':'))
 
 	#define IS_SIP_URI(__url__) ((__url__->len > 3/*O_o*/ \
 				&& (__url__->s[0]|0x20) == 's' && (__url__->s[1]|0x20) == 'i' \
-					&& (__url__->s[2]|0x20) == 'p'))
+					&& (__url__->s[2]|0x20) == 'p' && __url__->s[3] == ':'))
 
 	#define IS_FILE_URI(__url__) ((__url__->len > 4 \
 				&& (__url__->s[0]|0x20) == 'f' && (__url__->s[1]|0x20) == 'i' \
-				&& (__url__->s[2]|0x20) == 'l' && (__url__->s[3]|0x20) == 'e'))
+					&& (__url__->s[2]|0x20) == 'l' && (__url__->s[3]|0x20) == 'e' \
+					&& __url__->s[4] == ':'))
 
 	#define IS_SYSLOG_URI(__url__) ((__url__->len >= 6 \
 				&& (__url__->s[0]|0x20) == 's' && (__url__->s[1]|0x20) == 'y' \
 				&& (__url__->s[2]|0x20) == 's'  && (__url__->s[3]|0x20) == 'l'\
-				&& (__url__->s[4]|0x20) == 'o' && (__url__->s[5]|0x20) == 'g'))
+				&& (__url__->s[4]|0x20) == 'o' && (__url__->s[5]|0x20) == 'g' \
+				&& (__url__->len == 6 || __url__->s[6] == ':')))
 
 	#define IS_UDP(__url__) ((__url__.len == 3/*O_o*/ \
 				&& (__url__.s[0]|0x20) == 'u' && (__url__.s[1]|0x20) == 'd' \
@@ -514,8 +516,13 @@ static void get_siptrace_type(str *name, str *trace_uri, str *param1,
 		trace_uri->s += 5;
 	} else if (IS_SYSLOG_URI(trace_uri)) {
 		*type = TYPE_SYSLOG;
-		trace_uri->len -= 6;
-		trace_uri->s += 6;
+		if (trace_uri->len > 6) {
+			trace_uri->len -= 7;
+			trace_uri->s += 7;
+		} else {
+			/* bare "syslog" means use the configured defaults */
+			trace_uri->len = 0;
+		}
 	} else {
 		/* need to take the table into account */
 		if (param1 && (param1->s == NULL || param1->len == 0))
@@ -894,8 +901,14 @@ static int mod_init(void)
 
 	if (trace_default_syslog_facility < 0)
 		trace_default_syslog_facility = log_facility;
-	if (trace_default_syslog_level != 0)
+	if (trace_default_syslog_level == 0)
 		trace_default_syslog_level = *log_level;
+
+	/* update the levels for all tids, if not explicitely set */
+	for (it = trace_list; it; it = it->next) {
+		if (it->type == TYPE_SYSLOG && it->el.syslog.level == 0)
+			it->el.syslog.level = trace_default_syslog_level;
+	}
 
 	LM_INFO("initializing...\n");
 
@@ -2113,7 +2126,8 @@ do { \
 	(((_msg)->rcv.bind_address && (_msg)->rcv.bind_address->adv_sock_str.len)? \
 	 (struct ip_addr *)&(_msg)->rcv.bind_address->adv_address:&(_msg)->rcv.dst_ip)
 #define TRACE_GET_DST_PORT(_msg) \
-	(((_msg)->rcv.bind_address && (_msg)->rcv.bind_address->adv_sock_str.len)? \
+	(((_msg)->rcv.bind_address && (_msg)->rcv.bind_address->adv_sock_str.len && \
+	  (_msg)->rcv.dst_port == (_msg)->rcv.bind_address->port_no)? \
 	 (_msg)->rcv.bind_address->adv_port:(_msg)->rcv.dst_port)
 
 

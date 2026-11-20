@@ -346,7 +346,7 @@ static inline char del_transfer(int fd)
 }
 
 /*
- * GCVCALLP-3344: guard against registering a non-socket fd. libcurl's
+ * guard against registering a non-socket fd. libcurl's
  * internal wakeup eventfd can appear in curl_multi_fdset()'s read set
  * alongside the real transfer socket (observed on 8.21.0, not 8.17.0);
  * is_new_transfer() only checks fd numbers, not fd type.

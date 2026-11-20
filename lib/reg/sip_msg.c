@@ -106,6 +106,7 @@ int extract_aor(str* _uri, str* _a, str *sip_instance, str* call_id,
 	struct sip_uri puri;
 	int user_len,tgruu_len,dec_size,i;
 	str *magic;
+	char *p;
 
 	if (parse_uri(_uri->s, _uri->len, &puri) < 0) {
 		rerrno = R_AOR_PARSE;
@@ -120,12 +121,18 @@ int extract_aor(str* _uri, str* _a, str *sip_instance, str* call_id,
 		LM_DBG("has gruu\n");
 
 		/* ;gr param detected */
-		if (memcmp(puri.user.s,TEMP_GRUU,TEMP_GRUU_SIZE) == 0)
+		if (puri.user.len >= TEMP_GRUU_SIZE &&
+				memcmp(puri.user.s,TEMP_GRUU,TEMP_GRUU_SIZE) == 0)
 		{
-			LM_DBG("temp gruu\n");
 			/* temp GRUU, decode and extract aor, sip_instance
 			 * and call_id */
 			tgruu_len = puri.user.len - TEMP_GRUU_SIZE;
+			LM_DBG("temp gruu, encoded length %d\n", tgruu_len);
+			if (tgruu_len > (int)sizeof(tgruu_dec)) {
+				rerrno = R_AOR_LEN;
+				LM_ERR("temporary GRUU too long\n");
+				return -2;
+			}
 			memcpy(tgruu_dec,puri.user.s+TEMP_GRUU_SIZE,tgruu_len);
 
 			if (gruu_secret.s)
@@ -142,18 +149,20 @@ int extract_aor(str* _uri, str* _a, str *sip_instance, str* call_id,
 			LM_DBG("decoded [%.*s]\n",dec_size,tgruu_dec);
 			/* extract aor - skip tgruu generation time at
 			 * the beggining */
-			_a->s = (char *)memchr(tgruu_dec,' ',dec_size) + 1;
-			if (_a->s == NULL) {
+			p = (char *)memchr(tgruu_dec,' ',dec_size);
+			if (p == NULL) {
 				rerrno = R_AOR_PARSE;
 				LM_ERR("failed to parse Address of Record\n");
 				return -1;
 			}
-			_a->len = (char *)memchr(_a->s,' ',dec_size - (_a->s-tgruu_dec)) - _a->s;
-			if (_a->len < 0) {
+			_a->s = p + 1;
+			p = (char *)memchr(_a->s,' ',dec_size - (_a->s-tgruu_dec));
+			if (p == NULL) {
 				rerrno = R_AOR_PARSE;
 				LM_ERR("failed to parse Address of Record\n");
 				return -1;
 			}
+			_a->len = p - _a->s;
 
 			sip_instance->s = _a->s+_a->len+1; /* skip ' ' */
 			if (sip_instance->s >= tgruu_dec + dec_size) {
@@ -161,15 +170,16 @@ int extract_aor(str* _uri, str* _a, str *sip_instance, str* call_id,
 				LM_ERR("failed to parse Address of Record\n");
 				return -1;
 			}
-			sip_instance->len = (char *)memchr(sip_instance->s,' ',
-					dec_size-(sip_instance->s-tgruu_dec)) - sip_instance->s;
-			if (sip_instance->len < 0) {
+			p = (char *)memchr(sip_instance->s,' ',
+					dec_size-(sip_instance->s-tgruu_dec));
+			if (p == NULL) {
 				rerrno = R_AOR_PARSE;
 				LM_ERR("failed to parse Address of Record\n");
 				return -1;
 			}
+			sip_instance->len = p - sip_instance->s;
 
-			call_id->s = sip_instance->s + sip_instance->len + 1;
+			call_id->s = p + 1;
 			if (call_id->s >= tgruu_dec + dec_size) {
 				rerrno = R_AOR_PARSE;
 				LM_ERR("failed to parse Address of Record\n");

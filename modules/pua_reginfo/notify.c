@@ -238,7 +238,7 @@ int process_body(str notify_body, udomain_t *domain)
 	str path = {0, 0};
 	str user_agent = {0, 0};
 	int state, event, expires, result, final_result = RESULT_ERROR;
-	char *expires_char, *cseq_char;
+	char *expires_char, *cseq_char, *param_name;
 	int cseq = 0;
 	int len;
 	urecord_t *ul_record = NULL;
@@ -262,6 +262,8 @@ int process_body(str notify_body, udomain_t *domain)
 	}
 	registrations = doc_root->children;
 	while(registrations) {
+		aor_key.len = 0;
+		ul_record = NULL;
 		/* Only process registration sub-items */
 		if(xmlStrcasecmp(registrations->name, BAD_CAST "registration") != 0)
 			goto next_registration;
@@ -279,28 +281,29 @@ int process_body(str notify_body, udomain_t *domain)
 		aor.len = strlen(aor.s);
 		LM_DBG("AOR %.*s has state \"%d\"\n", aor.len, aor.s, state);
 
-		/* Get username part of the AOR, search for @ in the AOR. */
 		if(parse_uri(aor.s, aor.len, &parsed_aor) < 0) {
 			LM_ERR("failed to parse Address of Record (%.*s)\n", aor.len,
 					aor.s);
 			goto next_registration;
 		}
-
 		if(reginfo_use_domain) {
 			aor_key.s = uri;
+			aor_key.len = snprintf(uri, sizeof(uri), "%.*s@%.*s",
+				parsed_aor.user.len, parsed_aor.user.s,
+				parsed_aor.host.len, parsed_aor.host.s);
 		} else {
 			aor_key.s = parsed_aor.user.s;
+			aor_key.len = parsed_aor.user.len;
 		}
-		aor_key.len = strlen(aor_key.s);
+
 		/* Now let's lock that domain for this AOR: */
 		ul.lock_udomain(domain, &aor_key);
 		/* and retrieve the user-record for this user: */
 		result = ul.get_urecord(domain, &aor_key, &ul_record);
 		if(result < 0) {
-			ul.unlock_udomain(domain, &aor_key);
 			LM_ERR("failed to query usrloc (AOR %.*s)\n", aor_key.len,
 					aor_key.s);
-			goto next_registration;
+			goto unlock_registration;
 		}
 		/* If no contacts found, then set the ul_record to NULL */
 		if(result != 0)
@@ -344,6 +347,10 @@ int process_body(str notify_body, udomain_t *domain)
 				// If no CallID present, try the "id"-field instead:
 				if(callid.s == NULL)
 					callid.s = xmlGetAttrContentByName(contacts, "id");
+				if(callid.s == NULL) {
+					LM_ERR("No Call-ID or id for this contact!\n");
+					goto next_contact;
+				}
 				callid.len = strlen(callid.s);
 				LM_DBG("Got Call-ID \"%.*s\"\n", callid.len, callid.s);
 				received.s = xmlGetAttrContentByName(contacts, "received");
@@ -408,8 +415,11 @@ int process_body(str notify_body, udomain_t *domain)
 					if(xmlStrcasecmp(params->name, BAD_CAST "unknown-param")
 							!= 0)
 						goto next_param;
+					param_name = xmlGetAttrContentByName(params, "name");
+					if(param_name == NULL)
+						goto next_param;
 					len += 1 /* ; */
-						   + strlen(xmlGetAttrContentByName(params, "name"));
+						   + strlen(param_name);
 					param.s = (char *)xmlNodeGetContent(params);
 					param.len = strlen(param.s);
 					if(param.len > 0)
@@ -430,10 +440,13 @@ int process_body(str notify_body, udomain_t *domain)
 						if(xmlStrcasecmp(params->name, BAD_CAST "unknown-param")
 								!= 0)
 							goto next_param2;
+						param_name = xmlGetAttrContentByName(params, "name");
+						if(param_name == NULL)
+							goto next_param2;
 						contact_params.len += snprintf(
 								contact_params.s + contact_params.len,
 								len - contact_params.len, ";%s",
-								xmlGetAttrContentByName(params, "name"));
+								param_name);
 						param.s = (char *)xmlNodeGetContent(params);
 						param.len = strlen(param.s);
 						if(param.len > 0)
@@ -460,7 +473,7 @@ int process_body(str notify_body, udomain_t *domain)
 					contact_uri.s = (char *)xmlNodeGetContent(uris);
 					if(contact_uri.s == NULL) {
 						LM_ERR("No URI for this contact!\n");
-						goto next_registration;
+						goto unlock_registration;
 					}
 					contact_uri.len = strlen(contact_uri.s);
 					if(contact_params.len > 0) {
@@ -496,13 +509,13 @@ int process_body(str notify_body, udomain_t *domain)
 				contacts = contacts->next;
 			}
 		}
-	next_registration:
+		/* Unlock the domain for this AOR: */
+	unlock_registration:
 		if(ul_record)
 			ul.release_urecord(ul_record, 0);
-		/* Unlock the domain for this AOR: */
-		if(aor_key.len > 0)
-			ul.unlock_udomain(domain, &aor_key);
+		ul.unlock_udomain(domain, &aor_key);
 
+	next_registration:
 		registrations = registrations->next;
 	}
 error:

@@ -630,6 +630,9 @@ int pv_get_sdp_line(struct sip_msg *msg, pv_param_t *param, pv_value_t *res)
 			start = p;
 			while (start < lim && is_ws(*start))
 				start++;
+			if (start >= lim)
+				break;
+			p = start - 1;
 			continue;
 		}
 
@@ -722,6 +725,18 @@ int pv_set_sdp_line(struct sip_msg *msg, pv_param_t *param,
 
 	if (pvp->match_token.prefix.s)
 		goto handle_token_edit;
+
+	if (insert) {
+		if (ops->lines_sz >= SDP_MAX_LINES) {
+			LM_ERR("cannot insert SDP line: maximum line count (%d) reached\n",
+					SDP_MAX_LINES);
+			return -1;
+		}
+	} else if (idx >= ops->lines_sz) {
+		LM_ERR("cannot edit SDP line %d: have %d lines\n", idx,
+				ops->lines_sz);
+		return -1;
+	}
 
 	/* delete line operation -> ignore the index */
 	if (!val) {
@@ -1058,6 +1073,9 @@ int pv_get_sdp_stream(struct sip_msg *msg, pv_param_t *param, pv_value_t *res)
 			start = p;
 			while (start < lim && is_ws(*start))
 				start++;
+			if (start >= lim)
+				break;
+			p = start - 1;
 			continue;
 		}
 
@@ -1150,6 +1168,18 @@ int pv_set_sdp_stream(struct sip_msg *msg, pv_param_t *param,
 
 	if (pvp->match_token.prefix.s)
 		goto handle_token_edit;
+
+	if (insert) {
+		if (ops->lines_sz >= SDP_MAX_LINES) {
+			LM_ERR("cannot insert SDP line: maximum line count (%d) reached\n",
+					SDP_MAX_LINES);
+			return -1;
+		}
+	} else if (idx >= ops->lines_sz) {
+		LM_ERR("cannot edit SDP line %d: have %d lines\n", idx,
+				ops->lines_sz);
+		return -1;
+	}
 
 	/* delete line operation -> ignore the index */
 	if (!val) {
@@ -1338,6 +1368,9 @@ int pv_get_sdp_session(struct sip_msg *msg, pv_param_t *param, pv_value_t *res)
 			start = p;
 			while (start < lim && is_ws(*start))
 				start++;
+			if (start >= lim)
+				break;
+			p = start - 1;
 			continue;
 		}
 
@@ -1430,6 +1463,18 @@ int pv_set_sdp_session(struct sip_msg *msg, pv_param_t *param,
 
 	if (pvp->match_token.prefix.s)
 		goto handle_token_edit;
+
+	if (insert) {
+		if (ops->lines_sz >= SDP_MAX_LINES) {
+			LM_ERR("cannot insert SDP line: maximum line count (%d) reached\n",
+					SDP_MAX_LINES);
+			return -1;
+		}
+	} else if (idx >= ops->lines_sz) {
+		LM_ERR("cannot edit SDP line %d: have %d lines\n", idx,
+				ops->lines_sz);
+		return -1;
+	}
 
 	/* delete line operation -> ignore the index */
 	if (!val) {
