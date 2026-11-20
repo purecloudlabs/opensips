@@ -2190,7 +2190,35 @@ struct rtp_relay_tmp {
 	struct rtp_async_param *param;
 	struct dlg_cell *dlg;
 	struct list_head list;
+	/* protects refs, released and the release of the fields above */
+	gen_lock_t lock;
+	/* one reference for the owner + one per in-flight re-INVITE transaction:
+	 * a late or crossing reply may still reach the callback after the tmp
+	 * was released */
+	int refs;
+	int released;
 };
+
+static void rtp_relay_tmp_ref(struct rtp_relay_tmp *tmp)
+{
+	lock_get(&tmp->lock);
+	tmp->refs++;
+	lock_release(&tmp->lock);
+}
+
+static void rtp_relay_tmp_unref(void *param)
+{
+	struct rtp_relay_tmp *tmp = (struct rtp_relay_tmp *)param;
+	int refs;
+
+	lock_get(&tmp->lock);
+	refs = --tmp->refs;
+	lock_release(&tmp->lock);
+	if (refs == 0) {
+		lock_destroy(&tmp->lock);
+		shm_free(tmp);
+	}
+}
 
 static struct rtp_relay_tmp *rtp_relay_new_tmp(struct rtp_relay_ctx *ctx,
 		int set, str *node)
@@ -2201,7 +2229,9 @@ static struct rtp_relay_tmp *rtp_relay_new_tmp(struct rtp_relay_ctx *ctx,
 		LM_ERR("could not allocate temporary ctx\n");
 		return NULL;
 	}
-	tmp->state = 0;
+	memset(tmp, 0, sizeof *tmp);
+	lock_init(&tmp->lock);
+	tmp->refs = 1;
 	tmp->ctx = ctx;
 	/* create a new session, similar to the existing one */
 	tmp->sess = rtp_relay_dup_sess(ctx, ctx->established);
@@ -2222,6 +2252,7 @@ static struct rtp_relay_tmp *rtp_relay_new_tmp(struct rtp_relay_ctx *ctx,
 error:
 	if (tmp->sess)
 		rtp_relay_ctx_free_sess(ctx, tmp->sess);
+	lock_destroy(&tmp->lock);
 	shm_free(tmp);
 	return NULL;
 }
@@ -2231,6 +2262,14 @@ static int rtp_relay_release_tmp(struct rtp_relay_tmp *tmp, int success)
 	int ret;
 	struct rtp_async_param *p;
 	struct rtp_relay_sess *del_sess = NULL;
+
+	lock_get(&tmp->lock);
+	if (tmp->released) {
+		lock_release(&tmp->lock);
+		LM_DBG("re-INVITE context already released\n");
+		return 0;
+	}
+	tmp->released = 1;
 
 	RTP_RELAY_CTX_LOCK(tmp->ctx);
 	rtp_relay_ctx_reset_pending(tmp->ctx);
@@ -2288,7 +2327,12 @@ static int rtp_relay_release_tmp(struct rtp_relay_tmp *tmp, int success)
 	}
 	if (tmp->dlg)
 		rtp_relay_dlg.dlg_unref(tmp->dlg, 1);
-	shm_free(tmp);
+	tmp->dlg = NULL;
+	tmp->sess = NULL;
+	tmp->ctx = NULL;
+	tmp->param = NULL;
+	lock_release(&tmp->lock);
+	rtp_relay_tmp_unref(tmp);
 	return ret;
 }
 
@@ -2317,6 +2361,14 @@ static int rtp_relay_reinvite_reply(struct sip_msg *msg,
 	if (!param) {
 		LM_BUG("cannot get reinvite param!\n");
 		return -1;
+	}
+
+	lock_get(&tmp->lock);
+	if (tmp->released) {
+		lock_release(&tmp->lock);
+		/* already completed: a late or crossing reply */
+		LM_DBG("reply %d for an already released re-INVITE context\n", statuscode);
+		return 0;
 	}
 
 	callid = tmp->dlg->callid;
@@ -2349,6 +2401,7 @@ static int rtp_relay_reinvite_reply(struct sip_msg *msg,
 			}
 
 			tmp->state = RTP_RELAY_TMP_ANSWER;
+			lock_release(&tmp->lock);
 			return rtp_relay_reinvite(tmp, callee_idx(tmp->dlg), &body, 1);
 
 		case RTP_RELAY_TMP_FAIL_OFFER:
@@ -2359,6 +2412,7 @@ static int rtp_relay_reinvite_reply(struct sip_msg *msg,
 			}
 			body = tmp->dlg->legs[DLG_CALLER_LEG].in_sdp;
 			tmp->state = RTP_RELAY_TMP_ANSWER;
+			lock_release(&tmp->lock);
 			return rtp_relay_reinvite(tmp, callee_idx(tmp->dlg), &body, 0);
 
 		case RTP_RELAY_TMP_ANSWER:
@@ -2377,6 +2431,7 @@ static int rtp_relay_reinvite_reply(struct sip_msg *msg,
 			LM_BUG("%.*s: unknown tmp context state %d\n", callid.len, callid.s, tmp->state);
 			goto error;
 	}
+	lock_release(&tmp->lock);
 	return 0;
 error:
 	switch(tmp->state) {
@@ -2395,8 +2450,10 @@ error:
 			goto release;
 	}
 	body = tmp->dlg->legs[sdp_leg].in_sdp;
+	lock_release(&tmp->lock);
 	return rtp_relay_reinvite(tmp, dst_leg, &body, 0);
 release:
+	lock_release(&tmp->lock);
 	/* nothing to do, just release with error! */
 	if (success)
 		LM_DBG("%.*s: releasing context with success\n",
@@ -2432,9 +2489,15 @@ static int rtp_relay_reinvite(struct rtp_relay_tmp *tmp, int leg,
 	static str inv = str_init("INVITE");
 	static str content_type_sdp = str_init("application/sdp");
 
-	int ret = run_dlg_api(&rtp_relay_dlg, send_indialog_request, tmp->dlg,
+	int ret;
+
+	/* the transaction holds a reference until it is freed */
+	rtp_relay_tmp_ref(tmp);
+	ret = run_dlg_api(&rtp_relay_dlg, send_indialog_request, tmp->dlg,
 			&inv, leg, body, &content_type_sdp, NULL,
-			rtp_relay_reinvite_reply, tmp, NULL);
+			rtp_relay_reinvite_reply, tmp, rtp_relay_tmp_unref);
+	if (ret < 0)
+		rtp_relay_tmp_unref(tmp);
 	if (body && release_body)
 		pkg_free(body->s);
 	return ret;

@@ -411,6 +411,7 @@ static inline int translate_contact_ipport( str *ct, const struct socket_info *s
 	if ((p=q_memchr(ct->s, ':', ct->len))==NULL) {
 		LM_ERR("failed find hdr body in "
 			"advertised contact <%.*s>\n", ct->len, ct->s);
+		return -1;
 	}
 
 	memset( &ct_hdr, 0, sizeof(ct_hdr));
@@ -551,7 +552,8 @@ int dlg_update_leg_info(int leg_idx, struct dlg_cell *dlg, str* tag, str *rr,
 			}
 			rrp = head;
 			leg->nr_uris = 0;
-			while (rrp) {
+			while (rrp && leg->nr_uris <
+					(int)(sizeof(leg->route_uris) / sizeof(leg->route_uris[0]))) {
 				leg->route_uris[leg->nr_uris++] = rrp->nameaddr.uri;
 				rrp = rrp->next;
 			}
@@ -758,7 +760,9 @@ int dlg_update_routing(struct dlg_cell *dlg, unsigned int leg,
 		}
 		rrp = head;
 		dlg->legs[leg].nr_uris = 0;
-		while (rrp) {
+		while (rrp && dlg->legs[leg].nr_uris <
+				(int)(sizeof(dlg->legs[leg].route_uris) /
+					 sizeof(dlg->legs[leg].route_uris[0]))) {
 			dlg->legs[leg].route_uris[dlg->legs[leg].nr_uris++] = rrp->nameaddr.uri;
 			rrp = rrp->next;
 		}
@@ -1548,6 +1552,13 @@ static inline int internal_mi_print_dlg(mi_item_t *dialog_obj,
 						goto error;
 					}
 
+				} else if (dv->type == DLG_VAL_TYPE_BOOL) {
+					values_item = add_mi_object(values_arr, NULL, 0);
+					if (!values_item)
+						goto error;
+					if (add_mi_bool(values_item,dv->name.s,dv->name.len,
+						dv->val.n) < 0)
+						goto error;
 				} else {
 					values_item = add_mi_object(values_arr, NULL, 0);
 					if (!values_item)

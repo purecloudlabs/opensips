@@ -842,6 +842,7 @@ static void __tcpconn_rm(struct tcp_connection* c, int no_event)
 	lock_destroy(&c->write_lock);
 
 	if (c->async) {
+		tcp_async_fail_chunks(c);
 		for (r = 0; r<c->async->pending; r++)
 			shm_free(c->async->chunks[r]);
 		shm_free(c->async);
@@ -1921,14 +1922,17 @@ async_write:
 			sh_log(tcpconn->hist, TCP_REF, "tcpconn write, (%d)",
 				tcpconn->refcnt);
 			if (tcp_queue_write_job(tcpconn) < 0) {
-				LM_ERR("failed queuing TCP write job\n");
-				if (reactor_add_writer(tcpconn->fd, F_TCPCONN, RCT_PRIO_NET,
-						tcpconn) < 0) {
-					tcp_fail_conn(tcpconn, "Failed queueing write", 0);
-					return 0;
-				}
-				tcpconn->main_flags &= ~F_TCP_MAIN_REMOVED_WRITE;
-				tcpconn_put(tcpconn);
+				/* a queueing failure is not a transient the writer can
+				 * wait out: the socket is still writable, so re-arming
+				 * the writer brings the same EPOLLOUT and the same failure
+				 * back on the next loop - a tight loop in the TCP main for
+				 * as long as the cause lasts (seen at ~27k iterations/s
+				 * when a lost reader flag made reactor_del_reader() fail
+				 * here, before 7ea8daf009).  Drop the connection instead,
+				 * as the branch already did when the re-arm itself failed. */
+				LM_ERR("failed queuing TCP write job - closing the connection\n");
+				tcp_fail_conn(tcpconn, "Failed queueing write", 0);
+				return 0;
 			}
 			return 0;
 		}
@@ -2469,7 +2473,7 @@ int tcp_count_processes(unsigned int *extra)
 }
 
 
-int tcp_start_processes(int *chd_rank, int *startup_done)
+int tcp_start_processes(int *chd_rank, atomic_t *startup_done)
 {
 	int r, p_id, flags;
 	const struct internal_fork_params ifp_sr_tcp = {
@@ -2526,6 +2530,15 @@ int tcp_start_processes(int *chd_rank, int *startup_done)
 			/* parent */
 			tcp_workers[r].state = STATE_ACTIVE;
 			tcp_workers[r].pt_idx = p_id;
+			/* Wait for the startup owner before forking more workers. */
+			if (*chd_rank == 1 && startup_done) {
+				while (atomic_load(startup_done) == 0) {
+					usleep(5);
+					handle_sigs();
+				}
+				if (atomic_load(startup_done) != 1)
+					goto error;
+			}
 			continue;
 		}
 
@@ -2541,21 +2554,22 @@ int tcp_start_processes(int *chd_rank, int *startup_done)
 				init_child(*chd_rank) < 0) {
 			LM_ERR("init_child failed for TCP worker %d\n", r);
 			report_failure_status();
-			if (startup_done)
-				*startup_done = -1;
+			if (*chd_rank == 1 && startup_done)
+				atomic_store(startup_done, -1);
 			exit(-1);
 		}
 
-		/* first TCP worker runs startup_route if not already run */
-		if (startup_done && *startup_done == 0 && r == 0) {
+		/* Only the first SIP worker owns the startup flag.  In a mixed
+		 * setup the first UDP worker has already run the startup route. */
+		if (*chd_rank == 1 && startup_done) {
 			LM_DBG("running startup route for first TCP worker\n");
 			if (run_startup_route() < 0) {
 				LM_ERR("startup route processing failed in TCP worker\n");
 				report_failure_status();
-				*startup_done = -1;
+				atomic_store(startup_done, -1);
 				exit(-1);
 			}
-			*startup_done = 1;
+			atomic_store(startup_done, 1);
 		}
 
 		report_conditional_status((!no_daemon_mode), 0);
@@ -2568,12 +2582,6 @@ int tcp_start_processes(int *chd_rank, int *startup_done)
 		close(tcp_dispatch_sock[0]);
 		tcp_dispatch_sock[0] = -1;
 	}
-
-	if (startup_done && tcp_workers_no > 0)
-		while (!(*startup_done)) {
-			usleep(5);
-			handle_sigs();
-		}
 
 	return 0;
 error:

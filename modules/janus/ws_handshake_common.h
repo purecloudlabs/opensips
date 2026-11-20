@@ -680,7 +680,8 @@ static void ws_compute_key(str *key)
 static int ws_is_valid_key(str *key, str *accept)
 {
 	ws_compute_key(key);
-	return strncasecmp((char *)ws_accept_buf, accept->s, accept->len) == 0;
+	return accept->len == WS_ACCEPT_KEY_LEN &&
+		memcmp(ws_accept_buf, accept->s, WS_ACCEPT_KEY_LEN) == 0;
 }
 
 static int janus_ws_parse_rpl_handshake(janus_connection *c, char *msg, int len)
@@ -1040,11 +1041,7 @@ static int janus_ws_read_http(janus_connection *c, struct tcp_req *r)
 				break;
 
 			case H_STARTWS:
-				switch (*p){
-					content_len_beg_case;
-					crlf_default_skip_case;
-				}
-				p++;
+				r->state=H_SKIP;
 				break;
 			case H_SKIP_EMPTY:
 				switch (*p){
@@ -1106,7 +1103,11 @@ static int janus_ws_read_http(janus_connection *c, struct tcp_req *r)
 			change_state_case(H_CONT_LEN4,  'E', 'e', H_CONT_LEN5);
 			change_state_case(H_CONT_LEN5,  'N', 'n', H_CONT_LEN6);
 			change_state_case(H_CONT_LEN6,  'T', 't', H_CONT_LEN7);
-			change_state_case(H_CONT_LEN7,  '-', '_', H_CONT_LEN8);
+			case H_CONT_LEN7:
+				if (*p == '-') r->state=H_CONT_LEN8;
+				else r->state=H_SKIP;
+				p++;
+				break;
 			change_state_case(H_CONT_LEN8,  'L', 'l', H_CONT_LEN9);
 			change_state_case(H_CONT_LEN9,  'E', 'e', H_CONT_LEN10);
 			change_state_case(H_CONT_LEN10, 'N', 'n', H_CONT_LEN11);

@@ -192,7 +192,7 @@ int b2b_has_leg_idx(enum b2b_entity_type et, str *b2b_key, int leg_idx)
 
 	if (!b2b_key || !b2b_key->s || leg_idx <= 0)
 		return -1;
-	if (b2b_parse_key(b2b_key, &hash_index, &local_index) < 0)
+	if (b2b_parse_key(b2b_key, b2b_et_hsize(et), &hash_index, &local_index) < 0)
 		return -1;
 	table = (et == B2B_SERVER) ? server_htable : client_htable;
 	B2BE_LOCK_GET(table, hash_index);
@@ -217,7 +217,8 @@ int b2b_get_reply_leg(enum b2b_entity_type et, str *b2b_key, str *to_tag)
 	if (!b2b_key || !b2b_key->s || !to_tag || !to_tag->s)
 		return -1;
 
-	if (b2b_parse_key(b2b_key, &hash_index, &local_index) < 0) {
+	if (b2b_parse_key(b2b_key, b2b_et_hsize(et),
+			&hash_index, &local_index) < 0) {
 		LM_ERR("Failed to parse b2b key [%.*s]\n", b2b_key->len, b2b_key->s);
 		return -1;
 	}
@@ -481,10 +482,29 @@ err_free:
 	return NULL;
 }
 
+/* size of the hash table holding the entities of type @et;
+ * for B2B_NONE (either table), the larger of the two */
+unsigned int b2b_et_hsize(enum b2b_entity_type et)
+{
+	if (et == B2B_SERVER)
+		return server_hsize;
+	if (et == B2B_NONE)
+		return server_hsize > client_hsize ? server_hsize : client_hsize;
+	return client_hsize;
+}
+
+unsigned int b2b_table_hsize(b2b_table table)
+{
+	return table == server_htable ? server_hsize : client_hsize;
+}
+
 /* key format : B2B.hash_index.local_index.timestamp.random *
+ * @hsize: size of the hash table the key will be looked up in; a key with
+ * a hash_index outside of it is rejected
  */
 
-int b2b_parse_key(str* key, unsigned int* hash_index, unsigned int* local_index)
+int b2b_parse_key(str* key, unsigned int hsize, unsigned int* hash_index,
+		unsigned int* local_index)
 {
 	char* p;
 	str s;
@@ -511,6 +531,11 @@ int b2b_parse_key(str* key, unsigned int* hash_index, unsigned int* local_index)
 	if(str2int(&s, hash_index) < 0)
 	{
 		LM_DBG("Could not extract hash_index [%.*s]\n", key->len, key->s);
+		return -1;
+	}
+	if(*hash_index >= hsize)
+	{
+		LM_DBG("hash_index out of range [%.*s]\n", key->len, key->s);
 		return -1;
 	}
 
@@ -668,6 +693,46 @@ static void b2b_end_pending_tran(struct cell *tran)
 	}
 
 	tmb.unref_cell(tran);
+}
+
+/* RFC 3311 5.2 / RFC 3261 14.2: reply 500 "Overlapping Requests" with a
+ * Retry-After between 0 and 10 seconds and release the t_newtran() ref of
+ * the rejected transaction */
+#define RETRY_AFTER_HDR "Retry-After: "
+#define RETRY_AFTER_HDR_LEN (sizeof(RETRY_AFTER_HDR)-1)
+static void b2b_reply_overlapping(struct cell *tm_tran, str *to_tag)
+{
+	char ra_s[RETRY_AFTER_HDR_LEN + 3 + CRLF_LEN];
+	str ra = {ra_s, 0};
+	str text = str_init("Overlapping Requests");
+
+	LM_DBG("Received another request when the previous one was in process\n");
+	memcpy(ra.s + ra.len, RETRY_AFTER_HDR, RETRY_AFTER_HDR_LEN);
+	ra.len += RETRY_AFTER_HDR_LEN;
+	/* the retry value is between 0 and 10 */
+	ra.len += btostr(ra.s + ra.len, (unsigned char)(rand()%10));
+	memcpy(ra.s + ra.len, CRLF, CRLF_LEN);
+	ra.len += CRLF_LEN;
+
+	if (run_tm_api(&tmb, t_reply_with_body, tm_tran, 500, &text, 0, &ra,
+	to_tag) < 0)
+		LM_ERR("failed to send reply with tm\n");
+	LM_DBG("Sent reply [500] and unreffed the cell %p\n", tm_tran);
+	tmb.unref_cell(tm_tran); /* for t_newtran() */
+}
+#undef RETRY_AFTER_HDR
+#undef RETRY_AFTER_HDR_LEN
+
+/* Returns 1 if @tran is an UPDATE that has not been finally replied yet.
+ * Otherwise releases it (it is already answered) and returns 0. */
+static int b2b_update_pending(struct cell *tran)
+{
+	if (!tran || tran == T_UNDEFINED)
+		return 0;
+	if (tran->uas.status < 200)
+		return 1;
+	b2b_end_pending_tran(tran);
+	return 0;
 }
 
 void b2b_delete_legs(dlg_leg_t** legs)
@@ -1199,7 +1264,8 @@ search_dialog:
 	b2b_key = to_tag;
 	/* check if the to tag has the b2b key format -> meaning
 	 * that it is a server request */
-	if(b2b_key.s && b2b_parse_key(&b2b_key, &hash_index, &local_index)>=0)
+	if(b2b_key.s && b2b_parse_key(&b2b_key, server_hsize,
+			&hash_index, &local_index)>=0)
 	{
 		LM_DBG("Received a b2b server request [%.*s]\n",
 					msg->first_line.u.request.method.len,
@@ -1211,7 +1277,8 @@ search_dialog:
 		/* check if the callid is in b2b format -> meaning
 		 * that this is a client request */
 		b2b_key = msg->callid->body;
-		if(b2b_parse_key(&b2b_key, &hash_index, &local_index) >= 0)
+		if(b2b_parse_key(&b2b_key, client_hsize,
+				&hash_index, &local_index) >= 0)
 		{
 			LM_DBG("received a b2b client request [%.*s]\n",
 				msg->first_line.u.request.method.len,
@@ -1348,7 +1415,10 @@ logic_notify:
 	{
 		B2BE_LOCK_RELEASE(table, hash_index);
 		run_top_route(sroutes->request[req_route_ref->idx], msg);
-		if (b2b_apply_lumps(msg))
+		ret = b2b_apply_lumps(msg);
+		if (ret < 0)
+			goto scb_drop_msg;
+		if (ret > 0)
 		{
 			if (parse_from_header(msg) < 0)
 			{
@@ -1444,15 +1514,26 @@ logic_notify:
 					}
 				}
 				if (leg) {
-					if (leg->update_tran)
-						b2b_end_pending_tran(leg->update_tran);
+					if (b2b_update_pending(leg->update_tran)) {
+						/* RFC 3311 5.2: the previous UPDATE on this (early)
+						 * dialog is still pending -> reject the new one with
+						 * 500, keep the pending one untouched */
+						b2b_reply_overlapping(tm_tran, &to_tag);
+						B2BE_LOCK_RELEASE(table, hash_index);
+						goto scb_drop_msg;
+					}
 					leg->update_tran = tm_tran;
 					LM_DBG("UPDATE to-tag [%.*s] -> leg idx [%d], leg [%p], "
 						"tran [%p] on dlg[%p]\n", to_tag.len, to_tag.s,
 						leg_idx, leg, tm_tran, dlg);
 				} else {
-					if (dlg->update_tran)
-						b2b_end_pending_tran(dlg->update_tran);
+					if (b2b_update_pending(dlg->update_tran)) {
+						/* RFC 3311 5.2: the previous UPDATE is still
+						 * pending -> reject the new one with 500 */
+						b2b_reply_overlapping(tm_tran, &to_tag);
+						B2BE_LOCK_RELEASE(table, hash_index);
+						goto scb_drop_msg;
+					}
 					dlg->update_tran = tm_tran;
 					LM_DBG("UPDATE to-tag [%.*s] carries no leg index - stored "
 						"on dlg[%p], tran [%p]\n", to_tag.len, to_tag.s,
@@ -1491,28 +1572,7 @@ logic_notify:
 					if (method_value != METHOD_BYE) {
 						/* We have another UAS ongoing transaction on the dialog
 						 * -> reject with 500, "Overlapping Requests" */
-						#define RETRY_AFTER_HDR "Retry-After: "
-						#define RETRY_AFTER_HDR_LEN (sizeof("Retry-After: ")-1)
-						char ra_s[RETRY_AFTER_HDR_LEN + 3 + CRLF_LEN];
-						str ra = {ra_s, 0};
-						str text = str_init("Overlapping Requests");
-						LM_DBG("Received another request when the previous "
-								"one was in process\n");
-						memcpy( ra.s+ra.len, RETRY_AFTER_HDR, RETRY_AFTER_HDR_LEN);
-						ra.len += RETRY_AFTER_HDR_LEN;
-						/* the retry value is between 0 and 10 */
-						ra.len += btostr(ra.s+ra.len, (unsigned char)(rand()%10) );
-						memcpy( ra.s+ra.len, CRLF, CRLF_LEN);
-						ra.len += CRLF_LEN;
-						/* send reply */
-						if(run_tm_api(&tmb, t_reply_with_body,  tm_tran, 500,
-						&text, 0, &ra, &to_tag) < 0)
-						{
-							LM_ERR("failed to send reply with tm\n");
-						}
-						LM_DBG("Sent reply [500] and unreffed the cell %p\n",
-							tm_tran);
-						tmb.unref_cell(tm_tran); /* for t_newtran() */
+						b2b_reply_overlapping(tm_tran, &to_tag);
 						B2BE_LOCK_RELEASE(table, hash_index);
 						goto scb_drop_msg;
 					} else {
@@ -2069,7 +2129,7 @@ int _b2b_send_reply(b2b_dlg_t* dlg, b2b_rpl_data_t* rpl_data)
 	}
 
 	/* parse the key and find the position in hash table */
-	if(b2b_parse_key(b2b_key, &hash_index, &local_index) < 0)
+	if(b2b_parse_key(b2b_key, b2b_et_hsize(et), &hash_index, &local_index) < 0)
 	{
 		LM_ERR("Wrong format for b2b key\n");
 		return -1;
@@ -2487,7 +2547,7 @@ void b2b_entity_delete(enum b2b_entity_type et, str* b2b_key,
 		table = client_htable;
 
 	/* parse the key and find the position in hash table */
-	if(b2b_parse_key(b2b_key, &hash_index, &local_index) < 0)
+	if(b2b_parse_key(b2b_key, b2b_et_hsize(et), &hash_index, &local_index) < 0)
 	{
 		LM_ERR("Wrong format for b2b key\n");
 		return;
@@ -2574,7 +2634,7 @@ int b2b_entity_exists(enum b2b_entity_type et, str* b2b_key)
 		table = client_htable;
 
 	/* parse the key and find the position in hash table */
-	if(b2b_parse_key(b2b_key, &hash_index, &local_index) < 0)
+	if(b2b_parse_key(b2b_key, b2b_et_hsize(et), &hash_index, &local_index) < 0)
 	{
 		LM_ERR("Wrong format for b2b key\n");
 		return 0;
@@ -2861,7 +2921,7 @@ int _b2b_send_request(b2b_dlg_t* dlg, b2b_req_data_t* req_data)
 	}
 
 	/* parse the key and find the position in hash table */
-	if(b2b_parse_key(b2b_key, &hash_index, &local_index) < 0)
+	if(b2b_parse_key(b2b_key, b2b_et_hsize(et), &hash_index, &local_index) < 0)
 	{
 		LM_ERR("Wrong format for b2b key [%.*s]\n", b2b_key->len, b2b_key->s);
 		return -1;
@@ -3482,7 +3542,8 @@ void b2b_tm_cback(struct cell *t, b2b_table htable, struct tmcb_params *ps)
 	msg = ps->rpl;
 	b2b_key = (str*)*ps->param;
 
-	if(b2b_parse_key(b2b_key, &hash_index, &local_index)< 0)
+	if(b2b_parse_key(b2b_key, b2b_table_hsize(htable),
+			&hash_index, &local_index)< 0)
 	{
 		LM_ERR("Failed to parse b2b logic key [%.*s]\n",b2b_key->len,b2b_key->s);
 		goto done;
@@ -4542,6 +4603,7 @@ int b2b_apply_lumps(struct sip_msg* msg)
 {
 	str obuf;
 	struct sip_msg tmp;
+	struct sip_msg rebuilt;
 
 	/* faked reply */
 	if (msg==NULL || msg == FAKED_REPLY || msg==&dummy_msg)
@@ -4561,14 +4623,23 @@ int b2b_apply_lumps(struct sip_msg* msg)
 			msg->rcv.bind_address,0);
 
 	if (!obuf.s) {
-		LM_ERR("no more shm mem\n");
+		LM_ERR("failed to build SIP message\n");
+		return -1;
+	}
+	memset(&rebuilt, 0, sizeof(rebuilt));
+	rebuilt.buf = rebuilt.pkg_buf = obuf.s;
+	rebuilt.len = obuf.len;
+	rebuilt.rcv = msg->rcv;
+	if (parse_msg_opt(rebuilt.buf, rebuilt.len, &rebuilt, 0) != 0) {
+		LM_ERR("failed to parse rebuilt SIP message\n");
+		free_sip_msg(&rebuilt);
 		return -1;
 	}
 
 	/* temporary copy */
 	memcpy(&tmp, msg, sizeof(struct sip_msg));
 
-	/* reset dst uri and path vector to avoid freeing - restored later */
+	/* Keep these pkg strings across the reparse. */
 	if(msg->dst_uri.s != NULL)
 	{
 		msg->dst_uri.s = NULL;
@@ -4579,13 +4650,16 @@ int b2b_apply_lumps(struct sip_msg* msg)
 		msg->path_vec.s = NULL;
 		msg->path_vec.len = 0;
 	}
+	msg->set_global_address.s = NULL;
+	msg->set_global_address.len = 0;
+	msg->set_global_port.s = NULL;
+	msg->set_global_port.len = 0;
 
 	/* free old msg structure */
 	free_sip_msg(msg);
-	memset(msg, 0, sizeof(struct sip_msg));
+	memcpy(msg, &rebuilt, sizeof(*msg));
 
 	/* restore msg fields */
-	msg->buf                = tmp.buf;
 	msg->id                 = tmp.id;
 	msg->rcv                = tmp.rcv;
 	msg->set_global_address = tmp.set_global_address;
@@ -4599,22 +4673,8 @@ int b2b_apply_lumps(struct sip_msg* msg)
 	msg->dst_uri            = tmp.dst_uri;
 	msg->path_vec           = tmp.path_vec;
 
-	memcpy(msg->buf, obuf.s, obuf.len);
-	msg->len = obuf.len;
-	msg->buf[msg->len] = '\0';
-
-	/* free new buffer - copied in the static buffer from old struct sip_msg */
-	pkg_free(obuf.s);
-
-	/* reparse the message */
-	if (parse_msg(msg->buf, msg->len, msg) != 0)
-		LM_ERR("parse_msg failed\n");
-
-	/* check for SDP */
-	if (!parse_sdp(msg)) {
-		LM_DBG("failed to parse SDP message\n");
-		return -1;
-	}
+	/* SDP is optional; parse it if present. */
+	parse_sdp(msg);
 
 	return 1;
 }

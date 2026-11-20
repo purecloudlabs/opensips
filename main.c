@@ -248,7 +248,7 @@ static const struct main_script main_script[] = {
 static int main_loop(void)
 {
 	static int chd_rank;
-	int* startup_done = NULL;
+	atomic_t *startup_done = NULL;
 	utime_t last_check = 0;
 	int rc;
 	static struct internal_fork_handler profiling_handler = {
@@ -266,12 +266,12 @@ static int main_loop(void)
 	}
 
 	if(sroutes->startup.a) {/* if a startup route was defined */
-		startup_done = (int*)shm_malloc(sizeof(int));
+		startup_done = shm_malloc(sizeof(*startup_done));
 		if(startup_done == NULL) {
 			LM_ERR("No more shared memory\n");
 			goto error;
 		}
-		*startup_done = 0;
+		atomic_init(startup_done, 0);
 	}
 
 	/* fork for the timer process*/
@@ -308,8 +308,12 @@ static int main_loop(void)
 	bind_address=0;
 
 	if (startup_done) {
-		if (*startup_done==0)
+		if (atomic_load(startup_done) != 1) {
 			LM_CRIT("BUG: startup route defined, but not run :( \n");
+			goto error;
+		}
+		/* Only the first SIP worker accesses the flag, and its final
+		 * store was observed before starting the remaining workers. */
 		shm_free(startup_done);
 	}
 
@@ -629,8 +633,17 @@ int main(int argc, char** argv)
 					testing_module = optarg;
 					if (strcmp(testing_module, "core")) {
 						cfg_file = malloc(100);
-						snprintf(cfg_file, 100, "modules/%s/test/opensips.cfg",
+						/* a module lives under any of the MODULE_DIRS, so
+						 * probe the contrib one and fall back to the
+						 * regular collection, which also keeps the error
+						 * message on the common path */
+						snprintf(cfg_file, 100,
+						         "modules-contrib/%s/test/opensips.cfg",
 						         testing_module);
+						if (access(cfg_file, F_OK) != 0)
+							snprintf(cfg_file, 100,
+							         "modules/%s/test/opensips.cfg",
+							         testing_module);
 					}
 					break;
 #endif

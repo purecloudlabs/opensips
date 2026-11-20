@@ -166,7 +166,7 @@ static const cmd_export_t cmds[]={
 		{CMD_PARAM_STR|CMD_PARAM_OPT|CMD_PARAM_FIX_NULL,
 			 fixup_mc_compact_flags, 0},
 		{0, 0, 0}},
-		REQUEST_ROUTE|ONREPLY_ROUTE|LOCAL_ROUTE|FAILURE_ROUTE},
+		REQUEST_ROUTE|BRANCH_ROUTE|ONREPLY_ROUTE|LOCAL_ROUTE|FAILURE_ROUTE},
 	{"mc_compress",	  (cmd_function)mc_compress, {
 		{CMD_PARAM_INT|CMD_PARAM_OPT, 0, 0},
 		{CMD_PARAM_STR, fixup_compression_flags,
@@ -174,7 +174,7 @@ static const cmd_export_t cmds[]={
 		{CMD_PARAM_STR|CMD_PARAM_OPT,
 			fixup_whitelist_compress, fixup_whitelist_free},
 		{0, 0, 0}},
-		REQUEST_ROUTE|ONREPLY_ROUTE|LOCAL_ROUTE|FAILURE_ROUTE},
+		REQUEST_ROUTE|BRANCH_ROUTE|ONREPLY_ROUTE|LOCAL_ROUTE|FAILURE_ROUTE},
 	{"mc_decompress",	(cmd_function)mc_decompress, {
 		{0, 0, 0}},
 		REQUEST_ROUTE|LOCAL_ROUTE|FAILURE_ROUTE},
@@ -1714,6 +1714,12 @@ static int mc_decompress(struct sip_msg* msg)
 							1 Comp-Hdrs
 							2 Headers-Algo
 							3 Content-Encoding*/
+
+	/* This module rewrites msg->buf in place and then frees the message. */
+	if (msg->pkg_buf) {
+		LM_ERR("cannot decompress a message with a rebuilt pkg buffer\n");
+		return -1;
+	}
 
 	memset(hdr_vec, 0, HDRS_TO_SKIP * sizeof(struct hdr_field*));
 
