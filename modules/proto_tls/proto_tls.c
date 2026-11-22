@@ -614,10 +614,38 @@ static int proto_tls_send(const struct socket_info* send_sock,
 	/* now we have a connection, let's what we can do with it */
 	/* BE CAREFUL now as we need to release the conn before exiting !!! */
 	if (fd==-1) {
-		/* connection is not writable because of its state */
-		/* return error, nothing to do about it */
-		tcp_conn_release(c, 0);
-		return -1;
+		/* connection is not writable because of its state - can we append
+		 * data to it for later writting (async writting)? */
+		if (c->state==S_CONN_CONNECTING) {
+			/* the connection is currently in the process of getting
+			 * connected - let's append our send chunk as well - just in
+			 * case we ever manage to get through */
+			LM_DBG("We have acquired a TLS connection which is still "
+				"pending to connect - delaying write \n");
+			rlen = tcp_async_add_chunk(c, buf, len, 1);
+			if (rlen < 0) {
+				LM_ERR("Failed to add another write chunk to %p\n", c);
+				/* we failed due to internal errors - put the
+				 * connection back */
+				tcp_conn_release(c, 0);
+				return -1;
+			}
+
+			/* mark the ID of the used connection (tracing purposes) */
+			last_outgoing_tcp_id = c->id;
+			send_sock->last_real_ports->local = c->rcv.dst_port;
+			send_sock->last_real_ports->remote = c->rcv.src_port;
+
+			/* we successfully added our write chunk - success */
+			tcp_conn_release(c, 0);
+			return len;
+		} else {
+			/* the FD transfer failed (we have an established conn,
+			 * but returned fd is -1) -> leave the conn alone, return error
+			 * for the write op, nothing to do about it */
+			tcp_conn_release(c, 0);
+			return -1;
+		}
 	}
 
 send_it:
